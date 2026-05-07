@@ -138,6 +138,7 @@ cargo add <crate>           # NEVER hand-edit [dependencies]
 Architecture details, patterns, and conventions live in `.claude/rules/`:
 
 - [`planning.md`](.claude/rules/planning.md) -- Plan structure, phase template, gap analysis methodology.
+- [`prd-writing.md`](.claude/rules/prd-writing.md) -- PRD section template, file naming, quality bar, anti-patterns.
 - [`offline-first.md`](.claude/rules/offline-first.md) -- Sync engine, conflict resolution, local-schema invariants.
 - [`tauri.md`](.claude/rules/tauri.md) -- Tauri v2 commands, capabilities, dual-mode, build/release.
 - [`frontend.md`](.claude/rules/frontend.md) -- React 19, Vite, Tailwind v4, state architecture.
