@@ -1,0 +1,22 @@
+{
+  "app": {
+    "title": "Torch App Template",
+    "description": "Welcome to your Torch Business OS app"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "retry": "Retry",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "back": "Back",
+    "next": "Next",
+    "submit": "Submit"
+  },
+  "nav": {
+    "home": "Home",
+    "about": "About"
+  }
+}
