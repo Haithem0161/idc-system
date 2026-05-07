@@ -4,9 +4,13 @@
 //! - **Standalone**: Normal Tauri window app
 //! - **Embedded**: Headless mode for Business OS integration
 
+pub mod config;
+pub mod db;
+pub mod domains;
 pub mod embedded;
 pub mod error;
 pub mod state;
+pub mod sync;
 
 /// Initialize the Tauri application.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

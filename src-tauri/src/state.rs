@@ -25,6 +25,12 @@ pub struct AppState {
     user: RwLock<Option<UserContext>>,
 }
 
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppState {
     pub fn new() -> Self {
         Self {

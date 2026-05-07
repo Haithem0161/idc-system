@@ -1,130 +1,172 @@
-# CLAUDE.md
+# IDC System
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+**Offline-first desktop app** built on a Torch Tauri v2 template, paired with a **Fastify sync/backup server**.
+Tech Stack: Tauri v2 | React 19 | TypeScript | Rust | SQLite | Fastify | Prisma | PostgreSQL | Tailwind v4 | shadcn/ui | Vite | pnpm
 
-## Project Overview
+## Surfaces
 
-This is a React 19 + TypeScript + Tauri v2 desktop application template built with Vite and SWC. Designed as a starting point for Torch Business OS apps.
+This repo is two surfaces planned and reasoned about together:
 
-**Always use pnpm** - do not use npm or yarn.
+| Surface | Where | Purpose |
+|-|-|-|
+| **Frontend** | [src/](src/) | React 19 UI -- runs inside the Tauri webview (and inside Business OS embedded mode). |
+| **Tauri / Rust** | [src-tauri/](src-tauri/) | Local runtime, SQLite persistence, IPC commands, sync engine, embedded HTTP server. |
+| **Sync Server** | `sync-server/` (when introduced) | Fastify + Prisma + Postgres. Sync push/pull, backups, exports. **Not** a general-purpose API for the frontend. |
 
-## Commands
+The desktop app is the source of truth for the user's day-to-day workflow. The server exists for sync, backup, and cross-device collaboration.
+
+## Core Principles
+
+1. **Offline-First.** Every read goes to local SQLite; every write commits locally first; the sync engine ships changes later. A network outage NEVER breaks the user's workflow. See [`.claude/rules/offline-first.md`](.claude/rules/offline-first.md).
+2. **Plugin-First (sync server).** Use Fastify plugins for everything; don't reinvent the wheel.
+3. **DDD Everywhere.** Each domain is a bounded context with isolated domain logic. See [`.claude/rules/ddd.md`](.claude/rules/ddd.md).
+4. **Comprehensive Swagger (sync server).** Every server route has a TypeBox schema with description, tags, summary, body, response, security.
+5. **No Emojis.** Never in code, comments, docs, commit messages, or user-facing strings.
+6. **Context7 First.** NEVER write code without first querying Context7 for up-to-date docs on every library/plugin/framework being used. Mandatory, not optional.
+7. **Always pnpm.** Never `npm` or `yarn`.
+
+## Critical Rules
+
+### Git Commits
+**NEVER commit with Claude authorship or co-authorship.** No `Co-Authored-By: Claude`, no Anthropic emails, no modifying git config. All commits must appear as solely human-made.
+
+### Pre-Push Validation (MANDATORY)
+**NEVER push without local validation passing.** This mirrors what CI runs:
+- `pnpm lint` -- ESLint passes.
+- `pnpm build` -- TS + Vite build passes.
+- `cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`.
+- When the sync server exists: its lint, typecheck, and unit tests.
+
+### Destructive Actions
+The PreToolUse hook in `.claude/hooks/block-destructive.sh` blocks the most dangerous commands, but the rule stands regardless:
+- **NEVER** `docker rm`, `docker compose rm`, `docker system prune`, `docker container prune`, `docker volume prune`, `docker image prune`.
+- **NEVER** `git push --force` to `main`, `git reset --hard` shared branches, `git branch -D`, `git filter-branch`.
+- **NEVER** `--no-verify` or `--no-gpg-sign` on commits.
+
+### Context7 Documentation Lookup (MANDATORY)
+Before writing ANY implementation code using a library/plugin/framework:
+1. Call `resolve-library-id` to find the library.
+2. Call `query-docs` with your specific use case.
+3. Use the returned docs/examples as the basis for the implementation.
+
+This applies to: Tauri plugins, Tokio, sqlx/rusqlite, Axum, Fastify plugins, Prisma, BullMQ, TypeBox, undici, jsonwebtoken, React 19, React Router v7, TanStack Query, Zustand, Zod, framer-motion, react-i18next, shadcn/ui -- any library, no matter how familiar.
+
+### Package Installation
+**NEVER hand-edit `package.json` dependency sections.** Use `pnpm add <pkg>` / `pnpm add -D <pkg>` / `pnpm remove <pkg>`.
+**NEVER hand-edit `Cargo.toml` `[dependencies]`.** Use `cargo add <crate>` (with `--features` as needed). Hand-edit only `[workspace]`, `[profile]`, `[features]`, `[patch]`.
+
+## Development Workflow
+
+1. **Study the Plan.** Read the relevant `docs/<plan-name>/phase-XX.md`. Identify surfaces touched.
+2. **Research & Documentation (MANDATORY).** Query Context7 for every library/plugin you'll touch. Read existing patterns in this repo.
+3. **Design Schema.** Local SQLite migration (`src-tauri/migrations/`). Server Prisma model edit. Idempotent, forward-only.
+4. **Implement Domain Layer.** Entities, value objects, services, repository interfaces. Pure logic.
+5. **Implement Infrastructure.** SQLite repos (Rust), Prisma repos (server), sync adapters, jobs.
+6. **Implement Presentation.** Tauri commands + register in `lib.rs`. Server routes with Swagger. Frontend pages, queries, mutations.
+7. **Run the App.** `pnpm tauri dev`. Smoke-test new screens.
+8. **Sync Round-Trip.** Create offline -> reconnect -> server has it. Server change -> client pulls. Conflict scenario per declared policy.
+9. **Pre-Push Validation (MANDATORY).** Lint, typecheck, build, clippy, cargo test. Catches failures locally instead of in CI.
+10. **Fix and Iterate.** Schema -> runtime -> validation -> Swagger/IPC contract gaps. Fix root causes.
+
+See [`.claude/rules/dev-workflow.md`](.claude/rules/dev-workflow.md) for the full loop.
+
+## Frontend Cheatsheet
+
+| Concern | Tool | Detail |
+|-|-|-|
+| Routing | React Router v7 (`createBrowserRouter`) | [`REACT-ROUTER.md`](REACT-ROUTER.md) |
+| Server state | TanStack React Query v5 | [`REACT-QUERY.md`](REACT-QUERY.md) |
+| Client state | Zustand v5 | [`ZUSTAND.md`](ZUSTAND.md) |
+| Validation | Zod v4 | [`ZOD.md`](ZOD.md) |
+| Styling | Tailwind v4 + shadcn/ui | [`TAILWIND.md`](TAILWIND.md), [`SHADCN.md`](SHADCN.md) |
+| i18n | react-i18next (en + ar with RTL) | [`I18N.md`](I18N.md) |
+| Animations | framer-motion | [`FRAMER-MOTION.md`](FRAMER-MOTION.md) |
+| HTTP | axios (typed instance) | [`AXIOS.md`](AXIOS.md) |
+| SEO/meta | @dr.pogodin/react-helmet | [`REACT-HELMET.md`](REACT-HELMET.md) |
+| Path alias | `@/` -> `src/` | configured in vite.config.ts + tsconfig.app.json |
+
+Detailed conventions: [`.claude/rules/frontend.md`](.claude/rules/frontend.md).
+
+## Tauri Cheatsheet
+
+| Concern | Tool | Detail |
+|-|-|-|
+| Commands | `#[tauri::command]` async fns | [`src-tauri/TAURI.md`](src-tauri/TAURI.md) |
+| Async runtime | Tokio | [`src-tauri/TOKIO.md`](src-tauri/TOKIO.md) |
+| Embedded HTTP | Axum 0.8 | [`src-tauri/AXUM.md`](src-tauri/AXUM.md) |
+| Serialization | serde + serde_json + rmp-serde | [`src-tauri/SERDE.md`](src-tauri/SERDE.md) |
+| Errors | thiserror | [`src-tauri/THISERROR.md`](src-tauri/THISERROR.md) |
+| Logging | tracing + tracing-subscriber | [`src-tauri/TRACING.md`](src-tauri/TRACING.md) |
+| Business OS | embedded mode IPC | [`src-tauri/BUSINESS-OS-INTEGRATION.md`](src-tauri/BUSINESS-OS-INTEGRATION.md) |
+
+Detailed conventions: [`.claude/rules/tauri.md`](.claude/rules/tauri.md), [`.claude/rules/rust.md`](.claude/rules/rust.md).
+
+## Sync Server Cheatsheet (when introduced)
+
+| Concern | Tool |
+|-|-|
+| Framework | Fastify + plugin autoload |
+| ORM | Prisma + Postgres |
+| Validation | TypeBox schemas |
+| Auth | RS256 JWT, plugin-based |
+| Background jobs | BullMQ |
+| Docs | Swagger UI at `/documentation` |
+| Container | Docker compose + Dockerfile.dev with auto schema sync |
+
+Detailed conventions: [`.claude/rules/sync-server.md`](.claude/rules/sync-server.md), [`.claude/rules/auth.md`](.claude/rules/auth.md), [`.claude/rules/docker.md`](.claude/rules/docker.md).
+
+## Key Commands
 
 ```bash
-pnpm dev                # Start Vite dev server
-pnpm build              # Build frontend (tsc + vite)
-pnpm lint               # ESLint check
-pnpm preview            # Preview production build
-pnpm tauri dev          # Run Tauri desktop app in development
-pnpm tauri build        # Build Tauri app for production
+pnpm install                # install JS deps
+pnpm tauri dev              # run desktop app (frontend + Rust)
+pnpm tauri build            # build production bundle
+pnpm dev                    # frontend-only Vite dev (verify in tauri dev before declaring done)
+pnpm build                  # frontend type-check + Vite build
+pnpm lint                   # ESLint check
+
+# Rust (run from src-tauri/)
+cargo check                 # fastest signal
+cargo clippy --all-targets -- -D warnings
+cargo fmt
+cargo test
+cargo add <crate>           # NEVER hand-edit [dependencies]
 ```
 
-## Tech Stack
+## Detailed Rules (auto-loaded by path)
 
-- **Framework:** React 19
-- **Build Tool:** Vite 8 with SWC (`@vitejs/plugin-react-swc`)
-- **Language:** TypeScript (strict mode, ES2022 target)
-- **Styling:** Tailwind CSS v4 (`@tailwindcss/vite`) + shadcn/ui
-- **Routing:** React Router v7 (`createBrowserRouter`)
-- **State:** Zustand v5 (devtools + persist middleware)
-- **Server State:** TanStack React Query v5
-- **HTTP:** Axios (custom instance with auth interceptors)
-- **i18n:** react-i18next (Arabic/English with RTL support)
-- **Animations:** Framer Motion
-- **Validation:** Zod v4
-- **SEO:** @dr.pogodin/react-helmet
-- **Desktop:** Tauri v2 (dual mode: standalone window + Business OS embedded)
-- **Rust Backend:** Tokio, Axum, Serde, thiserror, tracing
-- **Package Manager:** pnpm
-- **Linting:** ESLint 9 with flat config, typescript-eslint, react-hooks plugin
+Architecture details, patterns, and conventions live in `.claude/rules/`:
 
-## Architecture
+- [`planning.md`](.claude/rules/planning.md) -- Plan structure, phase template, gap analysis methodology.
+- [`offline-first.md`](.claude/rules/offline-first.md) -- Sync engine, conflict resolution, local-schema invariants.
+- [`tauri.md`](.claude/rules/tauri.md) -- Tauri v2 commands, capabilities, dual-mode, build/release.
+- [`frontend.md`](.claude/rules/frontend.md) -- React 19, Vite, Tailwind v4, state architecture.
+- [`rust.md`](.claude/rules/rust.md) -- Rust conventions for the Tauri backend.
+- [`sync-server.md`](.claude/rules/sync-server.md) -- Fastify, Prisma, sync endpoints, Swagger.
+- [`ddd.md`](.claude/rules/ddd.md) -- Domain-Driven Design layout across all surfaces.
+- [`auth.md`](.claude/rules/auth.md) -- Offline-first JWT auth, token storage, refresh.
+- [`docker.md`](.claude/rules/docker.md) -- Docker rules for the sync-server stack.
+- [`dev-workflow.md`](.claude/rules/dev-workflow.md) -- The 10-step development loop.
 
-```
-src/
-├── api/axios.ts            # Axios instance + request/response interceptors (embedded-aware)
-├── components/ui/          # shadcn/ui components (add via: pnpx shadcn@latest add <component>)
-├── hooks/
-│   ├── use-auth.ts         # AuthContext + useAuth hook
-│   └── use-embedded-auth.ts # React Query polling hook for embedded mode
-├── i18n/
-│   ├── index.ts            # i18next config (Arabic + English, auto RTL)
-│   └── locales/{en,ar}/    # Translation JSON files
-├── lib/
-│   ├── embedded.ts         # Embedded mode detection + auth fetch
-│   ├── query-client.ts     # React Query client with defaults
-│   └── utils.ts            # cn() utility for Tailwind class merging
-├── pages/                  # Route page components
-├── providers/
-│   └── auth-provider.tsx   # AuthProvider (standalone + embedded mode)
-├── routes/index.tsx        # createBrowserRouter config
-├── stores/                 # Zustand stores
-├── App.tsx                 # Root layout (Helmet + Outlet)
-├── main.tsx                # Entry: StrictMode → HelmetProvider → QueryClientProvider → AuthProvider → RouterProvider
-└── index.css               # Tailwind v4 imports + shadcn/ui CSS variables (light/dark)
+## Subagent Rules
 
-src-tauri/
-├── Cargo.toml              # Rust dependencies
-├── tauri.conf.json         # Tauri config (window, CSP, bundling)
-├── capabilities/           # Permission declarations
-├── build.rs                # Tauri build script
-├── icons/                  # App icons (all platforms)
-└── src/
-    ├── main.rs             # Entry point → lib::run()
-    ├── lib.rs              # Dual mode: standalone Tauri OR embedded runner
-    ├── state.rs            # Thread-safe auth state (RwLock)
-    ├── error.rs            # AppError enum + AppResult<T>
-    └── embedded/           # Business OS integration
-        ├── mod.rs          # Embedded mode detection + config
-        ├── messages.rs     # IPC protocol types (MessagePack)
-        ├── http_server.rs  # Axum: /api/auth + static file serving
-        ├── ipc_client.rs   # TCP client for Business OS IPC
-        └── runner.rs       # Orchestration (HTTP + IPC + signals)
-```
+When launching subagents (Agent tool), include relevant rule content directly in the agent prompt -- subagents do NOT auto-load `.claude/rules/`. For Tauri work include `tauri.md`, `rust.md`, `offline-first.md`. For server work include `sync-server.md`, `ddd.md`, `auth.md`. Always include "no Claude authorship" and "Context7 first".
 
-- **Path alias:** `@/` resolves to `src/` (configured in both vite.config.ts and tsconfig.app.json)
-- `public/` - Static assets served as-is
+## Common Pitfalls
 
-## Key Configuration
-
-- **vite.config.ts** - SWC React plugin + Tailwind CSS vite plugin + `@/` path alias + Tauri dev server settings
-- **tsconfig.app.json** - Strict TypeScript with no unused variables/parameters + `@/*` paths
-- **eslint.config.js** - Flat config format (ESLint 9+)
-- **components.json** - shadcn/ui configuration (new-york style, lucide icons)
-- **src-tauri/tauri.conf.json** - Tauri app config (window, CSP, bundling, build commands)
-- **src-tauri/Cargo.toml** - Rust dependencies
-
-## Reference Guides
-
-- [REACT.md](REACT.md) - React patterns, architecture, and best practices
-- [REACT-QUERY.md](REACT-QUERY.md) - TanStack React Query patterns and best practices
-- [FRAMER-MOTION.md](FRAMER-MOTION.md) - Framer Motion animation patterns and best practices
-- [TAILWIND.md](TAILWIND.md) - Tailwind CSS utilities and patterns
-- [I18N.md](I18N.md) - i18n (react-i18next) for Arabic/English translations with RTL support
-- [SHADCN.md](SHADCN.md) - shadcn/ui component library and patterns
-- [REACT-BITS.md](REACT-BITS.md) - React Bits animated components
-- [ZOD.md](ZOD.md) - Zod schema validation and TypeScript types
-- [REACT-ROUTER.md](REACT-ROUTER.md) - React Router client-side routing
-- [ZUSTAND.md](ZUSTAND.md) - Zustand state management
-- [REACT-HELMET.md](REACT-HELMET.md) - React Helmet SEO and meta tags
-- [AXIOS.md](AXIOS.md) - Axios HTTP client
-- [src-tauri/CLAUDE.md](src-tauri/CLAUDE.md) - Tauri/Rust backend documentation and reference guides
-
-## Tauri Desktop
-
-This template supports dual-mode execution via Tauri v2:
-
-- **Standalone mode**: `pnpm tauri dev` launches a native desktop window with the React frontend
-- **Embedded mode**: When launched by Torch Business OS with `TORCH_EMBEDDED_MODE=true`, the app runs headless — serving the frontend via HTTP and communicating with Business OS via MessagePack IPC over TCP
-
-The Rust backend handles auth token management, IPC protocol, and frontend serving. The React frontend detects embedded mode and polls `/api/auth` for auth tokens instead of managing login directly.
-
-See [src-tauri/CLAUDE.md](src-tauri/CLAUDE.md) for the full Rust architecture and 7 reference guides covering Tauri, Tokio, Axum, Serde, thiserror, tracing, and Business OS integration.
+- Forgetting to register a new Tauri command in `lib.rs::generate_handler!` -- compiles fine, fails at runtime.
+- Adding a syncable model server-side without updating the local SQLite schema (or vice-versa) -- breaks the round trip.
+- Storing tokens in `localStorage` -- bypasses Rust's secure-storage path. Always go through IPC.
+- Holding a SQLite write transaction across an HTTP call -- locks WAL and stalls other writers.
+- Skipping the conflict-resolution declaration in a phase file -- the engine has nothing to dispatch on.
+- Letting `pnpm dev` mask a Tauri-only bug -- always verify in `pnpm tauri dev`.
+- Using `tokio::sync::Mutex` across an `await` -- prefer `RwLock`, or scope the lock and clone the value out.
+- Schema validation errors in TypeBox -- nullable fields use `Type.Union([T, Type.Null()])`, not `Type.Optional()`.
 
 <!-- MEMORY:START -->
 # Menu
 
-_Last updated: 2026-02-28 | 0 active memories, 0 total_
+_Last updated: 2026-05-07 | 0 active memories, 0 total_
 
 _For deeper context, use memory_search, memory_related, or memory_ask tools._
 <!-- MEMORY:END -->

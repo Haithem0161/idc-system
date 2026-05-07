@@ -29,3 +29,14 @@ src/routeTree.gen.ts
 # Tauri
 src-tauri/target/
 src-tauri/gen/schemas
+
+# Sync server
+sync-server/dist/
+sync-server/coverage/
+sync-server/.env
+sync-server/.sqlx/
+
+# Env files
+.env
+.env.local
+*.env.local
