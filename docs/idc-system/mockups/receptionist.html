@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IDC | واجهة الاستقبال</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --border: #e5e7eb;
+    --text: #0f172a;
+    --muted: #64748b;
+    --brand: #0f766e;
+    --brand-50: #f0fdfa;
+    --brand-100: #ccfbf1;
+    --brand-700: #0f766e;
+    --brand-800: #115e59;
+    --success: #059669;
+    --success-50: #ecfdf5;
+    --warning: #d97706;
+    --warning-50: #fffbeb;
+    --danger: #dc2626;
+    --danger-50: #fef2f2;
+    --info-50: #eff6ff;
+    --info-700: #1d4ed8;
+  }
+  html, body {
+    font-family: 'Tajawal', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  .latin { font-family: 'Inter', sans-serif; font-feature-settings: 'cv11','ss01'; }
+  .nums { font-variant-numeric: tabular-nums; font-family: 'Inter', sans-serif; }
+  .brand-bg { background: var(--brand); }
+  .brand-text { color: var(--brand); }
+  .ring-brand { box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .dot { width: 6px; height: 6px; border-radius: 999px; }
+  .focus-ring:focus-within { box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.18); border-color: #0f766e; }
+  .scrollbar-thin::-webkit-scrollbar { height: 6px; width: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+  .tab-btn[data-active="true"] { color: var(--brand-700); border-color: var(--brand-700); background: var(--brand-50); }
+  .tab-btn { color: var(--muted); }
+  .nav-item[data-active="true"] {
+    background: var(--brand-50);
+    color: var(--brand-800);
+  }
+  .nav-item[data-active="true"] .nav-icon { color: var(--brand-700); }
+  .nav-item[data-active="true"]::before {
+    content: ""; position: absolute; right: 0; top: 8px; bottom: 8px; width: 3px; background: var(--brand-700); border-radius: 2px;
+  }
+  /* number input visual */
+  input[type="number"]::-webkit-inner-spin-button { display: none; }
+  input { outline: none; }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  /* hover row */
+  .row-hover:hover { background: #f9fafb; }
+  /* tooltip */
+  [data-tip] { position: relative; }
+  [data-tip]:hover::after {
+    content: attr(data-tip);
+    position: absolute; bottom: calc(100% + 6px); right: 50%; transform: translateX(50%);
+    background: #0f172a; color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 11px;
+    white-space: nowrap; z-index: 50;
+  }
+  /* small spinner */
+  .spinner { border: 2px solid rgba(15,118,110,0.2); border-top-color: #0f766e; border-radius: 999px; width: 12px; height: 12px; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- ========================================================== -->
+<!-- App Shell: Sidebar + Topbar + Main + Statusbar             -->
+<!-- ========================================================== -->
+<div class="flex min-h-screen">
+
+  <!-- =================== SIDEBAR (right in RTL) =================== -->
+  <aside class="w-64 shrink-0 bg-white border-l border-slate-200 flex flex-col">
+    <!-- Brand -->
+    <div class="h-16 flex items-center gap-3 px-5 border-b border-slate-100">
+      <div class="w-9 h-9 rounded-xl brand-bg flex items-center justify-center text-white font-bold latin text-sm">IDC</div>
+      <div class="leading-tight">
+        <div class="font-bold text-[15px]">المجمع العراقي</div>
+        <div class="text-[11px] text-slate-500">التخصصي</div>
+      </div>
+    </div>
+
+    <!-- Nav -->
+    <nav class="flex-1 px-3 py-4 space-y-1 text-sm">
+      <div class="px-2 mb-2 text-[11px] font-semibold text-slate-400 tracking-wider">القوائم</div>
+
+      <a class="nav-item relative flex items-center gap-3 px-3 py-2.5 rounded-lg" data-active="true">
+        <svg class="nav-icon w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16"/><path d="M3 21h18"/><path d="M9 9h.01"/><path d="M15 9h.01"/><path d="M9 13h.01"/><path d="M15 13h.01"/><path d="M9 17h.01"/><path d="M15 17h.01"/></svg>
+        <span class="font-medium">الاستقبال</span>
+        <span class="me-auto"></span>
+        <span class="pill bg-emerald-50 text-emerald-700 nums text-[10px] py-0.5">٤</span>
+      </a>
+
+      <a class="nav-item relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-50">
+        <svg class="nav-icon w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21V3"/><path d="M8 21V8"/><path d="M3 21h18"/></svg>
+        <span>المحاسبة</span>
+      </a>
+
+      <a class="nav-item relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-50">
+        <svg class="nav-icon w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+        <span>المخزون</span>
+        <span class="me-auto"></span>
+        <span class="pill bg-amber-50 text-amber-700 text-[10px] py-0.5">منخفض</span>
+      </a>
+
+      <div class="px-2 mt-6 mb-2 text-[11px] font-semibold text-slate-400 tracking-wider">المسؤول</div>
+
+      <a class="nav-item relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-400 cursor-not-allowed" data-tip="لا تمتلك صلاحية الوصول">
+        <svg class="nav-icon w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>الإعدادات</span>
+        <svg class="w-4 h-4 me-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </a>
+
+      <a class="nav-item relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-400 cursor-not-allowed" data-tip="لا تمتلك صلاحية الوصول">
+        <svg class="nav-icon w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        <span>التدقيق</span>
+        <svg class="w-4 h-4 me-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </a>
+    </nav>
+
+    <!-- User block -->
+    <div class="border-t border-slate-100 p-3">
+      <div class="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+        <div class="w-9 h-9 rounded-full bg-teal-100 text-teal-800 font-bold flex items-center justify-center">م</div>
+        <div class="leading-tight flex-1 min-w-0">
+          <div class="text-sm font-semibold truncate">مها صبري</div>
+          <div class="text-[11px] text-slate-500">موظفة استقبال</div>
+        </div>
+        <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN COLUMN =================== -->
+  <div class="flex-1 flex flex-col min-w-0">
+
+    <!-- ============== Topbar ============== -->
+    <header class="h-16 bg-white border-b border-slate-200 flex items-center px-6 gap-4">
+      <div>
+        <div class="text-[12px] text-slate-500">المجمع العراقي التخصصي · الاستقبال</div>
+        <div class="text-base font-bold leading-tight">واجهة الاستقبال</div>
+      </div>
+      <div class="me-auto"></div>
+
+      <!-- Search -->
+      <div class="hidden lg:flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 w-80 focus-ring">
+        <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" placeholder="ابحث عن مريض، طبيب، أو رقم زيارة..." class="bg-transparent text-sm flex-1 placeholder:text-slate-400" />
+        <kbd class="latin text-[10px] text-slate-400 border border-slate-200 rounded px-1.5 py-0.5">⌘K</kbd>
+      </div>
+
+      <!-- Sync pill -->
+      <div class="pill bg-emerald-50 text-emerald-700">
+        <span class="dot bg-emerald-500"></span>
+        <span class="text-[11px]">متزامن</span>
+      </div>
+
+      <!-- Lang toggle -->
+      <button class="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold latin" title="التبديل إلى الإنجليزية">EN</button>
+
+      <!-- Notification -->
+      <button class="w-9 h-9 rounded-lg hover:bg-slate-100 flex items-center justify-center relative">
+        <svg class="w-5 h-5 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="absolute top-2 left-2 w-2 h-2 bg-rose-500 rounded-full"></span>
+      </button>
+    </header>
+
+    <!-- ============== Page header + tabs ============== -->
+    <div class="px-6 pt-5 pb-3 bg-white border-b border-slate-200">
+      <div class="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <div class="text-[12px] text-slate-500 latin">RECEPTION</div>
+          <h1 class="text-[22px] font-extrabold leading-tight">سير عمل الاستقبال</h1>
+        </div>
+        <div class="text-xs text-slate-500 latin nums">
+          <span>2026-05-07 · 14:32</span>
+          <span class="mx-2">·</span>
+          <span>اليوم: <span class="font-semibold text-slate-700">١٨ زيارة مقفلة · ٣ مسودات</span></span>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="mt-4 flex items-center gap-1">
+        <button onclick="showTab('new')" id="tab-new" class="tab-btn px-4 py-2.5 text-sm font-semibold border-b-2 border-transparent rounded-t-lg" data-active="true">
+          زيارة جديدة
+        </button>
+        <button onclick="showTab('list')" id="tab-list" class="tab-btn px-4 py-2.5 text-sm font-semibold border-b-2 border-transparent rounded-t-lg">
+          زيارات اليوم
+          <span class="latin nums text-[10px] bg-slate-100 px-1.5 rounded ms-1">21</span>
+        </button>
+        <button onclick="showTab('shifts')" id="tab-shifts" class="tab-btn px-4 py-2.5 text-sm font-semibold border-b-2 border-transparent rounded-t-lg">
+          مناوبات المشغّلين
+          <span class="latin nums text-[10px] bg-slate-100 px-1.5 rounded ms-1">3</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ============== CONTENT AREA ============== -->
+    <main class="flex-1 p-6 overflow-auto">
+
+      <!-- ====================================================== -->
+      <!-- TAB 1: NEW VISIT                                       -->
+      <!-- ====================================================== -->
+      <section id="panel-new" class="grid grid-cols-12 gap-6">
+
+        <!-- Left: form -->
+        <div class="col-span-12 xl:col-span-8 space-y-6">
+
+          <!-- Patient -->
+          <div class="card p-5">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="font-bold text-[15px]">المريض</h2>
+              <span class="text-[11px] text-slate-500">الاسم الرباعي مطلوب</span>
+            </div>
+            <div class="relative">
+              <label class="text-[12px] font-semibold text-slate-600">اسم المريض</label>
+              <div class="mt-1.5 flex items-center gap-2 border border-slate-300 rounded-lg px-4 py-3 focus-ring bg-white">
+                <svg class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <input type="text" value="علي حسن محمد كاظم" class="bg-transparent text-base flex-1 font-medium" />
+                <span class="pill bg-slate-100 text-slate-600 latin text-[10px]">٤ مقاطع</span>
+              </div>
+              <div class="mt-2 text-[11px] text-slate-500">آخر زيارة لمريض بهذا الاسم: ٢٠٢٥-١١-١٢ (للمرجعية فقط — لا يتم الدمج التلقائي)</div>
+            </div>
+          </div>
+
+          <!-- Lines -->
+          <div class="card overflow-hidden">
+            <div class="flex items-center justify-between p-5 border-b border-slate-100">
+              <div>
+                <h2 class="font-bold text-[15px]">الفحوصات</h2>
+                <p class="text-[12px] text-slate-500 mt-0.5">أضف فحصاً واحداً لكل سطر. الإجمالي يحتسب آنياً.</p>
+              </div>
+              <button class="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-teal-800">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                إضافة سطر
+              </button>
+            </div>
+
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th class="text-start font-semibold py-3 px-4 w-10">#</th>
+                  <th class="text-start font-semibold py-3 px-4">الفحص</th>
+                  <th class="text-start font-semibold py-3 px-4">النوع الفرعي</th>
+                  <th class="text-start font-semibold py-3 px-4">الطبيب</th>
+                  <th class="text-center font-semibold py-3 px-4">صبغة</th>
+                  <th class="text-center font-semibold py-3 px-4">تقرير</th>
+                  <th class="text-end font-semibold py-3 px-4">المجموع</th>
+                  <th class="w-10"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+
+                <!-- Line 1: Ultrasound, no subtype, house, no dye, no report -->
+                <tr class="row-hover">
+                  <td class="py-3 px-4 text-slate-400 nums">1</td>
+                  <td class="py-3 px-4">
+                    <div class="font-semibold">سونار</div>
+                    <div class="text-[11px] text-slate-500 latin">Ultrasound</div>
+                  </td>
+                  <td class="py-3 px-4 text-slate-400">—</td>
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-2">
+                      <span class="pill bg-slate-100 text-slate-600">داخلي (المجمّع)</span>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4 text-center">
+                    <div class="inline-flex w-10 h-6 bg-slate-200 rounded-full p-0.5 cursor-pointer" data-tip="غير مفعّل">
+                      <div class="w-5 h-5 bg-white rounded-full shadow"></div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4 text-center">
+                    <div class="inline-flex w-10 h-6 bg-slate-200 rounded-full p-0.5 cursor-pointer" data-tip="غير مفعّل">
+                      <div class="w-5 h-5 bg-white rounded-full shadow"></div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4 text-end nums font-semibold">25,000</td>
+                  <td class="py-3 px-4">
+                    <button class="text-slate-400 hover:text-rose-600 p-1.5 rounded hover:bg-rose-50">
+                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+                    </button>
+                  </td>
+                </tr>
+
+                <!-- Line 2: CT with dye + report, external doctor (search-select OPEN) -->
+                <tr class="row-hover bg-teal-50/30">
+                  <td class="py-3 px-4 text-slate-400 nums">2</td>
+                  <td class="py-3 px-4">
+                    <div class="font-semibold">مفراس</div>
+                    <div class="text-[11px] text-slate-500 latin">CT Scan</div>
+                  </td>
+                  <td class="py-3 px-4">
+                    <div class="px-2 py-1 rounded-md bg-white border border-slate-200 text-[13px] font-medium inline-flex items-center gap-1">
+                      دماغ
+                      <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4 relative">
+                    <div class="px-2 py-1 rounded-md bg-white border border-teal-300 ring-1 ring-teal-200 text-[13px] font-medium inline-flex items-center gap-1">
+                      د. أحمد الجبوري
+                      <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                    <!-- Floating dropdown preview, simulating search-select open -->
+                    <div class="absolute z-10 top-full mt-1 right-4 w-72 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden" style="display:none">
+                      <div class="px-3 py-2 border-b border-slate-100 flex items-center gap-2 bg-slate-50">
+                        <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input class="bg-transparent text-sm flex-1" value="أحمد" />
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4 text-center">
+                    <div class="inline-flex w-10 h-6 bg-teal-600 rounded-full p-0.5 cursor-pointer" data-tip="مفعّل">
+                      <div class="w-5 h-5 bg-white rounded-full shadow ms-auto"></div>
+                    </div>
+                    <div class="text-[10px] text-teal-700 mt-0.5 font-semibold">+15,000</div>
+                  </td>
+                  <td class="py-3 px-4 text-center">
+                    <div class="inline-flex w-10 h-6 bg-teal-600 rounded-full p-0.5 cursor-pointer" data-tip="مفعّل">
+                      <div class="w-5 h-5 bg-white rounded-full shadow ms-auto"></div>
+                    </div>
+                    <div class="text-[10px] text-teal-700 mt-0.5 font-semibold">+10,000</div>
+                  </td>
+                  <td class="py-3 px-4 text-end nums font-semibold">175,000</td>
+                  <td class="py-3 px-4">
+                    <button class="text-slate-400 hover:text-rose-600 p-1.5 rounded hover:bg-rose-50">
+                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+                    </button>
+                  </td>
+                </tr>
+
+                <!-- Line 3: X-ray, no subtype, house, no dye, report yes -->
+                <tr class="row-hover">
+                  <td class="py-3 px-4 text-slate-400 nums">3</td>
+                  <td class="py-3 px-4">
+                    <div class="font-semibold">أشعة سينية</div>
+                    <div class="text-[11px] text-slate-500 latin">X-Ray</div>
+                  </td>
+                  <td class="py-3 px-4 text-slate-400">—</td>
+                  <td class="py-3 px-4">
+                    <span class="pill bg-slate-100 text-slate-600">داخلي (المجمّع)</span>
+                  </td>
+                  <td class="py-3 px-4 text-center">
+                    <div class="inline-flex w-10 h-6 bg-slate-100 rounded-full p-0.5" data-tip="غير مدعوم لهذا الفحص">
+                      <div class="w-5 h-5 bg-slate-200 rounded-full"></div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4 text-center">
+                    <div class="inline-flex w-10 h-6 bg-teal-600 rounded-full p-0.5 cursor-pointer">
+                      <div class="w-5 h-5 bg-white rounded-full shadow ms-auto"></div>
+                    </div>
+                    <div class="text-[10px] text-teal-700 mt-0.5 font-semibold">+10,000</div>
+                  </td>
+                  <td class="py-3 px-4 text-end nums font-semibold">28,000</td>
+                  <td class="py-3 px-4">
+                    <button class="text-slate-400 hover:text-rose-600 p-1.5 rounded hover:bg-rose-50">
+                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+                    </button>
+                  </td>
+                </tr>
+
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Lock validation panel -->
+          <div class="card p-4 border-amber-200 bg-amber-50">
+            <div class="flex items-start gap-3">
+              <svg class="w-5 h-5 text-amber-600 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <div class="flex-1 text-[13px]">
+                <div class="font-bold text-amber-900">قبل القفل: اختر مشغّلاً لكل سطر</div>
+                <div class="text-amber-800 mt-1 leading-relaxed">يجب اختيار مشغّل من بين المشغّلين الحاضرين حالياً ضمن تخصصهم. سيُرفض القفل إذا لم يكن هناك مشغّل مؤهّل.</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Right: totals + actions -->
+        <div class="col-span-12 xl:col-span-4 space-y-6">
+
+          <!-- Totals -->
+          <div class="card p-5 sticky top-6">
+            <h2 class="font-bold text-[15px] mb-4">الإجمالي</h2>
+
+            <div class="space-y-3 text-sm">
+              <div class="flex justify-between">
+                <span class="text-slate-600">قيمة الفحوصات</span>
+                <span class="nums font-semibold">203,000</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-600">صبغة (سطر واحد)</span>
+                <span class="nums">+15,000</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-600">تقارير (سطران)</span>
+                <span class="nums">+20,000</span>
+              </div>
+              <div class="border-t border-slate-100 my-2"></div>
+              <div class="flex justify-between items-baseline">
+                <span class="font-bold text-base">الإجمالي</span>
+                <div>
+                  <span class="nums font-extrabold text-2xl text-teal-700">238,000</span>
+                  <span class="latin text-[13px] text-slate-500 ms-1">IQD</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="my-5 border-t border-dashed border-slate-200"></div>
+
+            <!-- Operator picker preview (per line) -->
+            <div class="space-y-3">
+              <div class="text-[12px] font-semibold text-slate-700">تخصيص المشغّل لكل سطر</div>
+
+              <div class="rounded-lg border border-slate-200 p-3">
+                <div class="text-[11px] text-slate-500 mb-1">السطر ١ · سونار</div>
+                <select class="w-full text-sm border border-slate-200 rounded-md px-2 py-1.5 bg-white">
+                  <option>محمد سعيد — حاضر منذ ٠٩:٠٢</option>
+                  <option>زهراء جواد — حاضرة منذ ٠٨:٤٥</option>
+                </select>
+              </div>
+
+              <div class="rounded-lg border border-slate-200 p-3">
+                <div class="text-[11px] text-slate-500 mb-1">السطر ٢ · مفراس · مع صبغة</div>
+                <select class="w-full text-sm border border-slate-200 rounded-md px-2 py-1.5 bg-white">
+                  <option>علي حسن — حاضر منذ ٠٨:١٤</option>
+                </select>
+                <div class="text-[11px] text-amber-700 mt-1">سيُحتسب أجر المشغّل ×٢ بسبب الصبغة</div>
+              </div>
+
+              <div class="rounded-lg border border-rose-200 bg-rose-50 p-3">
+                <div class="text-[11px] text-rose-700 font-semibold mb-1">السطر ٣ · أشعة سينية</div>
+                <div class="text-[12px] text-rose-700">لا يوجد مشغّل حاضر بهذا التخصص. الرجاء إدخال المشغّل في تبويب "المناوبات" قبل القفل.</div>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="mt-5 flex flex-col gap-2">
+              <button class="bg-teal-700 hover:bg-teal-800 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                قفل وطباعة الإيصال
+              </button>
+              <div class="flex gap-2">
+                <button class="flex-1 border border-slate-300 py-2.5 rounded-lg font-semibold text-sm hover:bg-slate-50">حفظ كمسودّة</button>
+                <button class="flex-1 border border-slate-200 text-slate-500 py-2.5 rounded-lg font-semibold text-sm hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200">إلغاء الزيارة</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sync indicator -->
+          <div class="card p-4 flex items-center gap-3">
+            <div class="w-9 h-9 rounded-lg bg-emerald-50 flex items-center justify-center">
+              <span class="dot bg-emerald-500"></span>
+            </div>
+            <div class="flex-1">
+              <div class="text-sm font-semibold">المزامنة مفعّلة</div>
+              <div class="text-[11px] text-slate-500 latin">آخر مزامنة قبل ٤ ثوانٍ · 0 عمليات معلّقة</div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ====================================================== -->
+      <!-- TAB 2: TODAY'S VISITS                                  -->
+      <!-- ====================================================== -->
+      <section id="panel-list" class="hidden">
+
+        <!-- Filters -->
+        <div class="card p-4 flex flex-wrap items-center gap-3 mb-5">
+          <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex-1 min-w-[280px]">
+            <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="bg-transparent text-sm flex-1 placeholder:text-slate-400" placeholder="بحث بالاسم أو رقم الزيارة..." />
+          </div>
+          <select class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"><option>اليوم</option><option>الأمس</option><option>هذا الأسبوع</option></select>
+          <select class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"><option>كل الحالات</option><option>مقفلة</option><option>مسودّات</option><option>ملغاة</option></select>
+          <button class="border border-slate-200 rounded-lg px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            إعادة تعيين
+          </button>
+          <div class="me-auto"></div>
+          <div class="text-[12px] text-slate-500">عدد النتائج: <span class="font-bold text-slate-900 nums">21</span></div>
+        </div>
+
+        <!-- Visit table -->
+        <div class="card overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+              <tr>
+                <th class="text-start font-semibold py-3 px-4">الوقت</th>
+                <th class="text-start font-semibold py-3 px-4">رقم الزيارة</th>
+                <th class="text-start font-semibold py-3 px-4">المريض</th>
+                <th class="text-start font-semibold py-3 px-4">الفحوصات</th>
+                <th class="text-end font-semibold py-3 px-4">الإجمالي (د.ع)</th>
+                <th class="text-center font-semibold py-3 px-4">الحالة</th>
+                <th class="text-center font-semibold py-3 px-4">المزامنة</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+
+              <tr class="row-hover">
+                <td class="py-3 px-4 text-slate-500 nums">14:21</td>
+                <td class="py-3 px-4 nums latin font-semibold">#0192f08c</td>
+                <td class="py-3 px-4">فاطمة عبد الله جاسم العبيدي</td>
+                <td class="py-3 px-4">
+                  <span class="text-slate-700">سونار</span>
+                  <span class="text-slate-300 mx-1">·</span>
+                  <span class="text-slate-700">رنين</span>
+                </td>
+                <td class="py-3 px-4 text-end nums font-semibold">185,000</td>
+                <td class="py-3 px-4 text-center"><span class="pill bg-blue-50 text-blue-700"><span class="dot bg-blue-500"></span>مقفلة</span></td>
+                <td class="py-3 px-4 text-center"><span class="dot bg-emerald-500 inline-block"></span></td>
+                <td class="py-3 px-4 text-end"><button class="text-teal-700 text-xs font-semibold hover:underline">فتح ←</button></td>
+              </tr>
+
+              <tr class="row-hover">
+                <td class="py-3 px-4 text-slate-500 nums">14:08</td>
+                <td class="py-3 px-4 nums latin font-semibold">#0192f04a</td>
+                <td class="py-3 px-4">محمد كريم سلمان الجبوري</td>
+                <td class="py-3 px-4"><span class="text-slate-700">مفراس</span></td>
+                <td class="py-3 px-4 text-end nums font-semibold">110,000</td>
+                <td class="py-3 px-4 text-center"><span class="pill bg-blue-50 text-blue-700"><span class="dot bg-blue-500"></span>مقفلة</span></td>
+                <td class="py-3 px-4 text-center"><span class="dot bg-amber-500 inline-block"></span></td>
+                <td class="py-3 px-4 text-end"><button class="text-teal-700 text-xs font-semibold hover:underline">فتح ←</button></td>
+              </tr>
+
+              <tr class="row-hover bg-amber-50/30">
+                <td class="py-3 px-4 text-slate-500 nums">13:55</td>
+                <td class="py-3 px-4 nums latin font-semibold">#0192efb2</td>
+                <td class="py-3 px-4">علي حسن محمد كاظم</td>
+                <td class="py-3 px-4"><span class="text-slate-700">سونار</span><span class="text-slate-300 mx-1">·</span><span class="text-slate-700">مفراس</span><span class="text-slate-300 mx-1">·</span><span class="text-slate-700">أشعة سينية</span></td>
+                <td class="py-3 px-4 text-end nums font-semibold">238,000</td>
+                <td class="py-3 px-4 text-center"><span class="pill bg-amber-50 text-amber-700"><span class="dot bg-amber-500"></span>مسودّة</span></td>
+                <td class="py-3 px-4 text-center"><span class="dot bg-amber-500 inline-block"></span></td>
+                <td class="py-3 px-4 text-end"><button class="text-teal-700 text-xs font-semibold hover:underline">متابعة ←</button></td>
+              </tr>
+
+              <tr class="row-hover">
+                <td class="py-3 px-4 text-slate-500 nums">13:42</td>
+                <td class="py-3 px-4 nums latin font-semibold">#0192efa1</td>
+                <td class="py-3 px-4">نور سعد حسين المالكي</td>
+                <td class="py-3 px-4"><span class="text-slate-700">صدى القلب</span></td>
+                <td class="py-3 px-4 text-end nums font-semibold">75,000</td>
+                <td class="py-3 px-4 text-center"><span class="pill bg-blue-50 text-blue-700"><span class="dot bg-blue-500"></span>مقفلة</span></td>
+                <td class="py-3 px-4 text-center"><span class="dot bg-emerald-500 inline-block"></span></td>
+                <td class="py-3 px-4 text-end"><button class="text-teal-700 text-xs font-semibold hover:underline">فتح ←</button></td>
+              </tr>
+
+              <tr class="row-hover">
+                <td class="py-3 px-4 text-slate-500 nums">13:27</td>
+                <td class="py-3 px-4 nums latin font-semibold">#0192ef88</td>
+                <td class="py-3 px-4">حسين كاظم عبد الزهرة الموسوي</td>
+                <td class="py-3 px-4"><span class="text-slate-700">مفراس</span><span class="text-slate-300 mx-1">·</span><span class="text-slate-700">رنين</span></td>
+                <td class="py-3 px-4 text-end nums font-semibold line-through text-slate-400">320,000</td>
+                <td class="py-3 px-4 text-center"><span class="pill bg-rose-50 text-rose-700"><span class="dot bg-rose-500"></span>ملغاة</span></td>
+                <td class="py-3 px-4 text-center"><span class="dot bg-emerald-500 inline-block"></span></td>
+                <td class="py-3 px-4 text-end"><button class="text-teal-700 text-xs font-semibold hover:underline">فتح ←</button></td>
+              </tr>
+
+              <tr class="row-hover">
+                <td class="py-3 px-4 text-slate-500 nums">13:11</td>
+                <td class="py-3 px-4 nums latin font-semibold">#0192ef62</td>
+                <td class="py-3 px-4">زينب جواد كاظم الشمري</td>
+                <td class="py-3 px-4"><span class="text-slate-700">سونار</span></td>
+                <td class="py-3 px-4 text-end nums font-semibold">25,000</td>
+                <td class="py-3 px-4 text-center"><span class="pill bg-blue-50 text-blue-700"><span class="dot bg-blue-500"></span>مقفلة</span></td>
+                <td class="py-3 px-4 text-center"><span class="dot bg-emerald-500 inline-block"></span></td>
+                <td class="py-3 px-4 text-end"><button class="text-teal-700 text-xs font-semibold hover:underline">فتح ←</button></td>
+              </tr>
+
+            </tbody>
+          </table>
+          <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 text-[12px] text-slate-500 flex items-center justify-between">
+            <span>عرض ٦ من ٢١</span>
+            <div class="flex items-center gap-1">
+              <button class="px-2 py-1 rounded hover:bg-white">←</button>
+              <button class="px-2.5 py-1 rounded bg-teal-700 text-white nums latin">1</button>
+              <button class="px-2.5 py-1 rounded hover:bg-white nums latin">2</button>
+              <button class="px-2.5 py-1 rounded hover:bg-white nums latin">3</button>
+              <button class="px-2 py-1 rounded hover:bg-white">→</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ====================================================== -->
+      <!-- TAB 3: OPERATOR SHIFTS                                 -->
+      <!-- ====================================================== -->
+      <section id="panel-shifts" class="hidden grid grid-cols-12 gap-6">
+
+        <div class="col-span-12 lg:col-span-7">
+          <div class="card overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h2 class="font-bold text-[15px]">المشغّلون الحاضرون</h2>
+                <p class="text-[12px] text-slate-500 mt-0.5">يجب أن يكون المشغّل حاضراً ليمكن إسناد الفحص له عند القفل.</p>
+              </div>
+              <button class="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-teal-800">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                تسجيل دخول مشغّل
+              </button>
+            </div>
+
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th class="text-start font-semibold py-3 px-4">المشغّل</th>
+                  <th class="text-start font-semibold py-3 px-4">التخصصات</th>
+                  <th class="text-start font-semibold py-3 px-4">منذ</th>
+                  <th class="text-end font-semibold py-3 px-4">فحوصات اليوم</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr class="row-hover">
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 font-bold flex items-center justify-center text-xs">ع</div>
+                      <div>
+                        <div class="font-semibold">علي حسن</div>
+                        <div class="text-[11px] text-slate-500 latin">2,500 IQD/check · ×2 بصبغة</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4"><span class="pill bg-slate-100 text-slate-700">سونار</span> <span class="pill bg-slate-100 text-slate-700">مفراس</span></td>
+                  <td class="py-3 px-4 nums text-slate-600">٠٨:١٤</td>
+                  <td class="py-3 px-4 text-end nums font-semibold">٧</td>
+                  <td class="py-3 px-4 text-end">
+                    <button class="text-rose-600 text-xs font-semibold hover:underline">تسجيل خروج</button>
+                  </td>
+                </tr>
+                <tr class="row-hover">
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 font-bold flex items-center justify-center text-xs">م</div>
+                      <div>
+                        <div class="font-semibold">محمد سعيد</div>
+                        <div class="text-[11px] text-slate-500 latin">2,000 IQD/check · ×2 بصبغة</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4"><span class="pill bg-slate-100 text-slate-700">سونار</span></td>
+                  <td class="py-3 px-4 nums text-slate-600">٠٩:٠٢</td>
+                  <td class="py-3 px-4 text-end nums font-semibold">٤</td>
+                  <td class="py-3 px-4 text-end">
+                    <button class="text-rose-600 text-xs font-semibold hover:underline">تسجيل خروج</button>
+                  </td>
+                </tr>
+                <tr class="row-hover">
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 font-bold flex items-center justify-center text-xs">ز</div>
+                      <div>
+                        <div class="font-semibold">زهراء جواد</div>
+                        <div class="text-[11px] text-slate-500 latin">2,200 IQD/check · ×2 بصبغة</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4"><span class="pill bg-slate-100 text-slate-700">سونار</span> <span class="pill bg-slate-100 text-slate-700">صدى القلب</span></td>
+                  <td class="py-3 px-4 nums text-slate-600">٠٨:٤٥</td>
+                  <td class="py-3 px-4 text-end nums font-semibold">٦</td>
+                  <td class="py-3 px-4 text-end">
+                    <button class="text-rose-600 text-xs font-semibold hover:underline">تسجيل خروج</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Recent shift history -->
+          <div class="card mt-5 overflow-hidden">
+            <div class="p-5 border-b border-slate-100">
+              <h2 class="font-bold text-[15px]">سجل المناوبات اليوم</h2>
+            </div>
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th class="text-start font-semibold py-3 px-4">المشغّل</th>
+                  <th class="text-start font-semibold py-3 px-4">دخول</th>
+                  <th class="text-start font-semibold py-3 px-4">خروج</th>
+                  <th class="text-start font-semibold py-3 px-4">المدة</th>
+                  <th class="text-end font-semibold py-3 px-4">فحوصات</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr class="row-hover"><td class="py-3 px-4">كرار حيدر</td><td class="py-3 px-4 nums">٠٧:٠٠</td><td class="py-3 px-4 nums">١٢:٣٠</td><td class="py-3 px-4 nums latin">5h 30m</td><td class="py-3 px-4 text-end nums font-semibold">٩</td></tr>
+                <tr class="row-hover"><td class="py-3 px-4">سارة منصور</td><td class="py-3 px-4 nums">٠٧:١٥</td><td class="py-3 px-4 nums">١٣:٤٠</td><td class="py-3 px-4 nums latin">6h 25m</td><td class="py-3 px-4 text-end nums font-semibold">١١</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Right column: stats card -->
+        <div class="col-span-12 lg:col-span-5 space-y-5">
+          <div class="card p-5">
+            <h3 class="font-bold text-[15px] mb-4">ملخص اليوم</h3>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="bg-emerald-50 rounded-xl p-4">
+                <div class="text-[12px] text-emerald-700 font-semibold">حاضرون الآن</div>
+                <div class="nums latin font-extrabold text-3xl text-emerald-700 mt-1">3</div>
+              </div>
+              <div class="bg-slate-50 rounded-xl p-4">
+                <div class="text-[12px] text-slate-600 font-semibold">إجمالي مناوبات اليوم</div>
+                <div class="nums latin font-extrabold text-3xl text-slate-800 mt-1">5</div>
+              </div>
+              <div class="bg-blue-50 rounded-xl p-4">
+                <div class="text-[12px] text-blue-700 font-semibold">فحوصات اليوم</div>
+                <div class="nums latin font-extrabold text-3xl text-blue-700 mt-1">37</div>
+              </div>
+              <div class="bg-amber-50 rounded-xl p-4">
+                <div class="text-[12px] text-amber-700 font-semibold">فحوصات بصبغة</div>
+                <div class="nums latin font-extrabold text-3xl text-amber-700 mt-1">8</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card p-5 bg-gradient-to-br from-teal-50 to-emerald-50 border-teal-100">
+            <h3 class="font-bold text-[14px] text-teal-900 mb-2">تذكير</h3>
+            <p class="text-[13px] text-teal-800 leading-relaxed">يحتسب نظام المحاسبة أجور المشغّلين فقط للزيارات التي وقعت ضمن وقت حضورهم. تأكّد من تسجيل الدخول والخروج بدقّة.</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ============== Status bar ============== -->
+    <footer class="border-t border-slate-200 bg-white px-6 py-2.5 flex items-center justify-between text-[11px] text-slate-500">
+      <div class="flex items-center gap-4">
+        <span class="latin">v0.1.0</span>
+        <span>·</span>
+        <span>الجهاز: <span class="latin nums">DESK-RECEPTION-01</span></span>
+        <span>·</span>
+        <span>قاعدة البيانات المحلية: <span class="text-emerald-700 font-semibold">سليمة</span></span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span>الواجهة: عربية (افتراضي) · RTL</span>
+        <span>·</span>
+        <span class="latin">2026-05-07</span>
+      </div>
+    </footer>
+
+  </div>
+</div>
+
+<script>
+  function showTab(name) {
+    ['new','list','shifts'].forEach(n => {
+      document.getElementById('panel-' + n).classList.toggle('hidden', n !== name);
+      const btn = document.getElementById('tab-' + n);
+      btn.dataset.active = (n === name) ? 'true' : 'false';
+    });
+  }
+</script>
+
+</body>
+</html>
