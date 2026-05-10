@@ -1,4 +1,4 @@
-# IDC System — Product Requirements Document V0.1.0
+# IDC System — Product Requirements Document V0.1.1
 
 المجمع العراقي التخصصي — Operational Software Platform.
 
@@ -6,7 +6,8 @@
 
 | Version | Date | Author | Status | Notes |
 |-|-|-|-|-|
-| 0.1.0 | 2026-05-07 | IDC Engineering | Draft | Initial PRD covering Reception, Accounting, Inventory, Admin modules; offline-first Tauri desktop + Fastify sync/backup server. Bilingual (ar default + en). |
+| 0.1.0 | 2026-05-07 | IDC Engineering | Superseded | Initial PRD covering Reception, Accounting, Inventory, Admin modules; offline-first Tauri desktop + Fastify sync/backup server. Bilingual (ar default + en). |
+| 0.1.1 | 2026-05-10 | IDC Engineering | Draft | Per-check Reception workflow lands. Data-model tightening: `visit_lines` removed; check fields (`check_type_id`, `check_subtype_id`, `doctor_id`, `operator_id`, `dye`, `report`, all `*_snapshot_iqd` columns) inlined onto `visits`. A visit is now exactly one check. Cascading updates to §4, §6, §7, §8, §9, §12. |
 
 ### Precedent Documents
 
@@ -33,7 +34,7 @@ The system is bilingual. The default locale is Arabic with right-to-left layout.
 
 ### §1.2 Key Objectives
 
-1. Lock a typical visit (one line, no special routing) in under 30 seconds from "New Visit" click to printed receipt.
+1. Lock a typical visit (no special routing) in under 30 seconds from check-card click to printed receipt.
 2. Attribute every doctor and operator cut deterministically — no silent fallbacks, no ambiguous splits, no after-the-fact reassignment.
 3. Audit every business mutation with actor, timestamp, device, and field-level delta; deletes are tombstones, never row removals.
 4. Survive any network outage indefinitely; the full feature surface works offline.
@@ -151,11 +152,11 @@ Status bar (bottom of every page): sync status pill, current user + role, langua
 /                                redirect by role: superadmin -> /reception
                                                    receptionist -> /reception
                                                    accountant -> /accounting
-/reception                       receptionist, superadmin
-  /reception/new
-  /reception/visits
-  /reception/visits/:id
-  /reception/shifts
+/reception                       receptionist, superadmin   (Checks Grid)
+  /reception/checks/:slug                                       (Check Workspace)
+  /reception/checks/:slug/new                                   (New Visit)
+  /reception/visits/:id                                         (Visit Detail)
+  /reception/shifts                                             (Operator Shifts)
 /accounting                      accountant, superadmin
   /accounting                    dashboard
   /accounting/visits
@@ -189,13 +190,13 @@ Status bar (bottom of every page): sync status pill, current user + role, langua
 
 | Module | Pages | Notes |
 |-|-|-|
-| Reception | 4 | New, list, detail, shifts. |
+| Reception | 5 | Checks grid, check workspace, new visit, visit detail, operator shifts. |
 | Accounting | 7 | Dashboard, visits list + detail, doctors list + detail, operators list + detail, daily close. |
 | Inventory | 3 | List, item detail, adjust. |
 | Admin | 11 | Users list + detail, check-types list + detail, doctors list + detail, operators list + detail, inventory list + detail, settings. |
 | Audit | 1 | Search/filter page. |
 | Auth/system | 2 | Login, no-access. |
-| **Total** | **28** | Drives milestone sizing. |
+| **Total** | **29** | Drives milestone sizing. |
 
 ### §3.3 Navigation Pattern
 
@@ -210,11 +211,11 @@ Status bar (bottom of every page): sync status pill, current user + role, langua
 
 ### §4.1 Lock-Then-Snapshot Pricing
 
-A `visits` row is `draft` until the receptionist clicks Lock. At lock time the system writes price snapshots into every `visit_lines` row: `price_snapshot`, `dye_cost_snapshot`, `report_cost_snapshot`, `doctor_cut_snapshot`, `operator_cut_snapshot`, `internal_pct_snapshot`. Subsequent admin changes to `check_types`, `check_subtypes`, `doctor_check_pricing`, or `settings` do NOT mutate locked lines. Accounting reports always sum the snapshots, never the live prices. See §6.1 (visit_lines) and §8.1 (lock workflow).
+A `visits` row is `draft` until the receptionist clicks Lock. At lock time the system writes the price snapshots onto the visit row itself: `price_snapshot_iqd`, `dye_cost_snapshot_iqd`, `report_cost_snapshot_iqd`, `doctor_cut_snapshot_iqd`, `operator_cut_snapshot_iqd`, `internal_pct_snapshot`, `total_amount_iqd_snapshot`. Subsequent admin changes to `check_types`, `check_subtypes`, `doctor_check_pricing`, or `settings` do NOT mutate locked visits. Accounting reports always read the snapshots, never the live prices. See §6.1.10 (visits) and §8.1 (lock workflow).
 
 ### §4.2 Operator Attribution at Lock
 
-A draft visit may be saved with no operator. Lock requires every line to have an `operator_id` chosen from the set of operators who are currently clocked in (`operator_shifts.check_in_at <= now AND check_out_at IS NULL`) and whose specialties (`operator_specialties`) cover that line's `check_type_id`. If the qualifying set is empty, lock fails with the domain error `OperatorAttribution::NoQualifiedOperator` and the UI shows "No qualified operator on shift for <check type>." Lock NEVER auto-assigns silently.
+A draft visit may be saved with no operator. Lock requires the visit to have an `operator_id` chosen from the set of operators who are currently clocked in (`operator_shifts.check_in_at <= now AND check_out_at IS NULL`) and whose specialties (`operator_specialties`) cover the visit's `check_type_id`. If the qualifying set is empty, lock fails with the domain error `OperatorAttribution::NoQualifiedOperator` and the UI shows "No qualified operator on shift for <check type>." Lock NEVER auto-assigns silently.
 
 ### §4.3 Audit-First Writes
 
@@ -222,7 +223,7 @@ Every domain service performs writes through a transactional `with_audit(actor, 
 
 ### §4.4 Inventory Consumption Ledger
 
-Stock counts are derived. `inventory_items.quantity_on_hand` is materialized for fast reads, but every change is recorded as an `inventory_adjustments` row with reason in `{receive, writeoff, count_correction, consume_visit_line}`. On visit lock, the system iterates the line's matching `inventory_consumption_map` rows and writes one negative-delta `inventory_adjustments` row per consumed item, all in the same transaction as the line. Voiding a visit writes offsetting positive-delta rows referencing the same `visit_line_id`. The materialized `quantity_on_hand` is recomputed in the same transaction.
+Stock counts are derived. `inventory_items.quantity_on_hand` is materialized for fast reads, but every change is recorded as an `inventory_adjustments` row with reason in `{receive, writeoff, count_correction, consume_visit}`. On visit lock, the system iterates the visit's matching `inventory_consumption_map` rows and writes one negative-delta `inventory_adjustments` row per consumed item, all in the same transaction as the lock. Voiding a visit writes offsetting positive-delta rows referencing the same `visit_id`. The materialized `quantity_on_hand` is recomputed in the same transaction.
 
 ### §4.5 Bilingual-by-Construction
 
@@ -449,7 +450,7 @@ model CheckType {
   doctorPricings        DoctorCheckPricing[]
   inventoryConsumption  InventoryConsumptionMap[]
   operatorSpecialties   OperatorSpecialty[]
-  visitLines            VisitLine[]
+  visits                Visit[]
 
   @@map("check_types")
 }
@@ -521,7 +522,7 @@ model CheckSubtype {
   checkType             CheckType                 @relation(fields: [checkTypeId], references: [id])
   doctorPricings        DoctorCheckPricing[]
   inventoryConsumption  InventoryConsumptionMap[]
-  visitLines            VisitLine[]
+  visits                Visit[]
 
   @@map("check_subtypes")
 }
@@ -531,13 +532,13 @@ model CheckSubtype {
 
 1. Parent `check_types.has_subtypes` must equal `1` at write time (enforced in service layer).
 2. `price_iqd` is non-negative.
-3. Soft-delete is allowed if no non-deleted `visit_lines` reference the subtype with `status != voided`.
+3. Soft-delete is allowed if no non-deleted `visits` reference the subtype with `status != voided`.
 
 **Sync Policy:** `last-write-wins`.
 
 #### §6.1.4 doctors
 
-An external referring doctor. The "house"/internal case is NOT a row — it is the absence of a `doctor_id` on a visit line.
+An external referring doctor. The "house"/internal case is NOT a row — it is the absence of a `doctor_id` on a visit.
 
 **Core Fields**
 
@@ -591,7 +592,7 @@ model Doctor {
   entityId        String    @map("entity_id")
 
   pricings    DoctorCheckPricing[]
-  visitLines  VisitLine[]
+  visits      Visit[]
 
   @@index([entityId, name])
   @@map("doctors")
@@ -687,7 +688,7 @@ enum CutKind {
 2. If the parent `check_types.has_subtypes = 1`, then `check_subtype_id` must be non-null.
 3. If the parent `check_types.has_subtypes = 0`, then `check_subtype_id` must be null.
 4. `cut_kind = 'pct'` constrains `cut_value` to `[0, 100]`.
-5. `price_override_iqd`, when present, replaces the type/subtype price ONLY for visit lines booked under this doctor; type/subtype default applies otherwise.
+5. `price_override_iqd`, when present, replaces the type/subtype price ONLY for visits booked under this doctor; type/subtype default applies otherwise.
 
 **Sync Policy:** `last-write-wins`.
 
@@ -746,7 +747,7 @@ model Operator {
 
   specialties OperatorSpecialty[]
   shifts      OperatorShift[]
-  visitLines  VisitLine[]
+  visits      Visit[]
 
   @@map("operators")
 }
@@ -951,7 +952,7 @@ model Patient {
 
 #### §6.1.10 visits
 
-The header of a patient encounter. Holds status and totals snapshot.
+A patient encounter for exactly one check. Carries the patient header, the chosen check, the dye/report flags, the doctor and operator, and all financial snapshots taken at lock. v1 is single-check by design; multi-check bookings are Horizon-1 (see §11.1).
 
 **Core Fields**
 
@@ -960,11 +961,23 @@ The header of a patient encounter. Holds status and totals snapshot.
 | patient_id | TEXT FK | yes | no |  |
 | status | TEXT | yes | yes | `draft`, `locked`, `voided`. |
 | receptionist_user_id | TEXT FK | yes | no | who created the visit. |
+| check_type_id | TEXT FK | yes | yes | the check this visit is for. |
+| check_subtype_id | TEXT FK | conditional | yes | required when `check_types.has_subtypes = 1`. |
+| doctor_id | TEXT FK | no | yes | NULL = house (in-house). |
+| operator_id | TEXT FK | conditional | no | required at lock; chosen from clocked-in operators with matching specialty. |
+| dye | INTEGER | yes | yes | 0 or 1; gated by `check_types.dye_supported`. |
+| report | INTEGER | yes | yes | 0 or 1; gated by `check_types.report_supported`. |
 | locked_at | TEXT | no | yes | RFC3339; set on `draft -> locked`. |
 | voided_at | TEXT | no | yes | RFC3339; set on `locked -> voided`. |
 | voided_by_user_id | TEXT FK | conditional | no | required when voided. |
 | void_reason | TEXT | conditional | no | required when voided. |
-| total_amount_iqd_snapshot | INTEGER | conditional | no | sum across lines at lock time. |
+| price_snapshot_iqd | INTEGER | conditional | no | set at lock; NULL while draft. |
+| dye_cost_snapshot_iqd | INTEGER | conditional | no | set at lock; 0 when `dye = 0`. |
+| report_cost_snapshot_iqd | INTEGER | conditional | no | set at lock; 0 when `report = 0`. |
+| doctor_cut_snapshot_iqd | INTEGER | conditional | no | set at lock. |
+| operator_cut_snapshot_iqd | INTEGER | conditional | no | set at lock. |
+| internal_pct_snapshot | INTEGER | conditional | no | set at lock when `doctor_id IS NULL`; captures `settings.internal_doctor_pct`. |
+| total_amount_iqd_snapshot | INTEGER | conditional | no | `price + dye_cost + report_cost` at lock. |
 
 **Local Schema (SQLite)**
 
@@ -974,10 +987,22 @@ CREATE TABLE visits (
   patient_id                  TEXT NOT NULL REFERENCES patients(id),
   status                      TEXT NOT NULL CHECK (status IN ('draft','locked','voided')),
   receptionist_user_id        TEXT NOT NULL REFERENCES users(id),
+  check_type_id               TEXT NOT NULL REFERENCES check_types(id),
+  check_subtype_id            TEXT NULL REFERENCES check_subtypes(id),
+  doctor_id                   TEXT NULL REFERENCES doctors(id),
+  operator_id                 TEXT NULL REFERENCES operators(id),
+  dye                         INTEGER NOT NULL DEFAULT 0 CHECK (dye IN (0,1)),
+  report                      INTEGER NOT NULL DEFAULT 0 CHECK (report IN (0,1)),
   locked_at                   TEXT NULL,
   voided_at                   TEXT NULL,
   voided_by_user_id           TEXT NULL REFERENCES users(id),
   void_reason                 TEXT NULL,
+  price_snapshot_iqd          INTEGER NULL,
+  dye_cost_snapshot_iqd       INTEGER NULL,
+  report_cost_snapshot_iqd    INTEGER NULL,
+  doctor_cut_snapshot_iqd     INTEGER NULL,
+  operator_cut_snapshot_iqd   INTEGER NULL,
+  internal_pct_snapshot       INTEGER NULL,
   total_amount_iqd_snapshot   INTEGER NULL,
   created_at                  TEXT NOT NULL,
   updated_at                  TEXT NOT NULL,
@@ -988,12 +1013,25 @@ CREATE TABLE visits (
   origin_device_id            TEXT NULL,
   entity_id                   TEXT NOT NULL,
   CHECK (
-    (status = 'draft'  AND locked_at IS NULL AND voided_at IS NULL) OR
-    (status = 'locked' AND locked_at IS NOT NULL AND voided_at IS NULL AND total_amount_iqd_snapshot IS NOT NULL) OR
-    (status = 'voided' AND locked_at IS NOT NULL AND voided_at IS NOT NULL AND voided_by_user_id IS NOT NULL AND void_reason IS NOT NULL)
+    (status = 'draft'  AND locked_at IS NULL AND voided_at IS NULL
+                       AND price_snapshot_iqd IS NULL
+                       AND total_amount_iqd_snapshot IS NULL) OR
+    (status = 'locked' AND locked_at IS NOT NULL AND voided_at IS NULL
+                       AND operator_id IS NOT NULL
+                       AND price_snapshot_iqd IS NOT NULL
+                       AND dye_cost_snapshot_iqd IS NOT NULL
+                       AND report_cost_snapshot_iqd IS NOT NULL
+                       AND doctor_cut_snapshot_iqd IS NOT NULL
+                       AND operator_cut_snapshot_iqd IS NOT NULL
+                       AND total_amount_iqd_snapshot IS NOT NULL) OR
+    (status = 'voided' AND locked_at IS NOT NULL AND voided_at IS NOT NULL
+                       AND voided_by_user_id IS NOT NULL AND void_reason IS NOT NULL)
   )
 );
-CREATE INDEX visits_status_date ON visits(entity_id, status, locked_at);
+CREATE INDEX visits_status_date    ON visits(entity_id, status, locked_at);
+CREATE INDEX visits_check_type     ON visits(entity_id, check_type_id, locked_at) WHERE deleted_at IS NULL;
+CREATE INDEX visits_doctor         ON visits(entity_id, doctor_id, locked_at)     WHERE deleted_at IS NULL AND doctor_id IS NOT NULL;
+CREATE INDEX visits_operator       ON visits(entity_id, operator_id, locked_at)   WHERE deleted_at IS NULL AND operator_id IS NOT NULL;
 ```
 
 **Server Schema (Prisma)**
@@ -1004,10 +1042,22 @@ model Visit {
   patientId                 String       @map("patient_id")
   status                    VisitStatus
   receptionistUserId        String       @map("receptionist_user_id")
+  checkTypeId               String       @map("check_type_id")
+  checkSubtypeId            String?      @map("check_subtype_id")
+  doctorId                  String?      @map("doctor_id")
+  operatorId                String?      @map("operator_id")
+  dye                       Boolean      @default(false)
+  report                    Boolean      @default(false)
   lockedAt                  DateTime?    @map("locked_at") @db.Timestamptz
   voidedAt                  DateTime?    @map("voided_at") @db.Timestamptz
   voidedByUserId            String?      @map("voided_by_user_id")
   voidReason                String?      @map("void_reason")
+  priceSnapshotIqd          Int?         @map("price_snapshot_iqd")
+  dyeCostSnapshotIqd        Int?         @map("dye_cost_snapshot_iqd")
+  reportCostSnapshotIqd     Int?         @map("report_cost_snapshot_iqd")
+  doctorCutSnapshotIqd      Int?         @map("doctor_cut_snapshot_iqd")
+  operatorCutSnapshotIqd    Int?         @map("operator_cut_snapshot_iqd")
+  internalPctSnapshot       Int?         @map("internal_pct_snapshot")
   totalAmountIqdSnapshot    Int?         @map("total_amount_iqd_snapshot")
   createdAt                 DateTime     @map("created_at") @db.Timestamptz
   updatedAt                 DateTime     @map("updated_at") @db.Timestamptz
@@ -1017,11 +1067,18 @@ model Visit {
   originDeviceId            String?      @map("origin_device_id")
   entityId                  String       @map("entity_id")
 
-  patient            Patient     @relation(fields: [patientId], references: [id])
-  receptionist       User        @relation("VisitReceptionist", fields: [receptionistUserId], references: [id])
-  voidedBy           User?       @relation("VisitVoider", fields: [voidedByUserId], references: [id])
-  lines              VisitLine[]
+  patient        Patient       @relation(fields: [patientId], references: [id])
+  receptionist   User          @relation("VisitReceptionist", fields: [receptionistUserId], references: [id])
+  voidedBy       User?         @relation("VisitVoider",      fields: [voidedByUserId], references: [id])
+  checkType      CheckType     @relation(fields: [checkTypeId], references: [id])
+  checkSubtype   CheckSubtype? @relation(fields: [checkSubtypeId], references: [id])
+  doctor         Doctor?       @relation(fields: [doctorId], references: [id])
+  operator       Operator?     @relation(fields: [operatorId], references: [id])
+  inventoryAdjustments InventoryAdjustment[]
 
+  @@index([entityId, checkTypeId, lockedAt])
+  @@index([entityId, doctorId, lockedAt])
+  @@index([entityId, operatorId, lockedAt])
   @@map("visits")
 }
 
@@ -1035,9 +1092,13 @@ enum VisitStatus {
 **Invariants**
 
 1. Status transitions follow the state machine below; no other transitions allowed.
-2. A locked visit must have at least one non-deleted `visit_lines` row.
-3. Total snapshot equals the sum of `(price_snapshot + dye_cost_snapshot? + report_cost_snapshot?)` across non-deleted lines at lock time.
-4. Voiding requires `voided_by_user_id` to have role `superadmin`.
+2. If parent type has subtypes (`check_types.has_subtypes = 1`), `check_subtype_id` must be non-null.
+3. If parent type has no subtypes, `check_subtype_id` must be null.
+4. `dye = 1` requires `check_types.dye_supported = 1`.
+5. `report = 1` requires `check_types.report_supported = 1`.
+6. At lock: `operator_id` non-null; all `*_snapshot_iqd` fields non-null; `internal_pct_snapshot` non-null iff `doctor_id IS NULL`; `total_amount_iqd_snapshot = price_snapshot_iqd + dye_cost_snapshot_iqd + report_cost_snapshot_iqd`.
+7. While draft, all snapshot fields are null.
+8. Voiding requires `voided_by_user_id` to have role `superadmin`.
 
 **State Machine**
 
@@ -1052,121 +1113,19 @@ enum VisitStatus {
 
 | From | To | Trigger | Side Effects |
 |-|-|-|-|
-| n/a | draft | receptionist creates visit | row inserted; audit `create`. |
-| draft | draft | line add/edit/remove | line writes; total recomputed in UI; audit per line write. |
-| draft | (deleted) | receptionist discards | soft-delete; lines cascade; audit `soft_delete`. |
+| n/a | draft | receptionist creates visit on a check workspace | row inserted with `check_type_id` set; audit `create`. |
+| draft | draft | receptionist edits subtype/doctor/dye/report | row update; audit `update` with delta. |
+| draft | (deleted) | receptionist discards | soft-delete; audit `soft_delete`. |
 | draft | locked | receptionist clicks Lock and validation passes | snapshots written; inventory consumed; receipt generated; audit `lock`. |
 | locked | voided | superadmin voids | offsetting inventory adjustments; audit `void` with reason. |
-
-**Sync Policy:** `manual`. Rationale: financial-critical. Two devices editing the same draft, or two devices voiding the same locked visit, are real risks that must surface to a human resolver rather than auto-merging.
-
-#### §6.1.11 visit_lines
-
-One row per check on a visit. Carries all snapshots taken at lock.
-
-**Core Fields**
-
-| Field | Type | Required | Searchable | Notes |
-|-|-|-|-|-|
-| visit_id | TEXT FK | yes | no |  |
-| check_type_id | TEXT FK | yes | no |  |
-| check_subtype_id | TEXT FK | conditional | no | required when type has subtypes. |
-| doctor_id | TEXT FK | no | yes | NULL = house. |
-| operator_id | TEXT FK | conditional | no | required at lock time. |
-| dye | INTEGER | yes | no | 0 or 1. |
-| report | INTEGER | yes | no | 0 or 1. |
-| price_snapshot_iqd | INTEGER | conditional | no | set at lock; NULL while draft. |
-| dye_cost_snapshot_iqd | INTEGER | conditional | no |  |
-| report_cost_snapshot_iqd | INTEGER | conditional | no |  |
-| doctor_cut_snapshot_iqd | INTEGER | conditional | no |  |
-| operator_cut_snapshot_iqd | INTEGER | conditional | no |  |
-| internal_pct_snapshot | INTEGER | conditional | no | set when doctor_id IS NULL at lock. |
-| sort_order | INTEGER | yes | no | line ordering on receipt. |
-
-**Local Schema (SQLite)**
-
-```sql
-CREATE TABLE visit_lines (
-  id                          TEXT PRIMARY KEY,
-  visit_id                    TEXT NOT NULL REFERENCES visits(id),
-  check_type_id               TEXT NOT NULL REFERENCES check_types(id),
-  check_subtype_id            TEXT NULL REFERENCES check_subtypes(id),
-  doctor_id                   TEXT NULL REFERENCES doctors(id),
-  operator_id                 TEXT NULL REFERENCES operators(id),
-  dye                         INTEGER NOT NULL DEFAULT 0 CHECK (dye IN (0,1)),
-  report                      INTEGER NOT NULL DEFAULT 0 CHECK (report IN (0,1)),
-  price_snapshot_iqd          INTEGER NULL,
-  dye_cost_snapshot_iqd       INTEGER NULL,
-  report_cost_snapshot_iqd    INTEGER NULL,
-  doctor_cut_snapshot_iqd     INTEGER NULL,
-  operator_cut_snapshot_iqd   INTEGER NULL,
-  internal_pct_snapshot       INTEGER NULL,
-  sort_order                  INTEGER NOT NULL DEFAULT 0,
-  created_at                  TEXT NOT NULL,
-  updated_at                  TEXT NOT NULL,
-  deleted_at                  TEXT NULL,
-  version                     INTEGER NOT NULL DEFAULT 0,
-  dirty                       INTEGER NOT NULL DEFAULT 1,
-  last_synced_at              TEXT NULL,
-  origin_device_id            TEXT NULL,
-  entity_id                   TEXT NOT NULL
-);
-CREATE INDEX visit_lines_visit ON visit_lines(visit_id) WHERE deleted_at IS NULL;
-```
-
-**Server Schema (Prisma)**
-
-```prisma
-model VisitLine {
-  id                          String        @id
-  visitId                     String        @map("visit_id")
-  checkTypeId                 String        @map("check_type_id")
-  checkSubtypeId              String?       @map("check_subtype_id")
-  doctorId                    String?       @map("doctor_id")
-  operatorId                  String?       @map("operator_id")
-  dye                         Boolean       @default(false)
-  report                      Boolean       @default(false)
-  priceSnapshotIqd            Int?          @map("price_snapshot_iqd")
-  dyeCostSnapshotIqd          Int?          @map("dye_cost_snapshot_iqd")
-  reportCostSnapshotIqd       Int?          @map("report_cost_snapshot_iqd")
-  doctorCutSnapshotIqd        Int?          @map("doctor_cut_snapshot_iqd")
-  operatorCutSnapshotIqd      Int?          @map("operator_cut_snapshot_iqd")
-  internalPctSnapshot         Int?          @map("internal_pct_snapshot")
-  sortOrder                   Int           @default(0) @map("sort_order")
-  createdAt                   DateTime      @map("created_at") @db.Timestamptz
-  updatedAt                   DateTime      @map("updated_at") @db.Timestamptz
-  deletedAt                   DateTime?     @map("deleted_at") @db.Timestamptz
-  version                     Int           @default(0)
-  lastSyncedAt                DateTime?     @map("last_synced_at") @db.Timestamptz
-  originDeviceId              String?       @map("origin_device_id")
-  entityId                    String        @map("entity_id")
-
-  visit         Visit         @relation(fields: [visitId], references: [id])
-  checkType     CheckType     @relation(fields: [checkTypeId], references: [id])
-  checkSubtype  CheckSubtype? @relation(fields: [checkSubtypeId], references: [id])
-  doctor        Doctor?       @relation(fields: [doctorId], references: [id])
-  operator      Operator?     @relation(fields: [operatorId], references: [id])
-
-  @@map("visit_lines")
-}
-```
-
-**Invariants**
-
-1. If parent type has subtypes (`check_types.has_subtypes = 1`), `check_subtype_id` must be non-null.
-2. If parent type has no subtypes, `check_subtype_id` must be null.
-3. `dye = 1` requires `check_types.dye_supported = 1`.
-4. `report = 1` requires `check_types.report_supported = 1`.
-5. At lock: `operator_id` non-null; all `*_snapshot_iqd` fields non-null; `internal_pct_snapshot` non-null iff `doctor_id IS NULL`.
-6. While draft, all snapshot fields are null.
 
 **Money Math (applied at lock)**
 
 ```
-patient_total_for_line = price + (dye ? dye_cost : 0) + (report ? report_cost : 0)
+total_amount = price + (dye ? dye_cost : 0) + (report ? report_cost : 0)
 where:
   price = doctor_check_pricing.price_override_iqd  if doctor_id is set and override exists
-        else check_subtypes.price_iqd              if subtype line
+        else check_subtypes.price_iqd              if subtype visit
         else check_types.base_price_iqd            otherwise
   dye_cost    = settings.dye_cost_iqd
   report_cost = settings.report_cost_iqd
@@ -1183,9 +1142,9 @@ operator_cut     = operators.base_cut_per_check_iqd * (dye ? 2 : 1)
 
 `internal_pct_snapshot` is set ONLY when `doctor_id IS NULL` at lock; it captures `settings.internal_doctor_pct` at that moment.
 
-**Sync Policy:** `manual`. Rationale: financial-critical; co-edits or void races must surface to a human.
+**Sync Policy:** `manual`. Rationale: financial-critical. Two devices editing the same draft, or two devices voiding the same locked visit, are real risks that must surface to a human resolver rather than auto-merging.
 
-#### §6.1.12 settings
+#### §6.1.11 settings
 
 A singleton key-value table for global tunables.
 
@@ -1241,8 +1200,8 @@ enum SettingType {
 
 | Key | Type | Notes |
 |-|-|-|
-| `dye_cost_iqd` | int | non-negative IQD per line with `dye=1`. |
-| `report_cost_iqd` | int | non-negative IQD per line with `report=1`. |
+| `dye_cost_iqd` | int | non-negative IQD added to a visit when `dye=1`. |
+| `report_cost_iqd` | int | non-negative IQD added to a visit when `report=1`. |
 | `internal_doctor_pct` | int | percent in `[0,100]`. Applied to house lines only. |
 | `idle_lock_minutes` | int | default 10. |
 | `arabic_numerals` | bool | render Eastern-Arabic digits in Arabic locale; default `false`. |
@@ -1258,7 +1217,7 @@ enum SettingType {
 
 **Sync Policy:** `manual`. Rationale: settings flips have business consequences; concurrent edits must be resolved by an admin.
 
-#### §6.1.13 inventory_items
+#### §6.1.12 inventory_items
 
 A consumable or supply item.
 
@@ -1328,7 +1287,7 @@ model InventoryItem {
 
 **Sync Policy:** `last-write-wins` for the item metadata fields. The `quantity_on_hand` is recomputed locally from `inventory_adjustments` on every pull, so its sync value is informational only.
 
-#### §6.1.14 inventory_consumption_map
+#### §6.1.13 inventory_consumption_map
 
 Maps a check type or specific subtype to the items consumed when a line of that type locks.
 
@@ -1402,7 +1361,7 @@ model InventoryConsumptionMap {
 
 **Sync Policy:** `last-write-wins`.
 
-#### §6.1.15 inventory_adjustments
+#### §6.1.14 inventory_adjustments
 
 Append-only ledger of every change to stock counts.
 
@@ -1412,8 +1371,8 @@ Append-only ledger of every change to stock counts.
 |-|-|-|-|-|
 | item_id | TEXT FK | yes | no |  |
 | delta | INTEGER | yes | no | signed; positive on receive/positive correction, negative on consume/writeoff. |
-| reason | TEXT | yes | yes | `receive`, `writeoff`, `count_correction`, `consume_visit_line`. |
-| visit_line_id | TEXT FK | conditional | no | required for `consume_visit_line`. |
+| reason | TEXT | yes | yes | `receive`, `writeoff`, `count_correction`, `consume_visit`. |
+| visit_id | TEXT FK | conditional | no | required for `consume_visit`. |
 | note | TEXT | no | no |  |
 | by_user_id | TEXT FK | yes | no |  |
 
@@ -1424,8 +1383,8 @@ CREATE TABLE inventory_adjustments (
   id                TEXT PRIMARY KEY,
   item_id           TEXT NOT NULL REFERENCES inventory_items(id),
   delta             INTEGER NOT NULL,
-  reason            TEXT NOT NULL CHECK (reason IN ('receive','writeoff','count_correction','consume_visit_line')),
-  visit_line_id     TEXT NULL REFERENCES visit_lines(id),
+  reason            TEXT NOT NULL CHECK (reason IN ('receive','writeoff','count_correction','consume_visit')),
+  visit_id          TEXT NULL REFERENCES visits(id),
   note              TEXT NULL,
   by_user_id        TEXT NOT NULL REFERENCES users(id),
   created_at        TEXT NOT NULL,
@@ -1436,10 +1395,10 @@ CREATE TABLE inventory_adjustments (
   last_synced_at    TEXT NULL,
   origin_device_id  TEXT NULL,
   entity_id         TEXT NOT NULL,
-  CHECK (reason != 'consume_visit_line' OR visit_line_id IS NOT NULL)
+  CHECK (reason != 'consume_visit' OR visit_id IS NOT NULL)
 );
-CREATE INDEX inventory_adjustments_item ON inventory_adjustments(item_id, created_at) WHERE deleted_at IS NULL;
-CREATE INDEX inventory_adjustments_visit_line ON inventory_adjustments(visit_line_id) WHERE visit_line_id IS NOT NULL;
+CREATE INDEX inventory_adjustments_item  ON inventory_adjustments(item_id, created_at) WHERE deleted_at IS NULL;
+CREATE INDEX inventory_adjustments_visit ON inventory_adjustments(visit_id) WHERE visit_id IS NOT NULL;
 ```
 
 **Server Schema (Prisma)**
@@ -1450,7 +1409,7 @@ model InventoryAdjustment {
   itemId          String              @map("item_id")
   delta           Int
   reason          AdjustmentReason
-  visitLineId     String?             @map("visit_line_id")
+  visitId         String?             @map("visit_id")
   note            String?
   byUserId        String              @map("by_user_id")
   createdAt       DateTime            @map("created_at") @db.Timestamptz
@@ -1462,7 +1421,7 @@ model InventoryAdjustment {
   entityId        String              @map("entity_id")
 
   item       InventoryItem @relation(fields: [itemId], references: [id])
-  visitLine  VisitLine?    @relation(fields: [visitLineId], references: [id])
+  visit      Visit?        @relation(fields: [visitId], references: [id])
   byUser     User          @relation(fields: [byUserId], references: [id])
 
   @@map("inventory_adjustments")
@@ -1472,21 +1431,21 @@ enum AdjustmentReason {
   receive
   writeoff
   count_correction
-  consume_visit_line
+  consume_visit
 }
 ```
 
 **Invariants**
 
-1. Adjustments are never edited or hard-deleted. Voiding a visit writes new offsetting rows referencing the original `visit_line_id`.
-2. `reason = 'consume_visit_line'` requires `visit_line_id` non-null and `delta` non-positive.
+1. Adjustments are never edited or hard-deleted. Voiding a visit writes new offsetting rows referencing the same `visit_id`.
+2. `reason = 'consume_visit'` requires `visit_id` non-null and `delta` non-positive.
 3. `reason = 'receive'` requires `delta > 0`.
 4. `reason = 'writeoff'` requires `delta < 0`.
 5. `reason = 'count_correction'` allows any non-zero delta.
 
 **Sync Policy:** `additive-only`.
 
-#### §6.1.16 audit_log
+#### §6.1.15 audit_log
 
 Universal append-only log of every business mutation.
 
@@ -1599,10 +1558,10 @@ settings (singleton kv)
 
 ```
 patients -< visits >- users (receptionist)
-visits -< visit_lines >- check_types
-                       \- check_subtypes
-                       \- doctors (nullable: null = house)
-                       \- operators
+visits >- check_types
+visits >- check_subtypes (nullable; required when type has subtypes)
+visits >- doctors        (nullable; null = house)
+visits >- operators      (required at lock)
 visits -- voided_by --- users
 ```
 
@@ -1611,14 +1570,14 @@ visits -- voided_by --- users
 ```
 operators -< operator_shifts >- users (check_in_by, check_out_by)
 operators -< operator_specialties >- check_types
-operators -< visit_lines (operator_id)
+operators -< visits (operator_id)
 ```
 
 **Inventory Graph**
 
 ```
 inventory_items -< inventory_adjustments >- users (by_user_id)
-inventory_adjustments -- (consume) --- visit_lines
+inventory_adjustments -- (consume) --- visits
 inventory_items -< inventory_consumption_map >- check_types
                                               \- check_subtypes
 ```
@@ -1636,30 +1595,70 @@ audit_log >- (any entity, entity_id) -- denormalized; no FK, query by string mat
 
 ### §7.1 Reception
 
-**Purpose:** front-desk operators capture patient visits, manage operator shifts, and lock visits with a printed receipt.
+**Purpose:** front-desk operators capture patient visits, manage operator shifts, and lock visits with a printed receipt. The Reception module is **per-check**: the receptionist first picks which check the patient is here for, then works inside that check's workspace. A visit is exactly one check.
 
-#### §7.1.1 New Visit (`/reception/new`)
+#### §7.1.1 Checks Grid (`/reception`)
+
+The Reception landing page. A grid of cards, one per active `check_types` row, each showing the check name (`name_ar` primary, `(name_en)` if locale is `en`), the count of today's locked visits for that check, and a sample subtype list when applicable. Clicking a card enters that check's workspace at `/reception/checks/:check-slug`.
 
 ASCII layout:
 
 ```
 +--------------------------------------------------------------------------+
-| Patient name (اسم رباعي):  [_______________________________________]     |
+| Reception                                              [Operator shifts] |
 |                                                                          |
-| Lines                                                       [+ Add line] |
-| +--------------------------------------------------------------------+   |
-| | # | Check          | Subtype  | Doctor    | Dye | Report | Total   |   |
-| |---|----------------|----------|-----------|-----|--------|---------|   |
-| | 1 | سونار          | -        | (empty)   | [ ] | [ ]    | 25,000  |   |
-| | 2 | مفراس          | بدون صبغة| Dr.Ahmed  | [ ] | [x]    | 110,000 |   |
-| +--------------------------------------------------------------------+   |
+| What is the patient here for?                                            |
+| +-------------+  +-------------+  +-------------+  +-------------+       |
+| | سونار       |  | مفراس       |  | رنين        |  | صدى القلب   |  ... |
+| | 12 today    |  |  8 today    |  |  3 today    |  |  2 today    |       |
+| +-------------+  +-------------+  +-------------+  +-------------+       |
++--------------------------------------------------------------------------+
+```
+
+#### §7.1.2 Check Workspace (`/reception/checks/:check-slug`)
+
+Per-check workspace. Header shows the active check name and a back link to the grid. Body shows today's visits filtered to this check, plus a "+ New visit" button. Filters apply within the workspace (subtype, doctor, status, date).
+
+Columns: `#`, `Created at`, `Patient`, `Subtype`, `Doctor`, `Operator`, `Dye`, `Report`, `Total IQD`, `Status pill`, `Pending sync indicator`, `Actions`.
+
+Sort: `created_at DESC` default.
+
+Pagination: 50 rows per page; cursor-based scroll on local SQLite.
+
+Bulk actions: none in v1.
+
+#### §7.1.3 New Visit (`/reception/checks/:check-slug/new`)
+
+Single-check form. The check is locked into the URL — the receptionist cannot change the check from inside this form. To switch checks they back out to the grid.
+
+ASCII layout:
+
+```
++--------------------------------------------------------------------------+
+| New visit  ·  Check: سونار                                  [< Workspace]|
 |                                                                          |
-| Subtotal:                                                  135,000 IQD   |
-| Dye:                                                             0 IQD   |
-| Report:                                                     10,000 IQD   |
-| Total:                                                     135,000 IQD   |
+| Patient (اسم رباعي):  [_______________________________________________]  |
 |                                                                          |
-|                       [ Save draft ]   [ Discard ]   [ Lock & print >> ] |
+| Subtype:                                                                 |
+|   ( ) بدون صبغة     20,000 IQD                                          |
+|   ( ) مع صبغة       30,000 IQD                                          |
+|                                                                          |
+| Doctor:  [search... or leave empty for house]                            |
+|                                                                          |
+| Dye    : [ ] supported                                                   |
+| Report : [ ] supported (+10,000 IQD)                                     |
+|                                                                          |
+| Operator (at lock):  picked from clocked-in operators with this check    |
+|                                                                          |
+| Summary                                                                  |
+|   Price                                                  20,000 IQD      |
+|   Dye                                                         0 IQD      |
+|   Report                                                 10,000 IQD      |
+|   Total                                                  30,000 IQD      |
+|   Doctor cut (preview)                                    6,000 IQD      |
+|   Operator cut (preview)                                  3,000 IQD      |
+|                                                                          |
+|                  [ Save draft ]   [ Discard ]   [ Lock & print >> ]      |
 +--------------------------------------------------------------------------+
 ```
 
@@ -1668,54 +1667,42 @@ ASCII layout:
 | Field | Validation | Notes |
 |-|-|-|
 | Patient name | Zod: `z.string().trim().min(2).max(120)`. | Single-line; FTS5 search backs autocompletion of recent patients (last 30 days). |
-| Check type | required per line; from non-deleted active types. | UI surfaces `name_ar` first, then `(name_en)` if active locale is `en`. |
-| Subtype | required if type has subtypes. | Hidden when type has no subtypes. |
-| Doctor | optional autocomplete; null = house. | Live FTS over `doctors_fts`; empty box = house line. |
+| Check type | locked to the workspace's `check_type_id`. | Not editable in the form. |
+| Subtype | required if `check_types.has_subtypes = 1`; otherwise hidden. | Radio cards listing non-deleted subtypes with prices. |
+| Doctor | optional autocomplete; null = house. | Live FTS over `doctors_fts`; empty box = house. |
 | Dye | checkbox; gated by `check_types.dye_supported`. | Disabled with tooltip if not supported. |
 | Report | checkbox; gated by `check_types.report_supported`. | Disabled with tooltip if not supported. |
-| Operator picker | shown only at lock time, not in line editor. | Lazy-loaded from currently-clocked-in operators with matching specialty per line. |
+| Operator picker | shown at lock time. | Loaded from currently-clocked-in operators with `operator_specialties` covering the workspace's check type. |
 
 **Actions**
 
 | Action | Trigger | Permission | Side Effects | Audit Event |
 |-|-|-|-|-|
-| Create visit | "Save draft" or implicit save on first line add | receptionist, superadmin | inserts `visits` (status=draft) and `visit_lines`. | `create` per row. |
-| Add line | "+ Add line" | same | inserts `visit_lines`. | `create`. |
-| Edit line | inline | same (only on draft) | updates `visit_lines`. | `update` with delta. |
-| Remove line | row delete | same (only on draft) | soft-deletes `visit_lines`. | `soft_delete`. |
-| Discard visit | "Discard" | same | soft-deletes visit + lines. | `soft_delete`. |
-| Lock visit | "Lock & print" | same | snapshots, inventory consumption, receipt write. See §8.1. | `lock` + per-line snapshot delta. |
+| Create visit | "Save draft" or implicit save on first field commit | receptionist, superadmin | inserts `visits` (status=draft, `check_type_id` set). | `create`. |
+| Edit visit | inline / form save | same (only on draft) | updates `visits`. | `update` with delta. |
+| Discard visit | "Discard" | same | soft-deletes `visits`. | `soft_delete`. |
+| Lock visit | "Lock & print" | same | snapshots written to `visits`; inventory consumption; receipt write. See §8.1. | `lock` with snapshot delta. |
 
 **States**
 
-- **Empty:** "No lines yet — add one to get started" placeholder.
-- **Loading:** skeleton rows in the lines table when fetching reference data.
+- **Empty:** "Fill the patient name to start a visit" placeholder.
+- **Loading:** skeleton rows in the form when fetching reference data.
 - **Error:** inline form error toast for validation; modal for unrecoverable backend errors with retry.
-- **Lock validation failure:** inline list of unmet requirements (no operator on shift for line 2; subtype missing on line 1).
+- **Lock validation failure:** inline list of unmet requirements (no operator on shift for this check; subtype missing).
 
 **Mobile/Compact:** v1 deferred. App is desktop-only.
 
-#### §7.1.2 Visit List (`/reception/visits`)
+#### §7.1.4 Visit Detail (`/reception/visits/:id`)
 
-Today's visits by default. Filters: date (today, yesterday, last 7d, custom range), status (draft/locked/voided), patient name search, doctor search.
+Reachable from any workspace row click. Tabs: `Details`, `Audit`, `Receipts`.
 
-Columns: `#`, `Created at`, `Patient`, `Lines`, `Total IQD`, `Status pill`, `Pending sync indicator`, `Actions`.
-
-Bulk actions: none in v1.
-
-Pagination: 50 rows per page; cursor-based scroll on local SQLite.
-
-#### §7.1.3 Visit Detail (`/reception/visits/:id`)
-
-Tabs: `Lines`, `Audit`, `Receipts`.
-
-- `Lines` tab: read-only after lock; line-by-line breakdown with snapshots and computed cuts.
-- `Audit` tab: filtered audit_log on this visit_id.
+- `Details` tab: read-only after lock; one consolidated panel with check, subtype, doctor, operator, dye/report flags, all snapshots, and computed cuts.
+- `Audit` tab: filtered `audit_log` on this `visit_id`.
 - `Receipts` tab: list of generated receipt PDFs/thermal txts; reprint button.
 
 Superadmin-only action: `Void` button (requires void reason text input).
 
-#### §7.1.4 Operator Shifts (`/reception/shifts`)
+#### §7.1.5 Operator Shifts (`/reception/shifts`)
 
 ASCII:
 
@@ -1748,7 +1735,7 @@ States: empty (no operator on shift), error (failed to write — local DB unavai
 
 ### §7.2 Accounting
 
-**Purpose:** read-only financial reporting with deep filters and drill-down to source visit lines.
+**Purpose:** read-only financial reporting with deep filters and drill-down to source visits.
 
 #### §7.2.1 Dashboard (`/accounting`)
 
@@ -1767,7 +1754,7 @@ Active filters bar:
 
 #### §7.2.2 Visits Report (`/accounting/visits`)
 
-Detailed table of every locked visit line in the date range. Columns:
+Detailed table of every locked visit in the date range. Columns:
 
 `Date | Visit # | Patient | Check | Subtype | Doctor | Operator | Dye | Report | Price | Doctor cut | Operator cut | Net`
 
@@ -1791,19 +1778,19 @@ Drill-down: clicking a row opens `/reception/visits/:id` (read-only for accounta
 
 Aggregate per doctor across the filter window.
 
-Columns: `Doctor | Specialty | Lines | Revenue (lines) | Doctor cut total | Avg cut per line`.
+Columns: `Doctor | Specialty | Visits | Revenue | Doctor cut total | Avg cut per visit`.
 
-Includes a row for `(house)` summing all internal-doctor lines.
+Includes a row for `(house)` summing all internal-doctor visits.
 
-Drill-down: click a doctor → `/accounting/doctors/:id` shows per-check breakdown and a list of source lines.
+Drill-down: click a doctor → `/accounting/doctors/:id` shows per-check breakdown and a list of source visits.
 
 #### §7.2.4 Operator Earnings (`/accounting/operators`)
 
 Aggregate per operator.
 
-Columns: `Operator | Lines | Lines with dye | Operator cut total | Hours on shift | Avg cut per hour`.
+Columns: `Operator | Visits | Visits with dye | Operator cut total | Hours on shift | Avg cut per hour`.
 
-Drill-down: click an operator → `/accounting/operators/:id` shows shifts in the window plus the lines attributed.
+Drill-down: click an operator → `/accounting/operators/:id` shows shifts in the window plus the visits attributed.
 
 #### §7.2.5 Daily Close (`/accounting/daily-close`)
 
@@ -1848,7 +1835,7 @@ Tabs: `Overview`, `Consumption Map`, `Adjustments`, `Audit`.
 
 - **Overview:** current on-hand, threshold, badge.
 - **Consumption Map:** read-only table of `inventory_consumption_map` entries. Edit redirects to admin.
-- **Adjustments:** chronological list of `inventory_adjustments` rows; voided visit-line consumptions render as positive offsetting rows.
+- **Adjustments:** chronological list of `inventory_adjustments` rows; voided visit consumptions render as positive offsetting rows.
 - **Audit:** filtered `audit_log`.
 
 #### §7.3.3 Adjust (`/inventory/adjust`)
@@ -1867,7 +1854,7 @@ Sub-pages, each list+detail:
 - §7.4.3 **Doctors** — list with FTS5 search, detail with `doctor_check_pricing` rows; add/edit pricing per (check type, subtype if applicable).
 - §7.4.4 **Operators** — list, detail with `operator_specialties` and `base_cut_per_check_iqd`. Soft-delete blocked if open shifts exist.
 - §7.4.5 **Inventory (Catalog)** — items + consumption map editing. Items list shares with §7.3.1 but admin sees additional columns (active flag, last edit author).
-- §7.4.6 **Settings** — keyed form for the v1 required keys listed in §6.1.12.
+- §7.4.6 **Settings** — keyed form for the v1 required keys listed in §6.1.11.
 - §7.4.7 **Audit** — global audit search; see §7.5.
 
 Common patterns across admin pages:
@@ -1892,7 +1879,7 @@ ASCII:
 | | At                  | Actor   | Action | Entity     | Entity ID | |
 | |---------------------|---------|--------|------------|-----------| |
 | | 2026-05-07 14:02:11 | Maha    | lock   | visits     | 0192f...  | |
-| | 2026-05-07 14:02:11 | Maha    | create | visit_lines| 0192f...  | |
+| | 2026-05-07 14:02:11 | Maha    | update | inventory_adjustments | 0192f...  | |
 | | 2026-05-07 13:58:02 | Sami    | update | settings   | 0192e...  | |
 | +------------------------------------------------------------------+ |
 | Clicking a row expands the JSON delta inline.                        |
@@ -1911,29 +1898,28 @@ Server-backed when the query exceeds local retention (90 days); local-backed oth
 
 | Property | Description |
 |-|-|
-| Trigger | Receptionist clicks "Lock & print" on `/reception/new`. |
+| Trigger | Receptionist clicks "Lock & print" on `/reception/checks/:check-slug/new` (or on a draft visit detail page). |
 | Surfaces involved | Reception (UI), Tauri (`visits::lock_visit` command), domain service (`VisitService::lock`), inventory service (consumption), audit service. |
 | Frequency | Per visit, typically 30-100 times per day. |
 
 **Step Sequence**
 
-1. Validate the draft: ≥1 non-deleted line, every line has check_type + (subtype if required), every line has the proper dye/report toggles consistent with type capabilities.
-2. Build the operator-eligibility set per line: `qualified_operators(line) = active_shifts ∩ operators_with_specialty(line.check_type)`. If any line has empty set, return `LockError::NoQualifiedOperator(line_id)` and surface in UI.
-3. UI prompts the receptionist to pick an operator per line from the eligibility sets.
-4. Receptionist confirms; client posts `visits::lock_visit { visit_id, line_operator_map }` IPC.
+1. Validate the draft: `check_type_id` set; `check_subtype_id` set iff `check_types.has_subtypes = 1`; `dye` and `report` consistent with type capabilities; patient name non-empty.
+2. Build the operator-eligibility set: `qualified_operators(visit) = active_shifts ∩ operators_with_specialty(visit.check_type_id)`. If empty, return `LockError::NoQualifiedOperator(visit_id)` and surface in UI.
+3. UI prompts the receptionist to pick an operator from the eligibility set.
+4. Receptionist confirms; client posts `visits::lock_visit { visit_id, operator_id }` IPC.
 5. Rust handler opens a SQLite transaction.
-6. For each line: resolve `price` via the §6.1.11 money math; compute `doctor_cut`, `operator_cut`, `internal_pct_snapshot` as applicable; write all `*_snapshot_iqd` columns; set `operator_id`.
-7. Sum lines into `visits.total_amount_iqd_snapshot`; set `status='locked'`, `locked_at = now`.
-8. For each line: iterate `inventory_consumption_map` matching `(check_type_id, check_subtype_id?)` filtered by `on_dye_only ⇒ line.dye = 1`; write one `inventory_adjustments` row per match with negative delta and `reason='consume_visit_line'`.
-9. Recompute `inventory_items.quantity_on_hand` for each affected item (sum of `inventory_adjustments.delta`).
-10. Write one `audit_log` row per change in this transaction (visit update, each line update, each inventory adjustment).
-11. Generate the receipt PDF and thermal text; persist to `$APPDATA/idc-system/receipts/...`.
-12. Commit the transaction. Enqueue outbox entries for each affected row.
-13. UI fires the print dialog (PDF) and prints the thermal text via the configured printer.
+6. Resolve `price` via the §6.1.10 money math; compute `doctor_cut`, `operator_cut`, `internal_pct_snapshot` as applicable; write all `*_snapshot_iqd` columns onto the visit; set `operator_id`; set `total_amount_iqd_snapshot = price + dye_cost + report_cost`; set `status='locked'`, `locked_at = now`.
+7. Iterate `inventory_consumption_map` matching `(check_type_id, check_subtype_id?)` filtered by `on_dye_only ⇒ visit.dye = 1`; write one `inventory_adjustments` row per match with negative delta and `reason='consume_visit'`, `visit_id` set.
+8. Recompute `inventory_items.quantity_on_hand` for each affected item (sum of `inventory_adjustments.delta`).
+9. Write one `audit_log` row per change in this transaction (visit lock with snapshot delta, each inventory adjustment, each item recomputation).
+10. Generate the receipt PDF and thermal text; persist to `$APPDATA/idc-system/receipts/...`.
+11. Commit the transaction. Enqueue outbox entries for each affected row.
+12. UI fires the print dialog (PDF) and prints the thermal text via the configured printer.
 
 **Business Rules**
 
-- All eleven steps run inside a single SQLite transaction. No partial lock state is persistable.
+- All steps 5-11 run inside a single SQLite transaction. No partial lock state is persistable.
 - `now` for timestamps comes from the local clock; the server stamp on push is informational.
 - Receipt generation is part of the transaction in the sense that a failure to render the receipt aborts the lock (the receptionist sees a "lock failed — receipt generator unavailable" error and the visit remains a draft).
 
@@ -1942,9 +1928,9 @@ Server-backed when the query exceeds local retention (90 days); local-backed oth
 | Step | Online | Offline |
 |-|-|-|
 | 1-9 | Same | Same. All local; no network calls. |
-| 10-11 | Same | Same. Receipt is local. |
-| 12 | Outbox enqueues; sync engine ships within seconds. | Outbox enqueues; sync engine waits for connectivity. UI shows the visit row with a "pending sync" pill. |
-| 13 | Same | Same. Print is local. |
+| 10 | Same | Same. Receipt is local. |
+| 11 | Outbox enqueues; sync engine ships within seconds. | Outbox enqueues; sync engine waits for connectivity. UI shows the visit row with a "pending sync" pill. |
+| 12 | Same | Same. Print is local. |
 
 **UI Signals**
 
@@ -1968,9 +1954,9 @@ Server-backed when the query exceeds local retention (90 days); local-backed oth
 4. Verify status is `locked`. If not, return `VoidError::NotLocked`.
 5. Verify caller's role is `superadmin`. If not, return `VoidError::Forbidden`.
 6. Set `status='voided'`, `voided_at = now`, `voided_by_user_id`, `void_reason`.
-7. For each non-deleted `visit_lines` row: read its consume_visit_line adjustments and write offsetting positive-delta `inventory_adjustments` rows referencing the same `visit_line_id` with reason `consume_visit_line` (the system distinguishes by sign, not reason).
+7. Read all `consume_visit` adjustments for this `visit_id`; write offsetting positive-delta `inventory_adjustments` rows referencing the same `visit_id` with reason `consume_visit` (the system distinguishes consumption vs reversal by sign, not by reason).
 8. Recompute `inventory_items.quantity_on_hand` for affected items.
-9. Write one `audit_log` row per touched row (`void` on visit; `update` on each inventory item).
+9. Write one `audit_log` row per touched row (`void` on visit; `create` on each offsetting adjustment; `update` on each affected inventory item).
 10. Commit. Enqueue outbox.
 
 **Business Rules**
@@ -2023,9 +2009,9 @@ Same model — fully local, ships later.
 
 **Step Sequence**
 
-1. Aggregate today's locked visits and their cuts from `visits` + `visit_lines`.
+1. Aggregate today's locked visits and their cuts directly from `visits` snapshot columns.
 2. Aggregate today's voided visits separately.
-3. Aggregate inventory consumption today (sum of `consume_visit_line` adjustments today).
+3. Aggregate inventory consumption today (sum of `consume_visit` adjustments today).
 4. Compute deltas vs prior day.
 5. Render a printable artifact via the receipt generator.
 6. (v1 stops here.) Horizon-1 will add a `daily_close` row signed by the server.
@@ -2047,13 +2033,13 @@ Same model — fully local, ships later.
 
 1. Admin saves edit; service writes the change with audit.
 2. New visits booked after this point use the new price.
-3. Existing `draft` visits do NOT auto-recompute; the receptionist sees a "prices updated — refresh totals?" banner and can refresh per-line. (No silent rewrite.)
+3. Existing `draft` visits do NOT auto-recompute; the receptionist sees a "prices updated — refresh totals?" banner and can refresh on demand. (No silent rewrite.)
 4. Existing `locked` visits NEVER change. Their snapshot fields remain authoritative.
 
 **Business Rules**
 
 - Snapshots are never overwritten by background processes.
-- A "Recalculate draft" button on `/reception/new` re-fetches reference data and recomputes the running total.
+- A "Recalculate draft" button on the new-visit form re-fetches reference data and recomputes the running total.
 
 **Offline Branch**
 
@@ -2075,7 +2061,7 @@ Same model as §8.5: locked snapshots untouched, drafts get a "settings changed 
 
 ### §9.1 Tenant Scoping
 
-Every syncable table carries an `entity_id` (tenant) column. v1 hardcodes a single tenant per deployment but the column and indexes exist to support multi-branch later. The sync server's `TENANT_MODELS` list (per `.claude/rules/sync-server.md`) includes every entity in §6.1: `users`, `check_types`, `check_subtypes`, `doctors`, `doctor_check_pricing`, `operators`, `operator_specialties`, `operator_shifts`, `patients`, `visits`, `visit_lines`, `settings`, `inventory_items`, `inventory_consumption_map`, `inventory_adjustments`, `audit_log`. Server middleware injects `request.tenantId` from the JWT and every Prisma query filters on it.
+Every syncable table carries an `entity_id` (tenant) column. v1 hardcodes a single tenant per deployment but the column and indexes exist to support multi-branch later. The sync server's `TENANT_MODELS` list (per `.claude/rules/sync-server.md`) includes every entity in §6.1: `users`, `check_types`, `check_subtypes`, `doctors`, `doctor_check_pricing`, `operators`, `operator_specialties`, `operator_shifts`, `patients`, `visits`, `settings`, `inventory_items`, `inventory_consumption_map`, `inventory_adjustments`, `audit_log`. Server middleware injects `request.tenantId` from the JWT and every Prisma query filters on it.
 
 ### §9.2 Multi-User Local Behavior
 
@@ -2084,7 +2070,7 @@ A single SQLite file per device. Multiple users share the file with logical scop
 ### §9.3 Cross-Device Behavior
 
 Same user on two devices, or different users in the same tenant on two devices:
-- Visits, visit lines, doctors, operators, settings, inventory, audit log: synced live.
+- Visits, doctors, operators, settings, inventory, audit log: synced live.
 - UI prefs (last-opened tab, theme, language toggle): per-device, stored in `tauri-plugin-store`. NOT synced.
 - Drafts: synced, so the accountant can see the draft pipeline from the reception PC. Edits to the same draft from two devices are real and surface as a `manual` conflict.
 - Open shifts: synced. If an operator is clocked in on the reception PC and the superadmin tries to clock them out from the admin PC, the second device sees the same row.
@@ -2097,8 +2083,8 @@ Same user on two devices, or different users in the same tenant on two devices:
 
 Local SQLite FTS5 indexes:
 
-- `patients_fts (name)` — backs `/reception/new` patient autocomplete.
-- `doctors_fts (name, specialty)` — backs `/reception/new` doctor autocomplete and `/admin/doctors` list filter.
+- `patients_fts (name)` — backs the New Visit patient autocomplete.
+- `doctors_fts (name, specialty)` — backs the New Visit doctor autocomplete and `/admin/doctors` list filter.
 
 Inventory items, check types, and subtypes use `LIKE`-prefix queries on the `name_ar`/`name_en` columns; their cardinality is small enough that FTS is overkill in v1.
 
@@ -2230,28 +2216,27 @@ Localization is load-bearing for IDC and is enumerated here exhaustively.
 
 | Term | Definition |
 |-|-|
-| Audit Log | The append-only `audit_log` table capturing every business mutation with actor, action, entity, delta, IP, device, timestamp. See §6.1.16. |
-| Check | A diagnostic procedure performed on a patient. Realized as a `visit_lines` row referencing a `check_types` (and optionally a `check_subtypes`) row. |
+| Audit Log | The append-only `audit_log` table capturing every business mutation with actor, action, entity, delta, IP, device, timestamp. See §6.1.15. |
+| Check | A diagnostic procedure performed on a patient. Realized as a `visits` row referencing a `check_types` (and optionally a `check_subtypes`) row. |
 | CheckSubType | A finer-grained variant of a `check_types` row. Carries its own price. Required when the parent type's `has_subtypes = 1`. See §6.1.3. |
 | CheckType | A category of check (سونار, مفراس, ...). Either has a flat price or has subtypes that carry the price. See §6.1.2. |
-| Cut | The portion of a visit-line's revenue allocated to a doctor or operator. Computed at lock and stored as a snapshot. See §6.1.11 money math. |
+| Cut | The portion of a visit's revenue allocated to a doctor or operator. Computed at lock and stored as a snapshot on the `visits` row. See §6.1.10 money math. |
 | Daily Close | An end-of-day reconciliation report (v1 ad-hoc; Horizon-1 signed entity). See §7.2.5. |
 | Delta | The JSON `{ field: { from, to } }` payload stored on every `audit_log` row. |
-| Doctor | An external referring doctor with per-check pricing and cut. The "house"/internal case is the absence of a doctor on a visit line. See §6.1.4. |
-| Dye (صبغة) | An indicator that contrast was used on a check, adding a fixed cost (`settings.dye_cost_iqd`) and doubling the operator cut for that line. |
-| House | A visit line with no `doctor_id`. The internal-doctor percentage from `settings.internal_doctor_pct` applies. |
-| Lock | The receptionist action that finalizes a `draft` visit: snapshots prices, attributes operators, consumes inventory, generates a receipt. See §8.1. |
+| Doctor | An external referring doctor with per-check pricing and cut. The "house"/internal case is the absence of a doctor on a visit. See §6.1.4. |
+| Dye (صبغة) | An indicator that contrast was used on a check, adding a fixed cost (`settings.dye_cost_iqd`) and doubling the operator cut for that visit. |
+| House | A visit with no `doctor_id`. The internal-doctor percentage from `settings.internal_doctor_pct` applies. |
+| Lock | The receptionist action that finalizes a `draft` visit: snapshots prices, attributes the operator, consumes inventory, generates a receipt. See §8.1. |
 | Operator | A radiology technician. Tracked for payroll only; not a system user. See §6.1.6. |
 | Operator Shift | A clock-in/out span for an operator. Specialty + open-shift status drives operator eligibility at lock. See §6.1.8. |
 | Outbox | Local queue of mutations awaiting server push. Drained by the sync engine. Defined in `.claude/rules/offline-first.md`. |
 | Patient | The person receiving a check. v1 stores only the quadripartite name (اسم رباعي). See §6.1.9. |
 | Receipt | The printed artifact handed to the patient at lock; A5 PDF and/or thermal text. |
-| Report | An optional written radiology report, distinct from this PRD. Adds a fixed cost to the line; does NOT affect doctor or operator cuts. |
-| Settings | Singleton k/v store of global tunables: dye cost, report cost, internal-doctor percentage, etc. See §6.1.12. |
+| Report | An optional written radiology report, distinct from this PRD. Adds a fixed cost to the visit; does NOT affect doctor or operator cuts. |
+| Settings | Singleton k/v store of global tunables: dye cost, report cost, internal-doctor percentage, etc. See §6.1.11. |
 | Sync Engine | The Tokio task in the Tauri app that drains the outbox to the server and pulls peer changes. See `.claude/rules/offline-first.md`. |
 | Tombstone | A soft-deleted row, marked by non-null `deleted_at`. Tombstones propagate over sync; rows are never hard-deleted. |
-| Visit | A patient encounter; one or more visit lines. See §6.1.10. |
-| VisitLine | One check on a visit, with all snapshots stored at lock. See §6.1.11. |
+| Visit | A patient encounter for exactly one check, with all snapshots stored at lock. See §6.1.10. |
 | Void | The superadmin action that reverses a locked visit: status → `voided`, offsetting inventory adjustments, audit row. See §8.2. |
 
 ---
