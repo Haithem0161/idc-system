@@ -1,0 +1,221 @@
+//! Typed HTTP client for the sync server.
+//!
+//! All sync HTTP goes through this client; the frontend never talks to the
+//! server directly (capability `http:default` is intentionally not granted).
+
+use base64::Engine;
+use serde::{Deserialize, Serialize};
+
+use crate::error::{AppError, AppResult};
+
+const DEFAULT_TIMEOUT_SECS: u64 = 30;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PushOp {
+    pub op_id: String,
+    pub entity: String,
+    pub entity_id: String,
+    pub op: String,
+    /// MessagePack-encoded payload, transported as base64 (lets us reuse the
+    /// generic JSON transport without binary multipart).
+    pub payload_b64: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PushResponseOp {
+    pub op_id: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ServerConflict {
+    pub op_id: String,
+    pub entity: String,
+    pub entity_id: String,
+    pub server_payload: serde_json::Value,
+    pub local_payload: serde_json::Value,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PushResult {
+    pub accepted: Vec<PushResponseOp>,
+    pub conflicts: Vec<ServerConflict>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PullChange {
+    pub entity: String,
+    pub entity_id: String,
+    pub payload: serde_json::Value,
+    pub updated_at: String,
+    pub version: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PullResponse {
+    pub changes: Vec<PullChange>,
+    pub next_cursor: String,
+}
+
+#[derive(Clone)]
+pub struct SyncHttpClient {
+    base_url: String,
+    client: reqwest::Client,
+    device_id: String,
+    app_version: String,
+}
+
+impl SyncHttpClient {
+    pub fn new(base_url: String, device_id: String, app_version: String) -> AppResult<Self> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+            .user_agent(format!("idc-system/{app_version}"))
+            .build()
+            .map_err(AppError::from)?;
+        Ok(Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            client,
+            device_id,
+            app_version,
+        })
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    pub async fn push(&self, token: &str, ops: &[PushOp]) -> AppResult<PushResult> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            ops: &'a [PushOp],
+        }
+
+        let url = format!("{}/sync/push", self.base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(token)
+            .header("X-Device-Id", &self.device_id)
+            .header("X-App-Version", &self.app_version)
+            .json(&Body { ops })
+            .send()
+            .await
+            .map_err(AppError::from)?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::SessionExpired);
+        }
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::SyncUnavailable(format!("push {status}: {body}")));
+        }
+        let result: PushResult = resp.json().await.map_err(AppError::from)?;
+        Ok(result)
+    }
+
+    pub async fn pull(&self, token: &str, since: Option<&str>) -> AppResult<PullResponse> {
+        let mut url = format!("{}/sync/pull", self.base_url);
+        if let Some(cursor) = since {
+            url.push_str(&format!("?since={cursor}"));
+        }
+        let resp = self
+            .client
+            .get(&url)
+            .bearer_auth(token)
+            .header("X-Device-Id", &self.device_id)
+            .header("X-App-Version", &self.app_version)
+            .send()
+            .await
+            .map_err(AppError::from)?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::SessionExpired);
+        }
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::SyncUnavailable(format!("pull {status}: {body}")));
+        }
+        resp.json().await.map_err(AppError::from)
+    }
+
+    pub async fn lookup_op(&self, token: &str, op_ids: &[String]) -> AppResult<Vec<String>> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            op_ids: &'a [String],
+        }
+        #[derive(Deserialize)]
+        struct LookupResp {
+            found: Vec<String>,
+        }
+        let url = format!("{}/sync/lookup-op", self.base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(token)
+            .header("X-Device-Id", &self.device_id)
+            .header("X-App-Version", &self.app_version)
+            .json(&Body { op_ids })
+            .send()
+            .await
+            .map_err(AppError::from)?;
+        if !resp.status().is_success() {
+            return Err(AppError::SyncUnavailable(format!(
+                "lookup-op {}",
+                resp.status()
+            )));
+        }
+        let body: LookupResp = resp.json().await.map_err(AppError::from)?;
+        Ok(body.found)
+    }
+
+    pub async fn healthz(&self) -> AppResult<bool> {
+        let url = format!("{}/healthz", self.base_url);
+        match self.client.get(&url).send().await {
+            Ok(r) => Ok(r.status().is_success()),
+            Err(_) => Ok(false),
+        }
+    }
+
+    pub async fn resolve_conflict(
+        &self,
+        token: &str,
+        op_id: &str,
+        choice: &str,
+        merged: Option<serde_json::Value>,
+    ) -> AppResult<()> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            choice: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            merged: Option<serde_json::Value>,
+        }
+        let url = format!("{}/sync/conflicts/{op_id}/resolve", self.base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(token)
+            .header("X-Device-Id", &self.device_id)
+            .header("X-App-Version", &self.app_version)
+            .json(&Body { choice, merged })
+            .send()
+            .await
+            .map_err(AppError::from)?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::SessionExpired);
+        }
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::SyncUnavailable(format!(
+                "resolve {status}: {body}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Encode raw bytes to base64 for JSON transport.
+pub fn encode_payload(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}

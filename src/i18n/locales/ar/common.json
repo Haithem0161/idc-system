@@ -1,0 +1,61 @@
+{
+  "app": {
+    "title": "نظام IDC",
+    "description": "عمليات العيادة دون اتصال"
+  },
+  "common": {
+    "loading": "جارٍ التحميل...",
+    "retry": "إعادة المحاولة",
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "delete": "حذف",
+    "edit": "تعديل",
+    "back": "رجوع",
+    "next": "التالي",
+    "submit": "إرسال"
+  },
+  "nav": {
+    "aria_label": "أساسي",
+    "home": "الرئيسية",
+    "reception": "الاستقبال",
+    "doctors": "الأطباء",
+    "inventory": "المخزون",
+    "reports": "التقارير",
+    "users": "المستخدمون",
+    "audit": "سجل التدقيق",
+    "settings": "الإعدادات",
+    "coming_soon": "قريبًا"
+  },
+  "a11y": {
+    "skip_to_content": "تخطٍ إلى المحتوى",
+    "breadcrumbs": "مسار التنقل"
+  },
+  "language": {
+    "toggle_aria": "تبديل اللغة",
+    "switch_to_arabic": "العربية",
+    "switch_to_english": "English"
+  },
+  "sync": {
+    "status": {
+      "idle": "متزامن",
+      "pushing": "جارٍ الإرسال",
+      "pulling": "جارٍ الجلب",
+      "offline": "غير متصل",
+      "error": "خطأ في المزامنة"
+    },
+    "pending_aria": "العمليات المعلقة"
+  },
+  "status": {
+    "build": "الإصدار",
+    "device": "الجهاز"
+  },
+  "setup": {
+    "title": "الإعداد الأولي",
+    "subtitle": "أدخل عنوان خادم المزامنة. يمكنك تغييره لاحقًا من الإعدادات.",
+    "url_label": "عنوان خادم المزامنة",
+    "url_required": "عنوان خادم المزامنة مطلوب",
+    "url_invalid": "تعذر حفظ عنوان خادم المزامنة",
+    "save": "حفظ",
+    "saving": "جارٍ الحفظ..."
+  }
+}

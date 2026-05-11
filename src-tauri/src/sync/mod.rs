@@ -1,11 +1,14 @@
-//! Sync engine.
+//! Sync engine -- presentation/runtime layer for the sync bounded context.
 //!
-//! Background Tokio task that drains the outbox to the sync server (push),
-//! pulls remote changes since the cursor (pull), and resolves conflicts per
-//! entity policy. See `.claude/rules/offline-first.md` for the full contract.
+//! Owns the background Tokio task lifecycle, holds the typed HTTP client,
+//! emits Tauri events for UI status, and persists pulled changes into local
+//! tables. Pure domain logic lives in `crate::domains::sync`.
 
 pub mod conflict;
 pub mod engine;
+pub mod metrics;
 pub mod outbox;
 pub mod puller;
 pub mod pusher;
+
+pub use engine::{SyncEngine, SyncEngineHandle};

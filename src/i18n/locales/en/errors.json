@@ -1,0 +1,11 @@
+{
+  "errors": {
+    "generic": "Something went wrong",
+    "sync": {
+      "network_offline": "Network is offline. Changes are queued locally.",
+      "server_unavailable": "Sync server unavailable. Your work is safe and will sync when it returns.",
+      "auth_expired": "Session expired. Please log in to resume syncing.",
+      "already_resolved": "This conflict has already been resolved."
+    }
+  }
+}

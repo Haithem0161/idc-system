@@ -1,0 +1,61 @@
+{
+  "app": {
+    "title": "IDC System",
+    "description": "Offline-first clinic operations"
+  },
+  "common": {
+    "loading": "Loading...",
+    "retry": "Retry",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "back": "Back",
+    "next": "Next",
+    "submit": "Submit"
+  },
+  "nav": {
+    "aria_label": "Primary",
+    "home": "Home",
+    "reception": "Reception",
+    "doctors": "Doctors",
+    "inventory": "Inventory",
+    "reports": "Reports",
+    "users": "Users",
+    "audit": "Audit log",
+    "settings": "Settings",
+    "coming_soon": "Coming soon"
+  },
+  "a11y": {
+    "skip_to_content": "Skip to content",
+    "breadcrumbs": "Breadcrumbs"
+  },
+  "language": {
+    "toggle_aria": "Toggle language",
+    "switch_to_arabic": "العربية",
+    "switch_to_english": "English"
+  },
+  "sync": {
+    "status": {
+      "idle": "Synced",
+      "pushing": "Pushing",
+      "pulling": "Pulling",
+      "offline": "Offline",
+      "error": "Sync error"
+    },
+    "pending_aria": "Pending operations"
+  },
+  "status": {
+    "build": "Build",
+    "device": "Device"
+  },
+  "setup": {
+    "title": "First-launch setup",
+    "subtitle": "Enter the URL of your sync server. You can change this later from settings.",
+    "url_label": "Sync server URL",
+    "url_required": "Sync server URL is required",
+    "url_invalid": "Failed to save sync server URL",
+    "save": "Save",
+    "saving": "Saving..."
+  }
+}

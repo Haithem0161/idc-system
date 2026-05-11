@@ -36,8 +36,7 @@ impl EmbeddedConfig {
             .parse()
             .map_err(|_| "TORCH_IPC_PORT is not a valid port number")?;
 
-        let run_id =
-            std::env::var("TORCH_RUN_ID").map_err(|_| "TORCH_RUN_ID not set")?;
+        let run_id = std::env::var("TORCH_RUN_ID").map_err(|_| "TORCH_RUN_ID not set")?;
 
         let install_path = std::env::var("TORCH_INSTALL_PATH").ok();
 

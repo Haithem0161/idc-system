@@ -1,11 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
-  "windows": [
-    "main"
-  ],
+  "description": "Phase-01 baseline capabilities for the IDC desktop app.",
+  "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "store:default",
+    "os:default",
+    "dialog:default",
+    "fs:default",
+    "log:default"
   ]
 }

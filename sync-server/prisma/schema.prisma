@@ -1,0 +1,71 @@
+// IDC sync-server Prisma schema (Phase 1).
+// Postgres target. See docs/idc-system/phase-01.md §2.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AuditLog {
+  id              String    @id
+  actorUserId     String    @map("actor_user_id")
+  action          String
+  entity          String
+  entityId        String    @map("entity_id")
+  delta           Json
+  ip              String?
+  deviceId        String    @map("device_id")
+  at              DateTime  @db.Timestamptz
+  createdAt       DateTime  @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+  version         Int       @default(0)
+  lastSyncedAt    DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt        DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId  String?   @map("origin_device_id")
+  entityIdTenant  String    @map("entity_id_tenant")
+
+  @@index([entityIdTenant, at(sort: Desc)])
+  @@index([entityIdTenant, entity, entityId, at(sort: Desc)])
+  @@index([entityIdTenant, actorUserId, at(sort: Desc)])
+  @@map("audit_log")
+}
+
+model ProcessedOp {
+  opId           String   @id @map("op_id")
+  entityIdTenant String   @map("entity_id_tenant")
+  responseHash   String   @map("response_hash")
+  processedAt    DateTime @default(now()) @map("processed_at") @db.Timestamptz
+
+  @@index([entityIdTenant, processedAt])
+  @@map("processed_ops")
+}
+
+model SyncCursor {
+  deviceId       String
+  entityIdTenant String   @map("entity_id_tenant")
+  cursor         String
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@id([deviceId, entityIdTenant])
+  @@map("sync_cursors")
+}
+
+model ConflictParked {
+  opId             String    @id @map("op_id")
+  entityIdTenant   String    @map("entity_id_tenant")
+  entity           String
+  entityId         String    @map("entity_id")
+  localPayload     Json      @map("local_payload")
+  serverPayload    Json      @map("server_payload")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  resolvedAt       DateTime? @map("resolved_at") @db.Timestamptz
+  resolvedByUserId String?   @map("resolved_by_user_id")
+
+  @@index([entityIdTenant, resolvedAt])
+  @@map("conflicts_parked")
+}

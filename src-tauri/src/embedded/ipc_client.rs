@@ -51,15 +51,18 @@ impl IpcClient {
             .map_err(|e| AppError::Internal(format!("MessagePack encode error: {}", e)))?;
 
         let len = (bytes.len() as u32).to_be_bytes();
-        self.stream.write_all(&len).await.map_err(|e| {
-            AppError::Internal(format!("Failed to write message length: {}", e))
-        })?;
-        self.stream.write_all(&bytes).await.map_err(|e| {
-            AppError::Internal(format!("Failed to write message body: {}", e))
-        })?;
-        self.stream.flush().await.map_err(|e| {
-            AppError::Internal(format!("Failed to flush stream: {}", e))
-        })?;
+        self.stream
+            .write_all(&len)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to write message length: {}", e)))?;
+        self.stream
+            .write_all(&bytes)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to write message body: {}", e)))?;
+        self.stream
+            .flush()
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to flush stream: {}", e)))?;
 
         Ok(())
     }
@@ -67,9 +70,10 @@ impl IpcClient {
     /// Receive a message from Business OS.
     pub async fn receive(&mut self) -> AppResult<IpcEnvelope> {
         let mut len_buf = [0u8; 4];
-        self.stream.read_exact(&mut len_buf).await.map_err(|e| {
-            AppError::Internal(format!("Failed to read message length: {}", e))
-        })?;
+        self.stream
+            .read_exact(&mut len_buf)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to read message length: {}", e)))?;
         let len = u32::from_be_bytes(len_buf) as usize;
 
         if len > MAX_MESSAGE_SIZE {
@@ -80,9 +84,10 @@ impl IpcClient {
         }
 
         let mut buf = vec![0u8; len];
-        self.stream.read_exact(&mut buf).await.map_err(|e| {
-            AppError::Internal(format!("Failed to read message body: {}", e))
-        })?;
+        self.stream
+            .read_exact(&mut buf)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to read message body: {}", e)))?;
 
         rmp_serde::from_slice(&buf)
             .map_err(|e| AppError::Internal(format!("MessagePack decode error: {}", e)))
@@ -99,9 +104,9 @@ impl IpcClient {
         match ack.payload {
             IpcPayload::ConnectAck { success, error } => {
                 if !success {
-                    return Err(AppError::Internal(
-                        error.unwrap_or_else(|| "Connection rejected by Business OS".to_string()),
-                    ));
+                    return Err(AppError::Internal(error.unwrap_or_else(|| {
+                        "Connection rejected by Business OS".to_string()
+                    })));
                 }
                 tracing::info!("Received ConnectAck from Business OS");
             }
@@ -116,10 +121,7 @@ impl IpcClient {
         // Send EmbeddedReady
         self.send(&IpcEnvelope::embedded_ready(http_port, "/"))
             .await?;
-        tracing::info!(
-            "Sent EmbeddedReady - HTTP server on port {}",
-            http_port
-        );
+        tracing::info!("Sent EmbeddedReady - HTTP server on port {}", http_port);
 
         Ok(())
     }
@@ -157,18 +159,21 @@ impl IpcClient {
 
     /// Handle a single incoming message from Business OS.
     async fn handle_message(&mut self, msg: IpcEnvelope) -> AppResult<()> {
-        tracing::info!("IPC message received: {}", match &msg.payload {
-            IpcPayload::Ping { .. } => "Ping",
-            IpcPayload::Shutdown { .. } => "Shutdown",
-            IpcPayload::NavigateTo { .. } => "NavigateTo",
-            IpcPayload::AuthToken { .. } => "AuthToken",
-            IpcPayload::EntityContext { .. } => "EntityContext",
-            IpcPayload::TokenRefreshResponse { .. } => "TokenRefreshResponse",
-            IpcPayload::Error { .. } => "Error",
-            IpcPayload::EmbeddedAck { .. } => "EmbeddedAck",
-            IpcPayload::ConnectAck { .. } => "ConnectAck",
-            _ => "Other",
-        });
+        tracing::info!(
+            "IPC message received: {}",
+            match &msg.payload {
+                IpcPayload::Ping { .. } => "Ping",
+                IpcPayload::Shutdown { .. } => "Shutdown",
+                IpcPayload::NavigateTo { .. } => "NavigateTo",
+                IpcPayload::AuthToken { .. } => "AuthToken",
+                IpcPayload::EntityContext { .. } => "EntityContext",
+                IpcPayload::TokenRefreshResponse { .. } => "TokenRefreshResponse",
+                IpcPayload::Error { .. } => "Error",
+                IpcPayload::EmbeddedAck { .. } => "EmbeddedAck",
+                IpcPayload::ConnectAck { .. } => "ConnectAck",
+                _ => "Other",
+            }
+        );
 
         match msg.payload {
             IpcPayload::Ping { timestamp } => {
@@ -193,9 +198,7 @@ impl IpcClient {
                     expires_at
                 );
                 // Store the token for the /api/auth endpoint
-                self.app_state
-                    .set_current_token(token, expires_at)
-                    .await;
+                self.app_state.set_current_token(token, expires_at).await;
                 tracing::info!("Auth token stored from Business OS");
             }
 
@@ -231,24 +234,20 @@ impl IpcClient {
                 if let Some(err) = error {
                     tracing::error!("Token refresh failed from Business OS: {}", err);
                     if err == "NOT_AUTHENTICATED" {
-                        tracing::warn!("Business OS reports not authenticated, clearing auth state");
+                        tracing::warn!(
+                            "Business OS reports not authenticated, clearing auth state"
+                        );
                         self.app_state.clear_auth().await;
                     }
                 } else if let Some(new_token) = token {
                     tracing::info!("Token refreshed from Business OS");
                     let exp = expires_at.unwrap_or(0);
-                    self.app_state
-                        .set_current_token(new_token, exp)
-                        .await;
+                    self.app_state.set_current_token(new_token, exp).await;
                 }
             }
 
             IpcPayload::Error { code, message } => {
-                tracing::error!(
-                    "Error from Business OS: {} - {}",
-                    code,
-                    message
-                );
+                tracing::error!("Error from Business OS: {} - {}", code, message);
                 if code == "SESSION_EXPIRED" {
                     tracing::warn!(
                         "Session expired: {}. Clearing auth state, waiting for re-authentication.",

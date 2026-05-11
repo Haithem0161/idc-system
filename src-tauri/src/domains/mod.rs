@@ -1,15 +1,13 @@
 //! Bounded contexts.
 //!
-//! Each subdirectory is a self-contained domain following the DDD layout
-//! described in `.claude/rules/ddd.md`:
+//! Each subdirectory is a self-contained domain following the DDD layout:
 //!
 //! ```text
 //! domains/<name>/
 //! ├── domain/           # entities, services, repository traits (no deps)
-//! ├── infrastructure/   # SQLite repos, sync adapters
+//! ├── infrastructure/   # SQLite repos, HTTP clients, jobs
 //! └── commands.rs       # #[tauri::command] handlers
 //! ```
-//!
-//! Copy `_example/` to start a new domain.
 
 pub mod _example;
+pub mod sync;

@@ -193,9 +193,7 @@ pub async fn start_http_server(
     let app = Router::new()
         .route("/api/auth", get(get_auth))
         .with_state(http_state)
-        .fallback_service(
-            ServeDir::new(&frontend_dir).append_index_html_on_directories(true),
-        );
+        .fallback_service(ServeDir::new(&frontend_dir).append_index_html_on_directories(true));
 
     let addr = format!("127.0.0.1:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr)

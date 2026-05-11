@@ -40,3 +40,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Utils
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "chrono", "uuid", "migrate"] }
+uuid = { version = "1.20.0", features = ["v7", "serde"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls"] }
+tokio-util = { version = "0.7.18", features = ["rt"] }
+async-trait = "0.1.89"
+bytes = "1.11.1"
+tauri-plugin-sql = { version = "2.4.0", features = ["sqlite"] }
+tauri-plugin-store = "2.4.3"
+tauri-plugin-os = "2.3.2"
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-fs = "2.5.1"
+base64 = "0.22.1"

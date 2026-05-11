@@ -27,7 +27,7 @@ pub async fn run_embedded(embedded_config: EmbeddedConfig) -> AppResult<()> {
     let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Create app state
-    let app_state = Arc::new(AppState::new());
+    let app_state = Arc::new(AppState::for_embedded());
 
     // Start HTTP server for frontend assets + auth endpoint
     let http_port = start_http_server(app_state.clone(), shutdown_tx.subscribe()).await?;

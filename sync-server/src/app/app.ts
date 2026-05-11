@@ -1,37 +1,38 @@
 import { join } from 'node:path'
 import AutoLoad, { AutoloadPluginOptions } from '@fastify/autoload'
 import { FastifyPluginAsync, FastifyServerOptions } from 'fastify'
+import { TypeBoxValidatorCompiler } from '@fastify/type-provider-typebox'
 
 export interface AppOptions extends FastifyServerOptions, Partial<AutoloadPluginOptions> {
+}
 
-}
-// Pass --options via CLI arguments in command to enable these options.
-const options: AppOptions = {
-}
+const options: AppOptions = {}
 
 const app: FastifyPluginAsync<AppOptions> = async (
   fastify,
   opts
 ): Promise<void> => {
-  // Place here your custom code!
+  fastify.setValidatorCompiler(TypeBoxValidatorCompiler)
 
-  // Do not touch the following lines
-
-  // This loads all plugins defined in plugins
-  // those should be support plugins that are reused
-  // through your application
+  // Shared plugins (auth, swagger, errors, service wiring).
   // eslint-disable-next-line no-void
   void fastify.register(AutoLoad, {
     dir: join(__dirname, 'plugins'),
-    options: opts
+    options: opts,
   })
 
-  // This loads all plugins defined in routes
-  // define your routes in one of these
+  // Global routes (/healthz, /).
   // eslint-disable-next-line no-void
   void fastify.register(AutoLoad, {
     dir: join(__dirname, 'routes'),
-    options: opts
+    options: opts,
+  })
+
+  // Sync bounded context routes.
+  // eslint-disable-next-line no-void
+  void fastify.register(AutoLoad, {
+    dir: join(__dirname, 'sync', 'routes'),
+    options: opts,
   })
 }
 
