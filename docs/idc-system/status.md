@@ -6,7 +6,7 @@ _Last updated: 2026-05-11. Source: [roadmap.md](./roadmap.md)._
 
 | # | Phase | Surfaces | Status | Started | Completed | Local Tables Added | Server Models Added | IPC Commands Added | Routes Added | Services Added |
 |-|-|-|-|-|-|-|-|-|-|-|
-| 01 | Foundation & Sync Plumbing | All | not_started | - | - | 3 (`outbox`, `sync_state`, `audit_log`) | 4 (`AuditLog`, `ProcessedOp`, `SyncCursor`, `ConflictParked`) | 6 | 4 | 6 |
+| 01 | Foundation & Sync Plumbing | All | complete | 2026-05-11 | 2026-05-11 | 4 (`outbox`, `sync_state`, `audit_log`, `metrics_events`) | 4 (`AuditLog`, `ProcessedOp`, `SyncCursor`, `ConflictParked`) | 9 | 5 | 6 |
 | 02 | Authentication & Users | All | not_started | - | - | 2 (`users`, `settings`) | 3 (`User`, `Setting`, `RefreshToken`) | ~12 | 4 | 5 |
 | 03 | Catalog & Reference Data | All | not_started | - | - | 9 (8 tables + 1 FTS5 `doctors_fts`) | 8 | ~16 | 0 | 8 |
 | 04 | Operator Shifts | Frontend, Tauri, Server | not_started | - | - | 1 (`operator_shifts`) | 1 (`OperatorShift`) | 5 | 0 | 1 |
@@ -21,16 +21,16 @@ Aggregate ship target after Phase 08: 17 base SQLite tables + 2 FTS5 virtual tab
 
 | Metric | Before | Current | Target |
 |-|-|-|-|
-| SQLite syncable tables | 0 | 0 | 15 (PRD §6.1.1-§6.1.15) |
-| SQLite engine tables | 0 | 0 | 2 (`outbox`, `sync_state`) |
+| SQLite syncable tables | 0 | 1 (`audit_log`) | 15 (PRD §6.1.1-§6.1.15) |
+| SQLite engine tables | 0 | 3 (`outbox`, `sync_state`, `metrics_events`) | 3 |
 | SQLite FTS5 virtual tables | 0 | 0 | 2 (`patients_fts`, `doctors_fts`) |
-| Prisma syncable models | 0 | 0 | 15 |
-| Prisma server-only models | 0 | 0 | 4 (`ProcessedOp`, `SyncCursor`, `ConflictParked`, `RefreshToken`) |
-| Tauri IPC commands | 0 | 0 | ~55-67 |
-| Sync-server routes | 2 (template only) | 2 | 11 (incl. `/healthz` and `/documentation`) |
-| Frontend pages | 2 (`/`, `*`) | 2 | 31 (29 PRD pages + `/login` + `/no-access` + `/lock` + `/sync/conflicts` minus the duplicate `/` redirect) |
-| Conflict policies in use | 0 | 0 | 3 (`last-write-wins`, `additive-only`, `manual`) |
-| Locales | 2 (ar+en) | 2 | 2 |
+| Prisma syncable models | 0 | 1 (`AuditLog`) | 15 |
+| Prisma server-only models | 0 | 3 (`ProcessedOp`, `SyncCursor`, `ConflictParked`) | 4 (incl. `RefreshToken` in phase-02) |
+| Tauri IPC commands | 0 | 9 | ~55-67 |
+| Sync-server routes | 2 (template only) | 6 (`/`, `/healthz`, `/sync/push`, `/sync/pull`, `/sync/lookup-op`, `/sync/conflicts/:opId/resolve`) | 11 (incl. `/healthz` and `/documentation`) |
+| Frontend pages | 2 (`/`, `*`) | 2 (`/` wrapped in `<AppShell>`, `*`) | 31 (29 PRD pages + `/login` + `/no-access` + `/lock` + `/sync/conflicts` minus the duplicate `/` redirect) |
+| Conflict policies in use | 0 | 1 (`additive-only` for `audit_log`) | 3 (`last-write-wins`, `additive-only`, `manual`) |
+| Locales | 2 (ar+en) | 2 (3 namespaces: `common`, `errors`, `receipts`) | 2 |
 | Audit retention (local) | n/a | n/a | 90 days |
 | Audit retention (server) | n/a | n/a | indefinite |
 
@@ -146,6 +146,13 @@ Pass 3 (final) completed 2026-05-11 via six parallel sub-agents on non-overlappi
 ## Blockers & Notes
 
 _No blockers at plan-authoring time._
+
+### Phase 01 completion notes (2026-05-11)
+
+- All §1-§5 plumbing landed; §7.1-§7.36 gap additions applied except where explicitly deferred to later phases (resolver UI to phase-08 §7.5; conflict storage on server is server-canonical, IPC `sync_list_conflicts` is a stub list per §7.5).
+- Sync-server Phase-1 ships an in-memory store for `audit_log`, `ProcessedOp`, `SyncCursor`, `ConflictParked` so the suite is hermetic. The Prisma-backed swap will be wired in Phase-2 alongside `User` / `Setting`.
+- Verification: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (4 unit + 6 integration), `pnpm lint`, `pnpm build`, sync-server `pnpm test` (11/11) all green.
+- Tauri bundle icons regenerated from `public/logo.png` (Windows ICO, macOS ICNS, Linux PNG, iOS AppIcon set, Android mipmaps).
 
 Parallel-track notes:
 - Within each phase, the three surfaces (Frontend / Tauri-Rust / Sync Server) work as parallel tracks once the migration files land.

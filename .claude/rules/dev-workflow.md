@@ -7,7 +7,7 @@ paths:
 
 This is the canonical rhythm for any change in this repo. Follow it from the moment you pick up a task to the moment you push.
 
-## The 10-Step Loop
+## The 11-Step Loop
 
 1. **Study the Plan.** Read the relevant `docs/<plan-name>/phase-XX.md`. Confirm goals, surfaces (Frontend / Tauri / Sync Server), success criteria.
 2. **Research & Documentation (MANDATORY).** Query Context7 MCP for every library/framework/plugin you'll touch. Read existing patterns in this repo (look at sibling features). Do not write code from memory.
@@ -26,6 +26,11 @@ This is the canonical rhythm for any change in this repo. Follow it from the mom
    - `cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`.
    - When the sync server exists: its lint, typecheck, and unit tests.
 10. **Fix and Iterate.** Failures cascade in this order: schema -> runtime -> validation -> Swagger/IPC contract completeness. Fix root causes; never bypass with `--no-verify`.
+11. **Update `status.md` (MANDATORY).** Before committing, update `docs/<plan-name>/status.md`:
+    - Flip the phase row to `complete` (or `in_progress` if partial) with `Started` / `Completed` dates and the actual counts for Local Tables / Server Models / IPC Commands / Routes / Services.
+    - Refresh the Cumulative Totals table -- tables, models, IPC commands, routes, frontend pages, conflict policies in use, locales.
+    - Append a short completion note under "Blockers & Notes" covering: what landed, what was deferred and to which phase, verification results (lint / build / clippy / test counts), any non-obvious follow-ups for the next phase.
+    - This is not optional. `status.md` is the planning team's source of truth; shipping a phase without updating it forces the next phase to start from a stale picture.
 
 ## Tooling Choices
 

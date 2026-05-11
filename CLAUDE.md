@@ -67,6 +67,7 @@ This applies to: Tauri plugins, Tokio, sqlx/rusqlite, Axum, Fastify plugins, Pri
 8. **Sync Round-Trip.** Create offline -> reconnect -> server has it. Server change -> client pulls. Conflict scenario per declared policy.
 9. **Pre-Push Validation (MANDATORY).** Lint, typecheck, build, clippy, cargo test. Catches failures locally instead of in CI.
 10. **Fix and Iterate.** Schema -> runtime -> validation -> Swagger/IPC contract gaps. Fix root causes.
+11. **Update `status.md` (MANDATORY).** Before committing, update `docs/<plan-name>/status.md`: flip the phase row to `complete` with started/completed dates, refresh Cumulative Totals (tables/models/IPC commands/routes/pages/conflict policies/locales), and append a phase-completion note under "Blockers & Notes". Do the same on partial progress (`in_progress`). Never let `status.md` drift behind the code.
 
 See [`.claude/rules/dev-workflow.md`](.claude/rules/dev-workflow.md) for the full loop.
 
