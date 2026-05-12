@@ -80,6 +80,7 @@ See [`.claude/rules/dev-workflow.md`](.claude/rules/dev-workflow.md) for the ful
 | Client state | Zustand v5 | [`ZUSTAND.md`](ZUSTAND.md) |
 | Validation | Zod v4 | [`ZOD.md`](ZOD.md) |
 | Styling | Tailwind v4 + shadcn/ui | [`TAILWIND.md`](TAILWIND.md), [`SHADCN.md`](SHADCN.md) |
+| Design system | Editorial visual language (tokens, components) | [`.claude/rules/design-system.md`](.claude/rules/design-system.md) |
 | i18n | react-i18next (en + ar with RTL) | [`I18N.md`](I18N.md) |
 | Animations | framer-motion | [`FRAMER-MOTION.md`](FRAMER-MOTION.md) |
 | HTTP | axios (typed instance) | [`AXIOS.md`](AXIOS.md) |
@@ -143,6 +144,7 @@ Architecture details, patterns, and conventions live in `.claude/rules/`:
 - [`offline-first.md`](.claude/rules/offline-first.md) -- Sync engine, conflict resolution, local-schema invariants.
 - [`tauri.md`](.claude/rules/tauri.md) -- Tauri v2 commands, capabilities, dual-mode, build/release.
 - [`frontend.md`](.claude/rules/frontend.md) -- React 19, Vite, Tailwind v4, state architecture.
+- [`design-system.md`](.claude/rules/design-system.md) -- Editorial visual language: color tokens, typography, components, motion, RTL conventions.
 - [`rust.md`](.claude/rules/rust.md) -- Rust conventions for the Tauri backend.
 - [`sync-server.md`](.claude/rules/sync-server.md) -- Fastify, Prisma, sync endpoints, Swagger.
 - [`ddd.md`](.claude/rules/ddd.md) -- Domain-Driven Design layout across all surfaces.
@@ -152,7 +154,7 @@ Architecture details, patterns, and conventions live in `.claude/rules/`:
 
 ## Subagent Rules
 
-When launching subagents (Agent tool), include relevant rule content directly in the agent prompt -- subagents do NOT auto-load `.claude/rules/`. For Tauri work include `tauri.md`, `rust.md`, `offline-first.md`. For server work include `sync-server.md`, `ddd.md`, `auth.md`. Always include "no Claude authorship" and "Context7 first".
+When launching subagents (Agent tool), include relevant rule content directly in the agent prompt -- subagents do NOT auto-load `.claude/rules/`. For Tauri work include `tauri.md`, `rust.md`, `offline-first.md`. For server work include `sync-server.md`, `ddd.md`, `auth.md`. For frontend / UI work include `frontend.md`, `design-system.md`. Always include "no Claude authorship" and "Context7 first".
 
 ## Common Pitfalls
 
@@ -168,7 +170,7 @@ When launching subagents (Agent tool), include relevant rule content directly in
 <!-- MEMORY:START -->
 # Menu
 
-_Last updated: 2026-05-11 | 0 active memories, 0 total_
+_Last updated: 2026-05-12 | 0 active memories, 0 total_
 
 _For deeper context, use memory_search, memory_related, or memory_ask tools._
 <!-- MEMORY:END -->

@@ -14,7 +14,7 @@ import { SyncPushService } from '../sync/service/push-service'
  */
 export default fp(async (fastify) => {
   const store = new MemorySyncStore()
-  const pushService = new SyncPushService(store, store, store)
+  const pushService = new SyncPushService(store, store, store, store)
   const pullService = new SyncPullService(store, store)
   const conflictService = new ConflictResolveService(store)
 

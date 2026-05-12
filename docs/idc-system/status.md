@@ -7,7 +7,7 @@ _Last updated: 2026-05-11. Source: [roadmap.md](./roadmap.md)._
 | # | Phase | Surfaces | Status | Started | Completed | Local Tables Added | Server Models Added | IPC Commands Added | Routes Added | Services Added |
 |-|-|-|-|-|-|-|-|-|-|-|
 | 01 | Foundation & Sync Plumbing | All | complete | 2026-05-11 | 2026-05-11 | 4 (`outbox`, `sync_state`, `audit_log`, `metrics_events`) | 4 (`AuditLog`, `ProcessedOp`, `SyncCursor`, `ConflictParked`) | 9 | 5 | 6 |
-| 02 | Authentication & Users | All | not_started | - | - | 2 (`users`, `settings`) | 3 (`User`, `Setting`, `RefreshToken`) | ~12 | 4 | 5 |
+| 02 | Authentication & Users | All | complete | 2026-05-11 | 2026-05-11 | 2 (`users`, `settings`) | 3 (`User`, `Setting`, `RefreshToken`) + enums (`UserRole`, `SettingType`) | 15 (auth: 6, users: 7, settings: 3 minus overlap) | 5 (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/change-password`, `/auth/bootstrap-superadmin`) | 4 (AuthService [Rust], UserService, SettingsService, AuthService [TS]) |
 | 03 | Catalog & Reference Data | All | not_started | - | - | 9 (8 tables + 1 FTS5 `doctors_fts`) | 8 | ~16 | 0 | 8 |
 | 04 | Operator Shifts | Frontend, Tauri, Server | not_started | - | - | 1 (`operator_shifts`) | 1 (`OperatorShift`) | 5 | 0 | 1 |
 | 05 | Reception & Visit Lock | All | not_started | - | - | 4 (`patients`, `patients_fts`, `visits`, `inventory_adjustments`) | 3 (`Patient`, `Visit`, `InventoryAdjustment`) | ~12 | 0 | 5 |
@@ -21,16 +21,16 @@ Aggregate ship target after Phase 08: 17 base SQLite tables + 2 FTS5 virtual tab
 
 | Metric | Before | Current | Target |
 |-|-|-|-|
-| SQLite syncable tables | 0 | 1 (`audit_log`) | 15 (PRD §6.1.1-§6.1.15) |
+| SQLite syncable tables | 0 | 3 (`audit_log`, `users`, `settings`) | 15 (PRD §6.1.1-§6.1.15) |
 | SQLite engine tables | 0 | 3 (`outbox`, `sync_state`, `metrics_events`) | 3 |
 | SQLite FTS5 virtual tables | 0 | 0 | 2 (`patients_fts`, `doctors_fts`) |
-| Prisma syncable models | 0 | 1 (`AuditLog`) | 15 |
-| Prisma server-only models | 0 | 3 (`ProcessedOp`, `SyncCursor`, `ConflictParked`) | 4 (incl. `RefreshToken` in phase-02) |
-| Tauri IPC commands | 0 | 9 | ~55-67 |
-| Sync-server routes | 2 (template only) | 6 (`/`, `/healthz`, `/sync/push`, `/sync/pull`, `/sync/lookup-op`, `/sync/conflicts/:opId/resolve`) | 11 (incl. `/healthz` and `/documentation`) |
-| Frontend pages | 2 (`/`, `*`) | 2 (`/` wrapped in `<AppShell>`, `*`) | 31 (29 PRD pages + `/login` + `/no-access` + `/lock` + `/sync/conflicts` minus the duplicate `/` redirect) |
-| Conflict policies in use | 0 | 1 (`additive-only` for `audit_log`) | 3 (`last-write-wins`, `additive-only`, `manual`) |
-| Locales | 2 (ar+en) | 2 (3 namespaces: `common`, `errors`, `receipts`) | 2 |
+| Prisma syncable models | 0 | 3 (`AuditLog`, `User`, `Setting`) | 15 |
+| Prisma server-only models | 0 | 4 (`ProcessedOp`, `SyncCursor`, `ConflictParked`, `RefreshToken`) | 4 |
+| Tauri IPC commands | 0 | 24 (sync: 9, auth: 6, users: 7, settings: 3 -- counted unique) | ~55-67 |
+| Sync-server routes | 2 (template only) | 11 (`/`, `/healthz`, `/sync/push`, `/sync/pull`, `/sync/lookup-op`, `/sync/conflicts/:opId/resolve`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/change-password`, `/auth/bootstrap-superadmin`) | 11 (incl. `/healthz` and `/documentation`) |
+| Frontend pages | 2 (`/`, `*`) | 9 (`/`, `*`, `/login`, `/no-access`, `/lock`, `/setup/first-run`, `/admin/users`, `/admin/users/:id`, `/admin/settings`) | 31 |
+| Conflict policies in use | 0 | 3 (`additive-only` for `audit_log`, `last-write-wins` for `users`, `manual` for `settings`) | 3 |
+| Locales | 2 (ar+en) | 2 (5 namespaces: `common`, `errors`, `receipts`, `auth`, `admin`) | 2 |
 | Audit retention (local) | n/a | n/a | 90 days |
 | Audit retention (server) | n/a | n/a | indefinite |
 
@@ -153,6 +153,31 @@ _No blockers at plan-authoring time._
 - Sync-server Phase-1 ships an in-memory store for `audit_log`, `ProcessedOp`, `SyncCursor`, `ConflictParked` so the suite is hermetic. The Prisma-backed swap will be wired in Phase-2 alongside `User` / `Setting`.
 - Verification: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (4 unit + 6 integration), `pnpm lint`, `pnpm build`, sync-server `pnpm test` (11/11) all green.
 - Tauri bundle icons regenerated from `public/logo.png` (Windows ICO, macOS ICNS, Linux PNG, iOS AppIcon set, Android mipmaps).
+
+### Design system retrofit (2026-05-12)
+
+After Phases 1 and 2 shipped, the editorial design system in `.claude/rules/design-system.md` was authored. All Phase 1 and Phase 2 frontend was retrofitted to match before Phase 3 begins:
+
+- `src/index.css` rewritten with editorial tokens (`--paper`, `--paper-2`, `--surface`, `--ink/2/3/4`, `--crimson`, `--gold`, `--success`, `--info`, `--line/-2`), shadcn-alias layer mapping these onto the existing `--background` / `--foreground` / etc. names, and Tailwind v4 `@theme` exposing them as `bg-paper`, `text-ink-3`, `border-crimson`, etc.
+- Inter Variable + Geist Mono Variable bundled offline via `@fontsource-variable/*`. Body sets Inter; `.font-mono` + tabular-nums for IDs / times / money.
+- Component utility classes added: `.eyebrow`, `.status-pill` (+ `is-success/warn/info/danger/live`), `.role-pill` (+ `is-receptionist/accountant/superadmin`), `.count-badge`, `.btn` (+ `btn-primary/ink/ghost/danger`), `.input`, `.field-label`, `.panel` / `.panel-head` / `.panel-body` / `.panel-title`, `.data-table`, `.nav-item`.
+- Shell rebuilt: 64px header (just breadcrumbs + language pill + avatar), 32px status bar (sync pill + mono build/device), 256px sidebar (brand + role pill + grouped nav + user card with lock icon at bottom). All chrome sits on `--paper`; only cards rise to `--surface`.
+- Auth pages (login, lock, no-access, first-run) + first-launch modal use the eyebrow voice, panel cards, and editorial buttons.
+- Admin pages: users list now uses `.data-table` with role-coded pills and status pills; user detail uses role-tinted avatar tile and a `panel`-based danger zone; settings groups keys into editorial panels with a swipe-style toggle for booleans.
+- Home + 404 reworked with the eyebrow date stamp and phase-state cards.
+- Root redirect simplified -- all roles land on `/home` until per-role landing screens ship in later phases.
+- i18n: added `nav.group.{operations,records,admin}`, `auth.role_{role}`, `auth.*_eyebrow`, `admin.eyebrow`, `admin.settings.group.*` + `admin.settings.key.*`, `home.*`, `not_found.*`, `setup.eyebrow` keys to both `en` and `ar` locales.
+- Verification: `pnpm lint` clean (only pre-existing unused-disable warnings in unrelated files), `pnpm build` succeeds, fonts bundled into `dist/assets/`.
+
+### Phase 02 completion notes (2026-05-11)
+
+- **Local schema**: migration `002_users_settings.sql` adds `users` and `settings` with v1 seed (10 required keys). The `audit_log` FK to `users(id)` is deferred (documented in the migration header); application-enforced through `with_audit`.
+- **Server schema**: `User`, `Setting`, `RefreshToken` models with enums `UserRole` / `SettingType`. `pulledAt` added to `AuditLog`, `User`, `Setting` (§7.17, §7.32). All existing models now include the FK back-reference `AuditActor`.
+- **Tauri / Rust**: auth domain (Argon2id hashing, online + offline login, lock/unlock), users service (CRUD + reset-password with audit-first ordering), settings service (per-key validation, superadmin gate, manual conflict policy). 15 new IPC commands; AppState gained `auth_service`, `user_service`, `settings_service`, `user_repo`, `locked` fields.
+- **Sync server**: in-memory `MemoryUserStore` (user + refresh token repository), `AuthService` (Argon2id via `@node-rs/argon2`, sliding 15m/30d JWT pair, sha256-hashed refresh tokens, rotate-on-refresh), routes `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/change-password`, `/auth/bootstrap-superadmin`. Push service extended to dispatch `users` (LWW) and `settings` (manual conflict detection with `ConflictParked` envelope).
+- **Frontend**: `AuthBootstrap` mounts at root and syncs Tauri IPC -> `useAuthStore`. New stores: `useAuthStore`, `useIdleStore`. New components: `RequireAuth` / `RequireRole`, `IdleWatcher`, `UserMenu`. New pages: `/login`, `/no-access`, `/lock`, `/setup/first-run`, `/admin/users`, `/admin/users/:id`, `/admin/settings`. Root `/` performs role-based redirect.
+- **Deferred for Phase 8**: per-PRD-§5.5 stronghold-backed offline-creds cache (currently offline login verifies against locally-synced `users.password_hash` -- sufficient since the row is locally present after first online sync). JWT public-key pinning + JWKS endpoint (§7.10). OS suspend/blur lock-on-suspend hook (§7.26). The `tracing` PII-redaction layer remains a Phase 1 §7.14 follow-up.
+- **Verification**: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (7 unit + 6 integration = 13 Rust), `pnpm lint` (0 errors), `pnpm build`, sync-server `pnpm test` (17/17, including 6 new auth route tests covering login, refresh rotation/reuse rejection, change-password + token revocation, logout, bootstrap idempotency) all green.
 
 Parallel-track notes:
 - Within each phase, the three surfaces (Frontend / Tauri-Rust / Sync Server) work as parallel tracks once the migration files land.

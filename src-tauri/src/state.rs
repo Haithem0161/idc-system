@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
+use crate::domains::auth::domain::repositories::UserRepo;
+use crate::domains::auth::{AuthService, UserService};
+use crate::domains::settings::service::SettingsService;
 use crate::sync::SyncEngineHandle;
 
 /// User context received from Business OS (embedded mode) or the auth flow
@@ -30,8 +33,13 @@ pub type SettingValue = serde_json::Value;
 pub struct AppState {
     db_pool: Option<SqlitePool>,
     sync_engine: Option<SyncEngineHandle>,
+    auth_service: Option<Arc<AuthService>>,
+    user_service: Option<Arc<UserService>>,
+    settings_service: Option<Arc<SettingsService>>,
+    user_repo: Option<Arc<dyn UserRepo>>,
     user_context: RwLock<Option<UserContext>>,
     settings_cache: RwLock<HashMap<String, SettingValue>>,
+    locked: RwLock<bool>,
     device_id: String,
     app_version: String,
     token: RwLock<Option<String>>,
@@ -39,36 +47,49 @@ pub struct AppState {
     sync_server_url: RwLock<Option<String>>,
 }
 
+pub struct AppStateConfig {
+    pub db_pool: SqlitePool,
+    pub sync_engine: SyncEngineHandle,
+    pub auth_service: Arc<AuthService>,
+    pub user_service: Arc<UserService>,
+    pub settings_service: Arc<SettingsService>,
+    pub user_repo: Arc<dyn UserRepo>,
+    pub device_id: String,
+    pub app_version: String,
+    pub sync_server_url: Option<String>,
+}
+
 impl AppState {
-    pub fn new(
-        db_pool: SqlitePool,
-        sync_engine: SyncEngineHandle,
-        device_id: String,
-        app_version: String,
-        sync_server_url: Option<String>,
-    ) -> Self {
+    pub fn new(cfg: AppStateConfig) -> Self {
         Self {
-            db_pool: Some(db_pool),
-            sync_engine: Some(sync_engine),
+            db_pool: Some(cfg.db_pool),
+            sync_engine: Some(cfg.sync_engine),
+            auth_service: Some(cfg.auth_service),
+            user_service: Some(cfg.user_service),
+            settings_service: Some(cfg.settings_service),
+            user_repo: Some(cfg.user_repo),
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
-            device_id,
-            app_version,
+            locked: RwLock::new(false),
+            device_id: cfg.device_id,
+            app_version: cfg.app_version,
             token: RwLock::new(None),
             expires_at: RwLock::new(None),
-            sync_server_url: RwLock::new(sync_server_url),
+            sync_server_url: RwLock::new(cfg.sync_server_url),
         }
     }
 
-    /// Minimal state for embedded (Business OS) mode: auth + user context
-    /// only. Sync engine and DB pool are absent; any command that depends on
-    /// them returns `AppError::Configuration`.
     pub fn for_embedded() -> Self {
         Self {
             db_pool: None,
             sync_engine: None,
+            auth_service: None,
+            user_service: None,
+            settings_service: None,
+            user_repo: None,
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
+            locked: RwLock::new(false),
             device_id: String::new(),
             app_version: env!("CARGO_PKG_VERSION").to_string(),
             token: RwLock::new(None),
@@ -89,6 +110,22 @@ impl AppState {
 
     pub fn try_sync_engine(&self) -> Option<&SyncEngineHandle> {
         self.sync_engine.as_ref()
+    }
+
+    pub fn auth_service(&self) -> Option<Arc<AuthService>> {
+        self.auth_service.clone()
+    }
+
+    pub fn user_service(&self) -> Option<Arc<UserService>> {
+        self.user_service.clone()
+    }
+
+    pub fn settings_service(&self) -> Option<Arc<SettingsService>> {
+        self.settings_service.clone()
+    }
+
+    pub fn user_repo(&self) -> Option<Arc<dyn UserRepo>> {
+        self.user_repo.clone()
     }
 
     pub fn device_id(&self) -> &str {
@@ -127,6 +164,7 @@ impl AppState {
         *self.token.write().await = None;
         *self.expires_at.write().await = None;
         *self.user_context.write().await = None;
+        *self.locked.write().await = false;
         if let Some(engine) = &self.sync_engine {
             engine.set_token(None).await;
         }
@@ -134,6 +172,14 @@ impl AppState {
 
     pub async fn is_authenticated(&self) -> bool {
         self.user_context.read().await.is_some()
+    }
+
+    pub async fn set_locked(&self, locked: bool) {
+        *self.locked.write().await = locked;
+    }
+
+    pub async fn is_locked(&self) -> bool {
+        *self.locked.read().await
     }
 
     pub async fn set_setting(&self, key: String, value: SettingValue) {
@@ -156,9 +202,6 @@ impl AppState {
         self.sync_server_url.read().await.clone()
     }
 
-    /// Tenant identifier used by audit + sync. Resolved from the user context
-    /// when available; falls back to a "unscoped" sentinel pre-login (the
-    /// engine writes telemetry under this id during Phase-1 smoke).
     pub async fn entity_id_tenant(&self) -> String {
         self.user_context
             .read()

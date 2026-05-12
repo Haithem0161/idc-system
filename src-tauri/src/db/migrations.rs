@@ -11,10 +11,16 @@ use crate::error::{AppError, AppResult};
 /// Embedded migrations.
 ///
 /// Ordering is by filename; keep the `NNN_` prefix.
-const MIGRATIONS: &[(&str, &str)] = &[(
-    "001_foundation.sql",
-    include_str!("../../migrations/001_foundation.sql"),
-)];
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "001_foundation.sql",
+        include_str!("../../migrations/001_foundation.sql"),
+    ),
+    (
+        "002_users_settings.sql",
+        include_str!("../../migrations/002_users_settings.sql"),
+    ),
+];
 
 /// Apply every embedded migration that has not already run.
 pub async fn run(pool: &SqlitePool) -> AppResult<()> {
@@ -71,15 +77,54 @@ pub async fn run(pool: &SqlitePool) -> AppResult<()> {
 
 /// Split a SQL file into individual statements on top-level semicolons.
 ///
-/// SQLite drivers expect one statement per call; comments and blank lines are
-/// passed through (the driver tolerates them). We deliberately keep the parser
-/// trivial -- migrations here never use string literals that contain `;`.
+/// Skips `;` inside `--` line comments and inside single-quoted string
+/// literals. Migrations here never use multi-line `/* ... */` comments or
+/// dollar-quoted strings; extend this parser if that changes.
 fn split_statements(sql: &str) -> Vec<String> {
-    sql.split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| format!("{s};"))
-        .collect()
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_string = false;
+    let mut in_line_comment = false;
+    let mut chars = sql.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_line_comment {
+            current.push(c);
+            if c == '\n' {
+                in_line_comment = false;
+            }
+            continue;
+        }
+        if in_string {
+            current.push(c);
+            if c == '\'' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '-' if matches!(chars.peek(), Some('-')) => {
+                current.push(c);
+                in_line_comment = true;
+            }
+            '\'' => {
+                current.push(c);
+                in_string = true;
+            }
+            ';' => {
+                let trimmed = current.trim().to_string();
+                if !trimmed.is_empty() {
+                    out.push(format!("{trimmed};"));
+                }
+                current.clear();
+            }
+            _ => current.push(c),
+        }
+    }
+    let trimmed = current.trim().to_string();
+    if !trimmed.is_empty() {
+        out.push(format!("{trimmed};"));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -102,11 +147,18 @@ mod tests {
         // Tables exist
         let (count,): (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN \
-            ('outbox', 'sync_state', 'audit_log', 'metrics_events')",
+            ('outbox', 'sync_state', 'audit_log', 'metrics_events', 'users', 'settings')",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(count, 4);
+        assert_eq!(count, 6);
+
+        // Seed populated 10 setting keys
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM settings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(n, 10);
     }
 }

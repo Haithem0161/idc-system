@@ -24,7 +24,29 @@
     "users": "Users",
     "audit": "Audit log",
     "settings": "Settings",
-    "coming_soon": "Coming soon"
+    "coming_soon": "Coming soon",
+    "group": {
+      "operations": "Operations",
+      "records": "Records",
+      "admin": "Administration"
+    }
+  },
+  "home": {
+    "greeting": "Good morning, {{name}}.",
+    "subtitle": "Offline-first clinic operations. The rest of the workspace lights up as phases ship.",
+    "phase_01_title": "Foundation & sync",
+    "phase_01_body": "SQLite, outbox, audit log, push/pull engine.",
+    "phase_02_title": "Authentication & users",
+    "phase_02_body": "JWT, roles, settings, idle lock, first-run bootstrap.",
+    "phase_03_title": "Catalog & reference data",
+    "phase_03_body": "Doctors, check types, pricing, operators.",
+    "status_done": "Shipped",
+    "status_next": "Up next",
+    "status_later": "Planned"
+  },
+  "not_found": {
+    "eyebrow": "Lost",
+    "body": "We could not find that page."
   },
   "a11y": {
     "skip_to_content": "Skip to content",
@@ -52,6 +74,7 @@
   "setup": {
     "title": "First-launch setup",
     "subtitle": "Enter the URL of your sync server. You can change this later from settings.",
+    "eyebrow": "Setup",
     "url_label": "Sync server URL",
     "url_required": "Sync server URL is required",
     "url_invalid": "Failed to save sync server URL",

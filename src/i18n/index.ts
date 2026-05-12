@@ -6,26 +6,48 @@ import enCommon from "./locales/en/common.json"
 import enErrors from "./locales/en/errors.json"
 import enReceipts from "./locales/en/receipts.json"
 import enLegacy from "./locales/en/translation.json"
+import enAuth from "./locales/en/auth.json"
+import enAdmin from "./locales/en/admin.json"
 import arCommon from "./locales/ar/common.json"
 import arErrors from "./locales/ar/errors.json"
 import arReceipts from "./locales/ar/receipts.json"
 import arLegacy from "./locales/ar/translation.json"
+import arAuth from "./locales/ar/auth.json"
+import arAdmin from "./locales/ar/admin.json"
 
 // Phase-01 §7.10: split locales into namespaces. The legacy `translation.json`
 // stays as the default namespace for backwards compatibility with existing
 // pages until each phase migrates its strings.
 const resources = {
   en: {
-    translation: { ...enLegacy, ...enCommon, ...enErrors, ...enReceipts },
+    translation: {
+      ...enLegacy,
+      ...enCommon,
+      ...enErrors,
+      ...enReceipts,
+      ...enAuth,
+      ...enAdmin,
+    },
     common: enCommon,
     errors: enErrors,
     receipts: enReceipts,
+    auth: enAuth,
+    admin: enAdmin,
   },
   ar: {
-    translation: { ...arLegacy, ...arCommon, ...arErrors, ...arReceipts },
+    translation: {
+      ...arLegacy,
+      ...arCommon,
+      ...arErrors,
+      ...arReceipts,
+      ...arAuth,
+      ...arAdmin,
+    },
     common: arCommon,
     errors: arErrors,
     receipts: arReceipts,
+    auth: arAuth,
+    admin: arAdmin,
   },
 }
 

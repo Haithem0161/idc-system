@@ -1,12 +1,29 @@
-import { decode as decodeMsgpack } from '@msgpack/msgpack'
-
 import { DomainError } from '../../common/errors/domain'
-import type { AuditPayload, ParkedConflict, PushOp } from '../domain/types'
+import type { ParkedConflict, PushOp } from '../domain/types'
 import type {
   AuditLogRepository,
   ConflictParkedRepository,
   ProcessedOpRepository,
 } from '../domain/repositories'
+import type {
+  MemorySyncStore,
+  SettingSyncRecord,
+  UserSyncRecord,
+} from '../infrastructure/memory/store'
+import { decodeAuditPayload, decodeJsonPayload } from './push-decoders'
+
+const PROTECTED_SETTING_KEYS = new Set([
+  'dye_cost_iqd',
+  'report_cost_iqd',
+  'internal_doctor_pct',
+  'idle_lock_minutes',
+  'arabic_numerals',
+  'clinic_display_name_ar',
+  'clinic_display_name_en',
+  'currency_symbol',
+  'thermal_width',
+  'thermal_printer_name',
+])
 
 export interface PushAccepted {
   op_id: string
@@ -18,31 +35,37 @@ export interface PushOutcome {
   conflicts: ParkedConflict[]
 }
 
+export interface ActorClaims {
+  sub: string
+  role: 'superadmin' | 'receptionist' | 'accountant'
+  entityId: string
+}
+
 export class SyncPushService {
   constructor (
     private readonly audit: AuditLogRepository,
-    // Reserved for entities that use the manual policy; phase-01 has none.
-    private readonly _conflicts: ConflictParkedRepository,
-    private readonly processed: ProcessedOpRepository
-  ) {
-    void this._conflicts
-  }
+    private readonly conflicts: ConflictParkedRepository,
+    private readonly processed: ProcessedOpRepository,
+    private readonly store: MemorySyncStore
+  ) {}
 
-  async apply (batch: PushOp[], tenantId: string, deviceId: string): Promise<PushOutcome> {
+  async apply (
+    batch: PushOp[],
+    tenantId: string,
+    deviceId: string,
+    actor?: ActorClaims
+  ): Promise<PushOutcome> {
     void deviceId
     const accepted: PushAccepted[] = []
     const conflicts: ParkedConflict[] = []
 
     for (const op of batch) {
-      // Idempotency: replay the cached response.
       const cached = await this.processed.has(op.op_id, tenantId)
       if (cached) {
         accepted.push({ op_id: op.op_id, status: 'duplicate' })
         continue
       }
-
       if (op.op !== 'upsert') {
-        // §7.15: server rejects all non-upsert ops in v1.
         throw new DomainError(
           'UNSUPPORTED_OP',
           `op kind ${String(op.op)} is not supported in v1`,
@@ -51,38 +74,73 @@ export class SyncPushService {
         )
       }
 
-      if (op.entity !== 'audit_log') {
-        // Phase-1 accepts only audit_log; subsequent phases add entities.
-        throw new DomainError(
-          'VALIDATION_ERROR',
-          `entity ${op.entity} not handled in phase-01`,
-          422,
-          { op_id: op.op_id }
-        )
+      switch (op.entity) {
+        case 'audit_log': {
+          const payload = decodeAuditPayload(op.payload_b64)
+          if (payload.entity_id_tenant !== tenantId) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'payload entity_id_tenant must match JWT entityId',
+              403,
+              { op_id: op.op_id }
+            )
+          }
+          if (payload.deleted_at != null) {
+            throw new DomainError(
+              'AUDIT_IMMUTABLE',
+              'audit rows are append-only; deleted_at must be null',
+              422,
+              { op_id: op.op_id }
+            )
+          }
+          await this.audit.insertMany([payload])
+          break
+        }
+        case 'users': {
+          this.requireSuperadmin(actor, 'users push')
+          const row = decodeJsonPayload<UserSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          await this.store.upsertUser(row)
+          break
+        }
+        case 'settings': {
+          this.requireSuperadmin(actor, 'settings push')
+          const row = decodeJsonPayload<SettingSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          if (row.deleted_at && PROTECTED_SETTING_KEYS.has(row.key)) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              `${row.key} is a required setting and cannot be deleted`,
+              422,
+              { op_id: op.op_id }
+            )
+          }
+          const conflict = this.store.detectSettingConflict(row)
+          if (conflict) {
+            const envelope: ParkedConflict = {
+              opId: op.op_id,
+              entity: 'settings',
+              entityId: row.id,
+              serverPayload: conflict,
+              localPayload: row,
+              reason: 'manual_policy_version_divergence',
+            }
+            await this.conflicts.park({ ...envelope, tenantId })
+            conflicts.push(envelope)
+            continue
+          }
+          await this.store.upsertSetting(row)
+          break
+        }
+        default:
+          throw new DomainError(
+            'VALIDATION_ERROR',
+            `entity ${op.entity} not handled in this phase`,
+            422,
+            { op_id: op.op_id }
+          )
       }
 
-      const payload = decodeAuditPayload(op.payload_b64)
-
-      if (payload.entity_id_tenant !== tenantId) {
-        throw new DomainError(
-          'VALIDATION_ERROR',
-          'payload entity_id_tenant must match JWT entityId',
-          403,
-          { op_id: op.op_id }
-        )
-      }
-
-      if (payload.deleted_at != null) {
-        // §7.21: server REJECTS pushes that try to delete an audit row.
-        throw new DomainError(
-          'AUDIT_IMMUTABLE',
-          'audit rows are append-only; deleted_at must be null',
-          422,
-          { op_id: op.op_id }
-        )
-      }
-
-      await this.audit.insertMany([payload])
       const response = { op_id: op.op_id, status: 'applied' as const, body: { ok: true } }
       await this.processed.remember(op.op_id, tenantId, response)
       accepted.push({ op_id: op.op_id, status: 'applied' })
@@ -90,47 +148,25 @@ export class SyncPushService {
 
     return { accepted, conflicts }
   }
-}
 
-function decodeAuditPayload (b64: string): AuditPayload {
-  const bytes = Buffer.from(b64, 'base64')
-  let raw: unknown
-  try {
-    raw = decodeMsgpack(bytes)
-  } catch (err) {
-    throw new DomainError(
-      'VALIDATION_ERROR',
-      'payload is not valid MessagePack',
-      422,
-      { reason: (err as Error).message }
-    )
-  }
-  if (!raw || typeof raw !== 'object') {
-    throw new DomainError('VALIDATION_ERROR', 'payload root must be an object', 422)
-  }
-  const obj = raw as Record<string, unknown>
-  const required = ['id', 'actor_user_id', 'action', 'entity', 'entity_id', 'device_id', 'entity_id_tenant'] as const
-  for (const key of required) {
-    if (typeof obj[key] !== 'string') {
-      throw new DomainError('VALIDATION_ERROR', `audit payload missing field: ${key}`, 422)
+  private requireSuperadmin (actor: ActorClaims | undefined, what: string): void {
+    if (!actor || actor.role !== 'superadmin') {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        `${what} requires superadmin role`,
+        403
+      )
     }
   }
-  return {
-    id: String(obj.id),
-    actor_user_id: String(obj.actor_user_id),
-    action: String(obj.action),
-    entity: String(obj.entity),
-    entity_id: String(obj.entity_id),
-    delta: (obj.delta as Record<string, unknown>) ?? {},
-    ip: typeof obj.ip === 'string' ? obj.ip : null,
-    device_id: String(obj.device_id),
-    at: typeof obj.at === 'string' ? obj.at : new Date().toISOString(),
-    created_at: typeof obj.created_at === 'string' ? obj.created_at : new Date().toISOString(),
-    updated_at: typeof obj.updated_at === 'string' ? obj.updated_at : new Date().toISOString(),
-    deleted_at: typeof obj.deleted_at === 'string' ? obj.deleted_at : null,
-    version: typeof obj.version === 'number' ? obj.version : 1,
-    last_synced_at: null,
-    origin_device_id: typeof obj.origin_device_id === 'string' ? obj.origin_device_id : null,
-    entity_id_tenant: String(obj.entity_id_tenant),
+}
+
+function assertTenantMatches (rowTenant: string, tenantId: string, opId: string): void {
+  if (rowTenant !== tenantId) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'payload entity_id must match JWT entityId',
+      403,
+      { op_id: opId }
+    )
   }
 }

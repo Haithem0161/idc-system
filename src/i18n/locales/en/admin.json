@@ -1,0 +1,61 @@
+{
+  "admin": {
+    "eyebrow": "Administration",
+    "users": {
+      "title": "Users",
+      "subtitle": "Operators with access to the clinic system.",
+      "back": "Back to users",
+      "profile": "Profile",
+      "include_inactive": "Include inactive",
+      "new": "New user",
+      "save": "Save",
+      "saved": "Saved",
+      "cancel": "Cancel",
+      "edit": "Edit",
+      "email": "Email",
+      "name": "Name",
+      "role": "Role",
+      "status": "Status",
+      "active": "Active",
+      "active_yes": "Active",
+      "active_no": "Inactive",
+      "actions": "Actions",
+      "role_superadmin": "Superadmin",
+      "role_receptionist": "Receptionist",
+      "role_accountant": "Accountant",
+      "empty": "No users yet",
+      "reset_password": "Reset password",
+      "new_password": "New password",
+      "password_reset_ok": "Password reset",
+      "password_too_short": "Password must be at least 8 characters",
+      "danger_zone": "Danger zone",
+      "delete": "Delete user",
+      "delete_confirm": "Soft-delete this user? Active sessions will be revoked.",
+      "delete_warning": "Soft-deletes the user and revokes all active sessions."
+    },
+    "settings": {
+      "title": "Settings",
+      "subtitle": "Configure clinic operations.",
+      "saved": "Saved",
+      "group": {
+        "identity": "Clinic identity",
+        "pricing": "Pricing",
+        "security": "Security",
+        "display": "Display",
+        "printing": "Receipt printing"
+      },
+      "key": {
+        "clinic_display_name_ar": "Clinic name (Arabic)",
+        "clinic_display_name_en": "Clinic name (English)",
+        "currency_symbol": "Currency symbol",
+        "dye_cost_iqd": "Dye cost (IQD)",
+        "report_cost_iqd": "Report cost (IQD)",
+        "internal_doctor_pct": "Internal doctor share (%)",
+        "idle_lock_minutes": "Idle lock (minutes)",
+        "arabic_numerals": "Arabic-Indic numerals",
+        "thermal_width": "Thermal printer width",
+        "thermal_printer_name": "Thermal printer name"
+      }
+    }
+  }
+}

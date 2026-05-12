@@ -34,6 +34,7 @@ pub trait BusinessWrite: Send {
     async fn write(&mut self, tx: &mut Tx<'_>) -> AppResult<(serde_json::Value, Vec<OutboxOp>)>;
 }
 
+#[derive(Clone)]
 pub struct AuditWriter {
     audit_repo: Arc<dyn AuditRepo>,
     outbox_repo: Arc<dyn OutboxRepo>,

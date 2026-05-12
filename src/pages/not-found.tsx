@@ -7,12 +7,15 @@ export default function NotFoundPage() {
   const { t } = useTranslation()
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-4">
-      <Logo size={64} className="opacity-70" />
-      <h1 className="text-4xl font-bold">404</h1>
-      <p className="text-muted-foreground">Page not found</p>
-      <Link to="/" className="text-primary underline">
-        {t("nav.home")}
+    <div className="flex min-h-svh flex-col items-center justify-center gap-5 bg-paper px-6 py-12 text-center">
+      <Logo size={44} className="opacity-60" />
+      <span className="eyebrow">{t("not_found.eyebrow", { defaultValue: "Lost" })}</span>
+      <div className="space-y-2">
+        <p className="font-mono text-[44px] font-semibold leading-none tracking-[-0.02em] text-ink">404</p>
+        <p className="text-[14px] text-ink-3">{t("not_found.body", { defaultValue: "We could not find that page." })}</p>
+      </div>
+      <Link to="/" className="btn btn-ink btn-sm">
+        {t("nav.home", { defaultValue: "Home" })}
       </Link>
     </div>
   )

@@ -1,0 +1,61 @@
+{
+  "admin": {
+    "eyebrow": "الإدارة",
+    "users": {
+      "title": "المستخدمون",
+      "subtitle": "المشغّلون الذين لديهم وصول إلى نظام العيادة.",
+      "back": "رجوع إلى المستخدمين",
+      "profile": "الملف الشخصي",
+      "include_inactive": "تضمين غير النشطين",
+      "new": "مستخدم جديد",
+      "save": "حفظ",
+      "saved": "تم الحفظ",
+      "cancel": "إلغاء",
+      "edit": "تعديل",
+      "email": "البريد الإلكتروني",
+      "name": "الاسم",
+      "role": "الدور",
+      "status": "الحالة",
+      "active": "نشط",
+      "active_yes": "نشط",
+      "active_no": "غير نشط",
+      "actions": "إجراءات",
+      "role_superadmin": "مسؤول أعلى",
+      "role_receptionist": "موظف استقبال",
+      "role_accountant": "محاسب",
+      "empty": "لا يوجد مستخدمون بعد",
+      "reset_password": "إعادة تعيين كلمة المرور",
+      "new_password": "كلمة المرور الجديدة",
+      "password_reset_ok": "تم إعادة تعيين كلمة المرور",
+      "password_too_short": "يجب أن تكون كلمة المرور 8 أحرف على الأقل",
+      "danger_zone": "منطقة الخطر",
+      "delete": "حذف المستخدم",
+      "delete_confirm": "حذف هذا المستخدم بشكل ناعم؟ سيتم إلغاء الجلسات النشطة.",
+      "delete_warning": "يقوم بحذف المستخدم بشكل ناعم وإلغاء جميع الجلسات النشطة."
+    },
+    "settings": {
+      "title": "الإعدادات",
+      "subtitle": "تكوين عمليات العيادة.",
+      "saved": "تم الحفظ",
+      "group": {
+        "identity": "هوية العيادة",
+        "pricing": "التسعير",
+        "security": "الأمان",
+        "display": "العرض",
+        "printing": "طباعة الإيصالات"
+      },
+      "key": {
+        "clinic_display_name_ar": "اسم العيادة (عربي)",
+        "clinic_display_name_en": "اسم العيادة (إنجليزي)",
+        "currency_symbol": "رمز العملة",
+        "dye_cost_iqd": "تكلفة الصبغة (د.ع)",
+        "report_cost_iqd": "تكلفة التقرير (د.ع)",
+        "internal_doctor_pct": "حصة الطبيب الداخلي (٪)",
+        "idle_lock_minutes": "قفل عند الخمول (دقائق)",
+        "arabic_numerals": "الأرقام العربية الهندية",
+        "thermal_width": "عرض الطابعة الحرارية",
+        "thermal_printer_name": "اسم الطابعة الحرارية"
+      }
+    }
+  }
+}

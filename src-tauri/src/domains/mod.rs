@@ -10,4 +10,6 @@
 //! ```
 
 pub mod _example;
+pub mod auth;
+pub mod settings;
 pub mod sync;

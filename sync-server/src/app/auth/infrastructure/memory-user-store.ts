@@ -1,0 +1,161 @@
+import { randomUUID, createHash, randomBytes } from 'node:crypto'
+
+import type {
+  RefreshTokenRepository,
+  UserRepository,
+} from '../domain/repositories'
+import type {
+  RefreshTokenRecord,
+  UserRecord,
+  UserRole,
+} from '../domain/types'
+
+/**
+ * In-memory user + refresh token store for Phase-2 development and tests.
+ * Production swap-in: Prisma-backed implementation that follows the same
+ * port contract.
+ */
+export class MemoryUserStore implements UserRepository, RefreshTokenRepository {
+  private readonly users = new Map<string, UserRecord>()
+  private readonly tokens = new Map<string, RefreshTokenRecord>()
+  private readonly tokenHashes = new Map<string, string>()
+
+  async getByEmail (email: string, entityId: string): Promise<UserRecord | null> {
+    const lower = email.trim().toLowerCase()
+    for (const u of this.users.values()) {
+      if (u.entityId === entityId && u.email === lower && u.deletedAt === null) {
+        return u
+      }
+    }
+    return null
+  }
+
+  async getById (id: string): Promise<UserRecord | null> {
+    return this.users.get(id) ?? null
+  }
+
+  async create (input: {
+    id: string
+    email: string
+    name: string
+    passwordHash: string
+    role: UserRole
+    entityId: string
+  }): Promise<UserRecord> {
+    const now = new Date().toISOString()
+    const record: UserRecord = {
+      id: input.id,
+      email: input.email.trim().toLowerCase(),
+      name: input.name.trim(),
+      passwordHash: input.passwordHash,
+      role: input.role,
+      isActive: true,
+      entityId: input.entityId,
+      lastLoginAt: null,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      version: 1,
+    }
+    this.users.set(record.id, record)
+    return record
+  }
+
+  async updateLastLogin (id: string): Promise<void> {
+    const u = this.users.get(id)
+    if (!u) return
+    u.lastLoginAt = new Date().toISOString()
+    u.updatedAt = u.lastLoginAt
+  }
+
+  async updatePasswordHash (id: string, passwordHash: string): Promise<void> {
+    const u = this.users.get(id)
+    if (!u) return
+    u.passwordHash = passwordHash
+    u.version += 1
+    u.updatedAt = new Date().toISOString()
+    await this.revokeAllForUser(id)
+  }
+
+  async count (): Promise<number> {
+    let n = 0
+    for (const u of this.users.values()) {
+      if (u.deletedAt === null) n += 1
+    }
+    return n
+  }
+
+  async issue (input: {
+    userId: string
+    entityIdTenant: string
+    deviceId: string | null
+    ttlSeconds: number
+  }): Promise<{ id: string, plaintextToken: string, expiresAt: string }> {
+    const plaintext = randomBytes(32).toString('hex')
+    const hash = sha256(plaintext)
+    const id = randomUUID()
+    const expiresAt = new Date(Date.now() + input.ttlSeconds * 1000).toISOString()
+    const record: RefreshTokenRecord = {
+      id,
+      userId: input.userId,
+      tokenHash: hash,
+      entityIdTenant: input.entityIdTenant,
+      expiresAt,
+      revokedAt: null,
+      createdAt: new Date().toISOString(),
+      deviceId: input.deviceId,
+    }
+    this.tokens.set(id, record)
+    this.tokenHashes.set(hash, id)
+    return { id, plaintextToken: plaintext, expiresAt }
+  }
+
+  async rotate (presentedToken: string, deviceId: string | null) {
+    const hash = sha256(presentedToken)
+    const id = this.tokenHashes.get(hash)
+    const current = id ? this.tokens.get(id) : null
+    if (!current || current.revokedAt !== null) {
+      throw new Error('invalid refresh token')
+    }
+    if (Date.parse(current.expiresAt) < Date.now()) {
+      throw new Error('expired refresh token')
+    }
+    current.revokedAt = new Date().toISOString()
+
+    const issued = await this.issue({
+      userId: current.userId,
+      entityIdTenant: current.entityIdTenant,
+      deviceId,
+      ttlSeconds: 60 * 60 * 24 * 30,
+    })
+    return {
+      ...issued,
+      userId: current.userId,
+      entityIdTenant: current.entityIdTenant,
+    }
+  }
+
+  async revokeByPlaintext (plaintextToken: string): Promise<void> {
+    const hash = sha256(plaintextToken)
+    const id = this.tokenHashes.get(hash)
+    if (!id) return
+    const t = this.tokens.get(id)
+    if (t) t.revokedAt = new Date().toISOString()
+  }
+
+  async revokeAllForUser (userId: string): Promise<void> {
+    for (const t of this.tokens.values()) {
+      if (t.userId === userId && t.revokedAt === null) {
+        t.revokedAt = new Date().toISOString()
+      }
+    }
+  }
+
+  async loadRaw (id: string): Promise<RefreshTokenRecord | null> {
+    return this.tokens.get(id) ?? null
+  }
+}
+
+function sha256 (input: string): string {
+  return createHash('sha256').update(input).digest('hex')
+}

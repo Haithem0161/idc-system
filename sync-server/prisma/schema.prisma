@@ -1,5 +1,5 @@
-// IDC sync-server Prisma schema (Phase 1).
-// Postgres target. See docs/idc-system/phase-01.md §2.
+// IDC sync-server Prisma schema (Phase 2).
+// Postgres target. See docs/idc-system/phase-02.md §2.
 
 generator client {
   provider = "prisma-client-js"
@@ -28,6 +28,8 @@ model AuditLog {
   pulledAt        DateTime? @map("pulled_at") @db.Timestamptz
   originDeviceId  String?   @map("origin_device_id")
   entityIdTenant  String    @map("entity_id_tenant")
+
+  actor           User?     @relation("AuditActor", fields: [actorUserId], references: [id])
 
   @@index([entityIdTenant, at(sort: Desc)])
   @@index([entityIdTenant, entity, entityId, at(sort: Desc)])
@@ -68,4 +70,75 @@ model ConflictParked {
 
   @@index([entityIdTenant, resolvedAt])
   @@map("conflicts_parked")
+}
+
+model User {
+  id              String    @id
+  email           String
+  name            String
+  passwordHash    String    @map("password_hash")
+  role            UserRole
+  isActive        Boolean   @default(true) @map("is_active")
+  lastLoginAt     DateTime? @map("last_login_at") @db.Timestamptz
+  createdAt       DateTime  @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+  version         Int       @default(0)
+  lastSyncedAt    DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt        DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId  String?   @map("origin_device_id")
+  entityId        String    @map("entity_id")
+
+  refreshTokens   RefreshToken[]
+  auditEntries    AuditLog[]     @relation("AuditActor")
+
+  @@unique([entityId, email], name: "user_email_unique")
+  @@map("users")
+}
+
+enum UserRole {
+  superadmin
+  receptionist
+  accountant
+}
+
+model Setting {
+  id              String       @id
+  key             String
+  value           String
+  valueType       SettingType  @map("value_type")
+  createdAt       DateTime     @map("created_at") @db.Timestamptz
+  updatedAt       DateTime     @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime?    @map("deleted_at") @db.Timestamptz
+  version         Int          @default(0)
+  lastSyncedAt    DateTime?    @map("last_synced_at") @db.Timestamptz
+  pulledAt        DateTime?    @map("pulled_at") @db.Timestamptz
+  originDeviceId  String?      @map("origin_device_id")
+  entityId        String       @map("entity_id")
+
+  @@unique([entityId, key])
+  @@map("settings")
+}
+
+enum SettingType {
+  int
+  decimal
+  text
+  bool
+}
+
+model RefreshToken {
+  id              String    @id @default(uuid())
+  userId          String    @map("user_id")
+  tokenHash       String    @unique @map("token_hash")
+  entityIdTenant  String    @map("entity_id_tenant")
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deviceId        String?   @map("device_id")
+
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@index([entityIdTenant, userId])
+  @@map("refresh_tokens")
 }

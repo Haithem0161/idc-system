@@ -5,11 +5,9 @@ import { invoke, isTauri } from "@/lib/ipc"
 import { Logo } from "@/components/shell/logo"
 
 /**
- * Phase-1 first-launch modal (phase-01 §7.22).
- *
- * Prompts for the sync server URL and writes it via the Tauri config IPC.
- * If the URL is already set (or the env override is present) the modal stays
- * closed.
+ * First-launch modal (phase-01 §7.22). Captures the sync server URL via the
+ * Tauri config IPC; stays closed once the URL is set or the env override is
+ * present.
  */
 export function FirstLaunchSetup() {
   const { t } = useTranslation()
@@ -63,54 +61,56 @@ export function FirstLaunchSetup() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="setup-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-6 py-10 backdrop-blur-sm"
     >
       <form
         onSubmit={submit}
-        className="w-full max-w-md space-y-4 rounded-lg border border-border bg-card p-6 shadow-lg"
+        className="panel w-full max-w-md shadow-[0_20px_60px_rgba(10,18,48,0.18)]"
       >
-        <div className="flex flex-col items-center gap-3 text-center">
-          <Logo size={56} />
-          <div className="space-y-1">
-            <h2 id="setup-title" className="text-lg font-semibold">
-              {t("setup.title", { defaultValue: "First-launch setup" })}
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              {t("setup.subtitle", {
-                defaultValue:
-                  "Enter the URL of your sync server. You can change this later from settings.",
-              })}
-            </p>
+        <div className="panel-body space-y-5">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <Logo size={44} />
+            <span className="eyebrow">{t("setup.eyebrow", { defaultValue: "Setup" })}</span>
+            <div className="space-y-1">
+              <h2 id="setup-title" className="text-[22px] font-bold leading-[1.15] tracking-[-0.02em] text-ink">
+                {t("setup.title", { defaultValue: "First-launch setup" })}
+              </h2>
+              <p className="text-[13px] text-ink-3">
+                {t("setup.subtitle", {
+                  defaultValue: "Enter the URL of your sync server. You can change this later from settings.",
+                })}
+              </p>
+            </div>
           </div>
+          <label className="block">
+            <span className="field-label">
+              {t("setup.url_label", { defaultValue: "Sync server URL" })}
+            </span>
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://sync.example.com"
+              className="input"
+              required
+              autoFocus
+            />
+          </label>
+          {error ? (
+            <div role="alert" className="status-pill is-danger w-full justify-center">
+              {error}
+            </div>
+          ) : null}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="btn btn-primary w-full"
+          >
+            {submitting
+              ? t("setup.saving", { defaultValue: "Saving..." })
+              : t("setup.save", { defaultValue: "Save" })}
+          </button>
         </div>
-        <label className="block space-y-2">
-          <span className="text-sm font-medium">
-            {t("setup.url_label", { defaultValue: "Sync server URL" })}
-          </span>
-          <input
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://sync.example.com"
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            required
-            autoFocus
-          />
-        </label>
-        {error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        >
-          {submitting
-            ? t("setup.saving", { defaultValue: "Saving..." })
-            : t("setup.save", { defaultValue: "Save" })}
-        </button>
       </form>
     </div>
   )

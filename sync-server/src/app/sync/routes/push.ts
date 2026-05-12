@@ -62,7 +62,18 @@ const route: FastifyPluginAsync = async (fastify) => {
     handler: async (request) => {
       const tenantId = request.tenantId
       const deviceId = (request.headers['x-device-id'] as string | undefined) ?? 'unknown'
-      const result = await fastify.pushService.apply(request.body.ops, tenantId, deviceId)
+      const actor = request.user as
+        | { sub?: string; role?: 'superadmin' | 'receptionist' | 'accountant'; entityId?: string }
+        | undefined
+      const actorClaims = actor?.sub && actor.role && actor.entityId
+        ? { sub: actor.sub, role: actor.role, entityId: actor.entityId }
+        : undefined
+      const result = await fastify.pushService.apply(
+        request.body.ops,
+        tenantId,
+        deviceId,
+        actorClaims
+      )
       return {
         accepted: result.accepted,
         conflicts: result.conflicts.map((c) => ({

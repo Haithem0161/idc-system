@@ -1,38 +1,28 @@
 import { useEffect } from "react"
 import { Outlet } from "react-router"
-import { useTranslation } from "react-i18next"
 
 import { invoke, isTauri } from "@/lib/ipc"
 import { useDeviceStore } from "@/stores/device-store"
 import { useSyncEvents } from "@/features/sync/sync-events"
 import { FirstLaunchSetup } from "@/components/setup/first-launch-setup"
+import { IdleWatcher } from "@/components/auth/idle-watcher"
 
 import { Breadcrumbs } from "./breadcrumbs"
 import { LanguageToggle } from "./language-toggle"
-import { Logo } from "./logo"
 import { RtlBoundary } from "./rtl-boundary"
 import { Sidebar } from "./sidebar"
 import { SkipToContent } from "./skip-to-content"
 import { StatusBar } from "./status-bar"
+import { UserMenu } from "./user-menu"
 
 /**
- * Top-level application shell:
- *
- *   <SkipToContent />
- *   <RtlBoundary>
- *     <Sidebar />
- *     <header> -- breadcrumbs + language toggle
- *     <main id="main-content"> -- outlet for child routes
- *     <StatusBar /> -- sync pill + version
- *   </RtlBoundary>
- *
- * Mounted at the root of the router; every authenticated page sits inside it.
+ * Editorial chrome (see .claude/rules/design-system.md §10):
+ *   256px sidebar / fluid main / 64px header / 32px status bar.
+ * The whole frame sits on `--paper`; only `--surface` cards rise from it.
  */
 export function AppShell() {
-  const { t } = useTranslation()
   const setDevice = useDeviceStore((s) => s.setDevice)
 
-  // Bootstrap device info once.
   useEffect(() => {
     if (!isTauri()) return
     let cancelled = false
@@ -49,30 +39,27 @@ export function AppShell() {
     }
   }, [setDevice])
 
-  // Wire sync:* events into the store.
   useSyncEvents()
 
   return (
     <RtlBoundary>
       <SkipToContent />
       <FirstLaunchSetup />
-      <div className="flex h-screen w-full flex-col bg-background text-foreground">
+      <IdleWatcher />
+      <div className="flex h-screen w-full flex-col bg-paper text-ink">
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
-          <div className="flex flex-1 flex-col">
-            <header className="flex h-14 items-center justify-between border-b border-border bg-background px-4">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <header className="flex h-16 shrink-0 items-center justify-between border-b border-line bg-paper px-9">
               <Breadcrumbs />
               <div className="flex items-center gap-2">
-                <Logo size={20} />
-                <span className="text-xs text-muted-foreground">
-                  {t("app.title", { defaultValue: "IDC" })}
-                </span>
                 <LanguageToggle />
+                <UserMenu />
               </div>
             </header>
             <main
               id="main-content"
-              className="flex-1 overflow-y-auto bg-muted/20 p-6"
+              className="flex-1 overflow-y-auto bg-paper px-9 pt-7 pb-16"
               tabIndex={-1}
             >
               <Outlet />
