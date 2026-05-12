@@ -9,7 +9,7 @@ mod doctor_service;
 mod inventory_item_service;
 mod operator_service;
 pub mod operator_specialty_service;
-mod push_payloads;
+pub mod push_payloads;
 
 use std::sync::Arc;
 

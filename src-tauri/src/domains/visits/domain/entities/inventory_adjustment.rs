@@ -86,12 +86,24 @@ impl InventoryAdjustment {
                     "writeoff adjustments must have negative delta".into(),
                 ));
             }
+            AdjustmentReason::CountCorrection if input.delta == 0 => {
+                return Err(AppError::Validation(
+                    "count_correction adjustments must have non-zero delta".into(),
+                ));
+            }
             AdjustmentReason::ConsumeVisit if input.visit_id.is_none() => {
                 return Err(AppError::Validation(
                     "consume_visit adjustments require visit_id".into(),
                 ));
             }
             _ => {}
+        }
+        if let Some(note) = input.note.as_deref() {
+            if note.chars().count() > 500 {
+                return Err(AppError::Validation(
+                    "adjustment note must be 500 characters or fewer".into(),
+                ));
+            }
         }
         let now = Utc::now();
         Ok(Self {
@@ -110,6 +122,86 @@ impl InventoryAdjustment {
             last_synced_at: None,
             origin_device_id: input.origin_device_id,
             entity_id: input.entity_id,
+        })
+    }
+
+    /// Build a `receive` adjustment (positive delta). PRD §7.3.3.
+    pub fn try_receive(
+        item_id: Uuid,
+        qty: i64,
+        by_user_id: Uuid,
+        note: Option<String>,
+        entity_id: String,
+        origin_device_id: Option<String>,
+    ) -> AppResult<Self> {
+        if qty <= 0 {
+            return Err(AppError::Validation(
+                "receive quantity must be positive".into(),
+            ));
+        }
+        Self::try_new(AdjustmentNewInput {
+            item_id,
+            delta: qty,
+            reason: AdjustmentReason::Receive,
+            visit_id: None,
+            note,
+            by_user_id,
+            entity_id,
+            origin_device_id,
+        })
+    }
+
+    /// Build a `writeoff` adjustment from a non-negative quantity; the stored
+    /// delta is negated so the SUM-based recompute decreases on-hand.
+    pub fn try_writeoff(
+        item_id: Uuid,
+        qty: i64,
+        by_user_id: Uuid,
+        note: Option<String>,
+        entity_id: String,
+        origin_device_id: Option<String>,
+    ) -> AppResult<Self> {
+        if qty <= 0 {
+            return Err(AppError::Validation(
+                "writeoff quantity must be positive".into(),
+            ));
+        }
+        Self::try_new(AdjustmentNewInput {
+            item_id,
+            delta: -qty,
+            reason: AdjustmentReason::Writeoff,
+            visit_id: None,
+            note,
+            by_user_id,
+            entity_id,
+            origin_device_id,
+        })
+    }
+
+    /// Build a `count_correction` adjustment from a signed delta. Superadmin
+    /// only at the IPC layer (phase-06 §7.6).
+    pub fn try_count_correction(
+        item_id: Uuid,
+        signed_delta: i64,
+        by_user_id: Uuid,
+        note: Option<String>,
+        entity_id: String,
+        origin_device_id: Option<String>,
+    ) -> AppResult<Self> {
+        if signed_delta == 0 {
+            return Err(AppError::Validation(
+                "count_correction delta must be non-zero".into(),
+            ));
+        }
+        Self::try_new(AdjustmentNewInput {
+            item_id,
+            delta: signed_delta,
+            reason: AdjustmentReason::CountCorrection,
+            visit_id: None,
+            note,
+            by_user_id,
+            entity_id,
+            origin_device_id,
         })
     }
 }

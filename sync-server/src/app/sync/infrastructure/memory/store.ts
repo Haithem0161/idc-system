@@ -415,6 +415,11 @@ export class MemorySyncStore implements
    * Append-only inventory_adjustments. Returns `{ applied: true }` only on
    * a brand-new id; an existing id is a duplicate (handled via
    * ProcessedOp). See phase-05 §7.36.
+   *
+   * Phase-06 §7.3: when the adjustment is applied successfully, recompute
+   * `inventoryItems.quantity_on_hand` for the affected item by summing all
+   * non-deleted adjustments. Mirrors the local SQLite invariant so server
+   * reports do not require a separate recompute job.
    */
   async upsertInventoryAdjustment (
     row: InventoryAdjustmentSyncRecord
@@ -422,9 +427,35 @@ export class MemorySyncStore implements
     const existing = this.inventoryAdjustments.get(row.id)
     if (!existing) {
       this.inventoryAdjustments.set(row.id, row)
+      this.recomputeInventoryItemOnHand(row.item_id)
       return { applied: true, duplicate: false }
     }
     return { applied: false, duplicate: true }
+  }
+
+  /**
+   * Sum all non-deleted adjustments for `itemId` and overwrite the matching
+   * `inventoryItems.quantity_on_hand`. The version is bumped on every
+   * recompute so a subsequent pull surfaces the new total to clients that
+   * receive `inventory_items` rows in the same batch.
+   */
+  recomputeInventoryItemOnHand (itemId: string): number {
+    let sum = 0
+    for (const adj of this.inventoryAdjustments.values()) {
+      if (adj.item_id === itemId && adj.deleted_at == null) {
+        sum += adj.delta
+      }
+    }
+    const item = this.inventoryItems.get(itemId)
+    if (item) {
+      this.inventoryItems.set(itemId, {
+        ...item,
+        quantity_on_hand: sum,
+        version: item.version + 1,
+        updated_at: new Date().toISOString(),
+      })
+    }
+    return sum
   }
 
   async upsertSetting (row: SettingSyncRecord): Promise<{ applied: boolean }> {

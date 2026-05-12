@@ -304,6 +304,40 @@ export type CommandMap = {
     args: { args: { visit_id: string } }
     result: ReceiptArtifactsRecord
   }
+  // ---- Phase 6: inventory operations ----
+  inventory_list_items: {
+    args: {
+      args: {
+        status?: StockStatusLiteral
+        include_inactive?: boolean
+        query?: string | null
+      }
+    }
+    result: InventoryItemWithStatusRecord[]
+  }
+  inventory_get_item: {
+    args: { args: { id: string } }
+    result: InventoryItemDetailRecord
+  }
+  inventory_list_adjustments: {
+    args: { args: { item_id: string; limit?: number } }
+    result: InventoryAdjustmentRecord[]
+  }
+  inventory_create_adjustment: {
+    args: {
+      args: {
+        item_id: string
+        reason: AdjustmentReasonLiteral
+        delta: number
+        note?: string | null
+      }
+    }
+    result: InventoryAdjustmentRecord
+  }
+  inventory_recompute_on_hand: {
+    args: { args: { item_id: string } }
+    result: { new_on_hand: number }
+  }
 }
 
 // ---- Catalog wire shapes -------------------------------------------------
@@ -500,6 +534,73 @@ export interface ConsumptionRecord {
   quantity_per_check: number
   on_dye_only: boolean
   version: number
+}
+
+// ---- Phase 6: inventory operations -------------------------------------
+
+export type StockStatusLiteral = "ok" | "low" | "neg"
+
+export type AdjustmentReasonLiteral =
+  | "receive"
+  | "writeoff"
+  | "count_correction"
+  | "consume_visit"
+
+/**
+ * Item row enriched with the computed stock-status pill and the local
+ * `dirty` flag (consumed by the Pending-sync column in
+ * `<InventoryItemsTable>` per phase-06 §7.12).
+ */
+export interface InventoryItemWithStatusRecord {
+  id: string
+  name_ar: string
+  name_en: string | null
+  unit: string
+  quantity_on_hand: number
+  low_stock_threshold: number
+  is_active: boolean
+  status: StockStatusLiteral
+  updated_at: string
+  created_at: string
+  version: number
+  dirty: boolean
+  last_synced_at: string | null
+  entity_id: string
+}
+
+export interface InventoryConsumptionMapRecord {
+  id: string
+  check_type_id: string
+  check_subtype_id: string | null
+  item_id: string
+  quantity_per_check: number
+  on_dye_only: boolean
+}
+
+export interface InventoryAdjustmentRecord {
+  id: string
+  item_id: string
+  delta: number
+  reason: AdjustmentReasonLiteral
+  visit_id: string | null
+  note: string | null
+  by_user_id: string
+  created_at: string
+  updated_at: string
+  version: number
+  entity_id: string
+  /**
+   * True when the row reverses a voided visit's consume entry (positive
+   * delta on a `consume_visit` row). Used by `<ItemAdjustmentsList>` to
+   * render the reversal badge per phase-06 §7.15.
+   */
+  is_reversal: boolean
+}
+
+export interface InventoryItemDetailRecord {
+  item: InventoryItemWithStatusRecord
+  consumption_map: InventoryConsumptionMapRecord[]
+  recent_adjustments: InventoryAdjustmentRecord[]
 }
 
 export interface ConsumptionCreateArgs {

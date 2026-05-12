@@ -1,0 +1,145 @@
+{
+  "inventory": {
+    "eyebrow": "المخزون",
+    "list": {
+      "title": "المخزون",
+      "subtitle": "الأصناف ومستويات المخزون والتسويات.",
+      "actions": {
+        "new_adjustment": "تسوية جديدة"
+      },
+      "filters": {
+        "status": {
+          "all": "الكل",
+          "ok": "جيد",
+          "low": "منخفض",
+          "neg": "سالب"
+        },
+        "active": {
+          "label_active_only": "النشط فقط",
+          "label_all": "الكل"
+        },
+        "search_placeholder": "ابحث عن صنف"
+      },
+      "columns": {
+        "name": "الاسم",
+        "unit": "الوحدة",
+        "on_hand": "المتاح",
+        "threshold": "حد التنبيه",
+        "status": "الحالة",
+        "last_adjusted": "آخر تسوية",
+        "pending_sync": "المزامنة"
+      },
+      "status_pill": {
+        "ok": "جيد",
+        "low": "منخفض",
+        "neg": "سالب"
+      },
+      "empty": "لا توجد أصناف بعد. أضفها أولاً من شاشة الإدارة.",
+      "empty_filtered": "لا توجد أصناف مطابقة للمرشحات الحالية.",
+      "open_detail": "فتح الصنف",
+      "loading": "جارٍ تحميل الأصناف..."
+    },
+    "item": {
+      "back": "العودة إلى المخزون",
+      "header": {
+        "active": "نشط",
+        "inactive": "غير نشط",
+        "unit_label": "الوحدة",
+        "threshold_label": "حد التنبيه"
+      },
+      "tabs": {
+        "overview": "نظرة عامة",
+        "consumption_map": "خريطة الاستهلاك",
+        "adjustments": "التسويات",
+        "audit": "السجل"
+      },
+      "overview": {
+        "on_hand_label": "المتاح",
+        "threshold_label": "حد التنبيه",
+        "last_adjusted_label": "آخر تسوية",
+        "no_adjustments": "لا توجد تسويات مسجلة.",
+        "stock_status_label": "حالة المخزون",
+        "version_label": "الإصدار"
+      },
+      "consumption_map": {
+        "title": "خريطة الاستهلاك",
+        "subtitle": "قواعد الكمية لكل فحص (للعرض هنا، عدّلها من الإدارة).",
+        "columns": {
+          "check_type": "نوع الفحص",
+          "subtype": "النوع الفرعي",
+          "qty": "الكمية للفحص",
+          "on_dye_only": "صبغة فقط"
+        },
+        "all_subtypes": "كل الأنواع الفرعية",
+        "empty": "لا توجد قواعد استهلاك ترتبط بهذا الصنف.",
+        "edit_link": "تعديل في الإدارة"
+      },
+      "adjustments": {
+        "title": "التسويات",
+        "subtitle": "حسب الترتيب الزمني. عكوسات الزيارات الملغاة تظهر بقيمة موجبة.",
+        "columns": {
+          "created": "الوقت",
+          "reason": "السبب",
+          "delta": "التغيير",
+          "note": "ملاحظة",
+          "by": "بواسطة"
+        },
+        "reasons": {
+          "receive": "استلام",
+          "writeoff": "إتلاف",
+          "count_correction": "تصحيح جرد",
+          "consume_visit": "استهلاك زيارة"
+        },
+        "reversal_badge": "عكس",
+        "reversal_tooltip": "يعكس صف استهلاك لزيارة ملغاة.",
+        "empty": "لا توجد تسويات."
+      },
+      "audit": {
+        "title": "السجل",
+        "subtitle": "صفوف السجل المرتبطة بهذا الصنف (الكيان = inventory_items).",
+        "empty": "لا توجد إدخالات في السجل لهذا الصنف."
+      }
+    },
+    "adjust": {
+      "title": "تسوية جديدة",
+      "subtitle": "استلام مخزون أو إتلاف وحدات أو تصحيح جرد.",
+      "back": "العودة إلى المخزون",
+      "item_label": "الصنف",
+      "item_placeholder": "اختر صنفاً",
+      "reason_label": "السبب",
+      "reasons": {
+        "receive": "استلام",
+        "writeoff": "إتلاف",
+        "count_correction": "تصحيح جرد"
+      },
+      "delta_label": {
+        "receive": "الكمية المستلمة",
+        "writeoff": "الكمية المراد خصمها",
+        "count_correction": "تسوية بقيمة موجبة أو سالبة"
+      },
+      "helper": {
+        "receive": "عدد صحيح موجب يُضاف إلى المتاح.",
+        "writeoff": "عدد صحيح موجب يُخصم من المتاح.",
+        "count_correction_signed": "القيم السالبة تخفّض المخزون. ولا يجوز أن تكون صفراً.",
+        "large_warning": "تسوية ذات حجم غير معتاد - يرجى التأكيد قبل الحفظ."
+      },
+      "note_label": "ملاحظة (اختيارية)",
+      "note_placeholder": "السبب أو رقم الدفعة أو الشاهد، إلخ.",
+      "submit": "حفظ التسوية",
+      "cancel": "إلغاء",
+      "submitting": "جارٍ الحفظ...",
+      "errors": {
+        "delta_required": "أدخل رقماً.",
+        "delta_must_be_positive": "استخدم رقماً موجباً.",
+        "delta_must_be_nonzero": "يجب ألا يكون الرقم صفراً.",
+        "delta_integer": "أعداد صحيحة فقط.",
+        "delta_finite": "الرقم خارج النطاق.",
+        "item_required": "اختر صنفاً.",
+        "note_too_long": "الملاحظة طويلة جداً (الحد 500 حرف).",
+        "submit_failed": "تعذّر حفظ التسوية.",
+        "forbidden": "ليست لديك صلاحية لتسجيل هذه التسوية."
+      },
+      "success": "تم حفظ التسوية."
+    }
+  }
+}

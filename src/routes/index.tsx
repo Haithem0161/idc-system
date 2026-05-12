@@ -27,6 +27,9 @@ import ChecksGridPage from "@/pages/reception/checks-grid"
 import CheckWorkspacePage from "@/pages/reception/check-workspace"
 import NewVisitPage from "@/pages/reception/new-visit"
 import VisitDetailPage from "@/pages/reception/visit-detail"
+import InventoryListPage from "@/pages/inventory/list"
+import InventoryItemDetailOpsPage from "@/pages/inventory/detail"
+import InventoryAdjustPage from "@/pages/inventory/adjust"
 import { RequireRole } from "@/components/auth/require-role"
 
 export const router = createBrowserRouter([
@@ -77,6 +80,19 @@ export const router = createBrowserRouter([
               { path: "checks/:slug", Component: CheckWorkspacePage },
               { path: "checks/:slug/new", Component: NewVisitPage },
               { path: "visits/:id", Component: VisitDetailPage },
+            ],
+          },
+          {
+            path: "inventory",
+            element: (
+              <RequireRole roles={["receptionist", "superadmin"]}>
+                <Outlet />
+              </RequireRole>
+            ),
+            children: [
+              { index: true, Component: InventoryListPage },
+              { path: "adjust", Component: InventoryAdjustPage },
+              { path: "items/:id", Component: InventoryItemDetailOpsPage },
             ],
           },
         ],

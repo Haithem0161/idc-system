@@ -65,7 +65,12 @@ export function Sidebar() {
           enabled: role === "receptionist" || role === "superadmin",
         },
         { key: "doctors", to: "/doctors", icon: Stethoscope, enabled: false },
-        { key: "inventory", to: "/inventory", icon: Package, enabled: false },
+        {
+          key: "inventory",
+          to: "/inventory",
+          icon: Package,
+          enabled: role === "receptionist" || role === "superadmin",
+        },
       ],
     },
     {

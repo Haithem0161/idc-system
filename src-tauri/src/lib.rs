@@ -53,6 +53,12 @@ use crate::domains::catalog::infrastructure::{
 };
 use crate::domains::catalog::service::CatalogServicesConfig;
 use crate::domains::catalog::CatalogServices;
+use crate::domains::inventory::commands::{
+    inventory_create_adjustment, inventory_get_item, inventory_list_adjustments,
+    inventory_list_items, inventory_recompute_on_hand,
+};
+use crate::domains::inventory::service::InventoryAdjustmentServiceConfig;
+use crate::domains::inventory::InventoryAdjustmentService;
 use crate::domains::patients::commands::{
     patients_create, patients_get, patients_search, patients_update,
 };
@@ -261,6 +267,12 @@ pub fn run() {
             visits_void,
             visits_pricing_resolve,
             receipts_reprint,
+            // inventory operations
+            inventory_list_items,
+            inventory_get_item,
+            inventory_list_adjustments,
+            inventory_create_adjustment,
+            inventory_recompute_on_hand,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -379,6 +391,18 @@ async fn bootstrap(
 
     let receipts_dir = resolve_receipts_dir(app)?;
 
+    let inventory_adjustment_service = Arc::new(InventoryAdjustmentService::new(
+        InventoryAdjustmentServiceConfig {
+            pool: pool.clone(),
+            items_repo: catalog_services.inventory_item_repo.clone(),
+            consumption_repo: catalog_services.consumption_repo.clone(),
+            adjustments_repo: adjustment_repo.clone(),
+            audit_repo: audit_repo.clone(),
+            outbox_repo: outbox_repo.clone(),
+            device_id: device_id.clone(),
+        },
+    ));
+
     let visit_service = Arc::new(VisitService::new(VisitServiceConfig {
         pool: pool.clone(),
         visits: visit_repo,
@@ -409,6 +433,7 @@ async fn bootstrap(
         shift_service,
         patient_service,
         visit_service,
+        inventory_adjustment_service,
         user_repo,
         device_id,
         app_version,

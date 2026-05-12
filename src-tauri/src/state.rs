@@ -14,6 +14,7 @@ use tokio::sync::RwLock;
 use crate::domains::auth::domain::repositories::UserRepo;
 use crate::domains::auth::{AuthService, UserService};
 use crate::domains::catalog::CatalogServices;
+use crate::domains::inventory::InventoryAdjustmentService;
 use crate::domains::patients::PatientService;
 use crate::domains::settings::service::SettingsService;
 use crate::domains::shifts::ShiftService;
@@ -44,6 +45,7 @@ pub struct AppState {
     shift_service: Option<Arc<ShiftService>>,
     patient_service: Option<Arc<PatientService>>,
     visit_service: Option<Arc<VisitService>>,
+    inventory_adjustment_service: Option<Arc<InventoryAdjustmentService>>,
     user_repo: Option<Arc<dyn UserRepo>>,
     user_context: RwLock<Option<UserContext>>,
     settings_cache: RwLock<HashMap<String, SettingValue>>,
@@ -65,6 +67,7 @@ pub struct AppStateConfig {
     pub shift_service: Arc<ShiftService>,
     pub patient_service: Arc<PatientService>,
     pub visit_service: Arc<VisitService>,
+    pub inventory_adjustment_service: Arc<InventoryAdjustmentService>,
     pub user_repo: Arc<dyn UserRepo>,
     pub device_id: String,
     pub app_version: String,
@@ -83,6 +86,7 @@ impl AppState {
             shift_service: Some(cfg.shift_service),
             patient_service: Some(cfg.patient_service),
             visit_service: Some(cfg.visit_service),
+            inventory_adjustment_service: Some(cfg.inventory_adjustment_service),
             user_repo: Some(cfg.user_repo),
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
@@ -106,6 +110,7 @@ impl AppState {
             shift_service: None,
             patient_service: None,
             visit_service: None,
+            inventory_adjustment_service: None,
             user_repo: None,
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
@@ -158,6 +163,10 @@ impl AppState {
 
     pub fn visit_service(&self) -> Option<Arc<VisitService>> {
         self.visit_service.clone()
+    }
+
+    pub fn inventory_adjustment_service(&self) -> Option<Arc<InventoryAdjustmentService>> {
+        self.inventory_adjustment_service.clone()
     }
 
     pub fn user_repo(&self) -> Option<Arc<dyn UserRepo>> {

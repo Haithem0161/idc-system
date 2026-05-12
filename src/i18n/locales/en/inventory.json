@@ -1,0 +1,145 @@
+{
+  "inventory": {
+    "eyebrow": "Inventory",
+    "list": {
+      "title": "Inventory",
+      "subtitle": "Items, stock levels, and adjustments.",
+      "actions": {
+        "new_adjustment": "New adjustment"
+      },
+      "filters": {
+        "status": {
+          "all": "All",
+          "ok": "OK",
+          "low": "Low",
+          "neg": "Negative"
+        },
+        "active": {
+          "label_active_only": "Active only",
+          "label_all": "All"
+        },
+        "search_placeholder": "Search items"
+      },
+      "columns": {
+        "name": "Name",
+        "unit": "Unit",
+        "on_hand": "On hand",
+        "threshold": "Threshold",
+        "status": "Status",
+        "last_adjusted": "Last adjusted",
+        "pending_sync": "Sync"
+      },
+      "status_pill": {
+        "ok": "OK",
+        "low": "LOW",
+        "neg": "NEG"
+      },
+      "empty": "No inventory items yet. Configure them in admin first.",
+      "empty_filtered": "No items match the current filters.",
+      "open_detail": "Open item",
+      "loading": "Loading items..."
+    },
+    "item": {
+      "back": "Back to inventory",
+      "header": {
+        "active": "Active",
+        "inactive": "Inactive",
+        "unit_label": "Unit",
+        "threshold_label": "Low-stock threshold"
+      },
+      "tabs": {
+        "overview": "Overview",
+        "consumption_map": "Consumption Map",
+        "adjustments": "Adjustments",
+        "audit": "Audit"
+      },
+      "overview": {
+        "on_hand_label": "On hand",
+        "threshold_label": "Low-stock threshold",
+        "last_adjusted_label": "Last adjusted",
+        "no_adjustments": "No adjustments recorded yet.",
+        "stock_status_label": "Stock status",
+        "version_label": "Version"
+      },
+      "consumption_map": {
+        "title": "Consumption Map",
+        "subtitle": "Per-check quantity rules (read-only here; edit in Admin).",
+        "columns": {
+          "check_type": "Check type",
+          "subtype": "Subtype",
+          "qty": "Qty / check",
+          "on_dye_only": "Dye only"
+        },
+        "all_subtypes": "All subtypes",
+        "empty": "No consumption rules reference this item.",
+        "edit_link": "Edit in admin"
+      },
+      "adjustments": {
+        "title": "Adjustments",
+        "subtitle": "Chronological. Voided-visit reversals show as positive offsets.",
+        "columns": {
+          "created": "When",
+          "reason": "Reason",
+          "delta": "Delta",
+          "note": "Note",
+          "by": "By"
+        },
+        "reasons": {
+          "receive": "Receive",
+          "writeoff": "Writeoff",
+          "count_correction": "Count correction",
+          "consume_visit": "Visit consume"
+        },
+        "reversal_badge": "Reversal",
+        "reversal_tooltip": "Reverses a voided visit's consume row.",
+        "empty": "No adjustments yet."
+      },
+      "audit": {
+        "title": "Audit",
+        "subtitle": "Audit rows scoped to this item (entity = inventory_items).",
+        "empty": "No audit entries for this item."
+      }
+    },
+    "adjust": {
+      "title": "New adjustment",
+      "subtitle": "Receive stock, write off damaged units, or correct a count.",
+      "back": "Back to inventory",
+      "item_label": "Item",
+      "item_placeholder": "Select an item",
+      "reason_label": "Reason",
+      "reasons": {
+        "receive": "Receive",
+        "writeoff": "Writeoff",
+        "count_correction": "Count correction"
+      },
+      "delta_label": {
+        "receive": "Quantity received",
+        "writeoff": "Quantity to remove",
+        "count_correction": "Signed adjustment"
+      },
+      "helper": {
+        "receive": "Positive whole number; this adds to on-hand.",
+        "writeoff": "Positive whole number; this is removed from on-hand.",
+        "count_correction_signed": "Negative values reduce stock. Cannot be zero.",
+        "large_warning": "Unusually large adjustment - please confirm before saving."
+      },
+      "note_label": "Note (optional)",
+      "note_placeholder": "Reason, batch reference, witness, etc.",
+      "submit": "Save adjustment",
+      "cancel": "Cancel",
+      "submitting": "Saving...",
+      "errors": {
+        "delta_required": "Enter a number.",
+        "delta_must_be_positive": "Use a positive number.",
+        "delta_must_be_nonzero": "Use a non-zero number.",
+        "delta_integer": "Whole numbers only.",
+        "delta_finite": "Number is out of range.",
+        "item_required": "Pick an item.",
+        "note_too_long": "Note is too long (max 500 chars).",
+        "submit_failed": "Could not save the adjustment.",
+        "forbidden": "You do not have permission to record this adjustment."
+      },
+      "success": "Adjustment saved."
+    }
+  }
+}

@@ -299,8 +299,10 @@ export class SyncPushService {
           break
         }
         case 'inventory_adjustments': {
-          // Receptionist + superadmin push these. Additive-only: identical
-          // id + ProcessedOp hit returns the cached response; identical id
+          // Receptionist + superadmin push receive/writeoff/consume_visit.
+          // Accountant CAN forward (for reports drilldown ops) but cannot
+          // author count_correction rows. Additive-only: identical id +
+          // ProcessedOp hit returns the cached response; identical id
           // without a ProcessedOp hit means a peer tried to mutate an
           // immutable row -- reject (§7.36).
           if (!actor || (actor.role !== 'receptionist' && actor.role !== 'superadmin' && actor.role !== 'accountant')) {
@@ -314,6 +316,15 @@ export class SyncPushService {
           const row = decodeJsonPayload<InventoryAdjustmentSyncRecord>(op.payload_b64)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           validateAdjustment(row, op.op_id)
+          // Phase-06 §7.6: count_correction is superadmin-only.
+          if (row.reason === 'count_correction' && actor.role !== 'superadmin') {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'count_correction adjustments require superadmin role',
+              403,
+              { op_id: op.op_id }
+            )
+          }
           const result = await this.store.upsertInventoryAdjustment(row)
           if (!result.applied && result.duplicate) {
             throw new DomainError(
@@ -721,6 +732,24 @@ function validateAdjustment (
     throw new DomainError(
       'VALIDATION_ERROR',
       'writeoff adjustments must have negative delta',
+      422,
+      { op_id: opId }
+    )
+  }
+  // Phase-06 §7.1 / §7.7: count_correction must be non-zero (CHECK
+  // backstopped by the local SQLite trigger from migrations/006).
+  if (row.reason === 'count_correction' && row.delta === 0) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'count_correction adjustments must have non-zero delta',
+      422,
+      { op_id: opId }
+    )
+  }
+  if (row.note != null && row.note.length > 500) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'adjustment note must be 500 characters or fewer',
       422,
       { op_id: opId }
     )
