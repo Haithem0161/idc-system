@@ -6,7 +6,15 @@ import type {
   ProcessedOpRepository,
 } from '../domain/repositories'
 import type {
+  CheckSubtypeSyncRecord,
+  CheckTypeSyncRecord,
+  ConsumptionSyncRecord,
+  DoctorPricingSyncRecord,
+  DoctorSyncRecord,
+  InventoryItemSyncRecord,
   MemorySyncStore,
+  OperatorSpecialtySyncRecord,
+  OperatorSyncRecord,
   SettingSyncRecord,
   UserSyncRecord,
 } from '../infrastructure/memory/store'
@@ -132,6 +140,108 @@ export class SyncPushService {
           await this.store.upsertSetting(row)
           break
         }
+        case 'check_types': {
+          this.requireSuperadmin(actor, 'check_types push')
+          const row = decodeJsonPayload<CheckTypeSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          validateCheckType(row, op.op_id)
+          await this.store.upsertCheckType(row)
+          break
+        }
+        case 'check_subtypes': {
+          this.requireSuperadmin(actor, 'check_subtypes push')
+          const row = decodeJsonPayload<CheckSubtypeSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          this.requireSubtypedParent(row.check_type_id, op.op_id)
+          await this.store.upsertCheckSubtype(row)
+          break
+        }
+        case 'doctors': {
+          this.requireSuperadmin(actor, 'doctors push')
+          const row = decodeJsonPayload<DoctorSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          if (row.name.trim().length === 0) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'doctor name required',
+              422,
+              { op_id: op.op_id }
+            )
+          }
+          await this.store.upsertDoctor(row)
+          break
+        }
+        case 'doctor_check_pricing': {
+          this.requireSuperadmin(actor, 'doctor_check_pricing push')
+          const row = decodeJsonPayload<DoctorPricingSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          this.validateDoctorPricing(row, op.op_id)
+          await this.store.upsertDoctorPricing(row)
+          break
+        }
+        case 'operators': {
+          this.requireSuperadmin(actor, 'operators push')
+          const row = decodeJsonPayload<OperatorSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          if (row.name.trim().length === 0) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'operator name required',
+              422,
+              { op_id: op.op_id }
+            )
+          }
+          if (row.base_cut_per_check_iqd < 0) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'base_cut_per_check_iqd must be non-negative',
+              422,
+              { op_id: op.op_id }
+            )
+          }
+          await this.store.upsertOperator(row)
+          break
+        }
+        case 'operator_specialties': {
+          this.requireSuperadmin(actor, 'operator_specialties push')
+          const row = decodeJsonPayload<OperatorSpecialtySyncRecord>(
+            op.payload_b64
+          )
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          await this.store.upsertOperatorSpecialty(row)
+          break
+        }
+        case 'inventory_items': {
+          this.requireSuperadmin(actor, 'inventory_items push')
+          const row = decodeJsonPayload<InventoryItemSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          if (row.name_ar.trim().length === 0) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'name_ar required',
+              422,
+              { op_id: op.op_id }
+            )
+          }
+          if (row.unit.trim().length === 0) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'unit required',
+              422,
+              { op_id: op.op_id }
+            )
+          }
+          await this.store.upsertInventoryItem(row)
+          break
+        }
+        case 'inventory_consumption_map': {
+          this.requireSuperadmin(actor, 'inventory_consumption_map push')
+          const row = decodeJsonPayload<ConsumptionSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          this.validateConsumption(row, op.op_id)
+          await this.store.upsertConsumption(row)
+          break
+        }
         default:
           throw new DomainError(
             'VALIDATION_ERROR',
@@ -157,6 +267,152 @@ export class SyncPushService {
         403
       )
     }
+  }
+
+  private requireSubtypedParent (checkTypeId: string, opId: string): void {
+    const parent = this.store.checkTypes.get(checkTypeId)
+    if (!parent) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        `parent check_type ${checkTypeId} not found`,
+        422,
+        { op_id: opId }
+      )
+    }
+    if (parent.deleted_at) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'parent check_type is deleted',
+        422,
+        { op_id: opId }
+      )
+    }
+    if (!parent.has_subtypes) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'parent check_type does not allow subtypes (errors:catalog.parent_not_subtyped)',
+        422,
+        { op_id: opId }
+      )
+    }
+  }
+
+  private validateDoctorPricing (row: DoctorPricingSyncRecord, opId: string): void {
+    const parent = this.store.checkTypes.get(row.check_type_id)
+    if (!parent) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        `parent check_type ${row.check_type_id} not found`,
+        422,
+        { op_id: opId }
+      )
+    }
+    if (parent.has_subtypes && row.check_subtype_id == null) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'check_subtype_id required when parent has subtypes',
+        422,
+        { op_id: opId }
+      )
+    }
+    if (!parent.has_subtypes && row.check_subtype_id != null) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'check_subtype_id forbidden when parent has no subtypes',
+        422,
+        { op_id: opId }
+      )
+    }
+    if (row.cut_value < 0) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'cut_value must be non-negative',
+        422,
+        { op_id: opId }
+      )
+    }
+    if (row.cut_kind === 'pct' && row.cut_value > 100) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'cut_value must be <= 100 for pct',
+        422,
+        { op_id: opId }
+      )
+    }
+    if (row.price_override_iqd != null && row.price_override_iqd < 0) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'price_override_iqd must be non-negative',
+        422,
+        { op_id: opId }
+      )
+    }
+  }
+
+  private validateConsumption (row: ConsumptionSyncRecord, opId: string): void {
+    const parent = this.store.checkTypes.get(row.check_type_id)
+    if (!parent) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        `parent check_type ${row.check_type_id} not found`,
+        422,
+        { op_id: opId }
+      )
+    }
+    if (parent.has_subtypes && row.check_subtype_id == null) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'check_subtype_id required when parent has subtypes',
+        422,
+        { op_id: opId }
+      )
+    }
+    if (!parent.has_subtypes && row.check_subtype_id != null) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'check_subtype_id forbidden when parent has no subtypes',
+        422,
+        { op_id: opId }
+      )
+    }
+    if (row.quantity_per_check <= 0) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'quantity_per_check must be > 0',
+        422,
+        { op_id: opId }
+      )
+    }
+    if (row.on_dye_only && !parent.dye_supported) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'parent check_type does not support dye',
+        422,
+        { op_id: opId }
+      )
+    }
+  }
+}
+
+function validateCheckType (row: CheckTypeSyncRecord, opId: string): void {
+  if (row.name_ar.trim().length === 0) {
+    throw new DomainError('VALIDATION_ERROR', 'name_ar required', 422, { op_id: opId })
+  }
+  if (row.has_subtypes && row.base_price_iqd != null) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'base_price_iqd must be null when has_subtypes=true',
+      422,
+      { op_id: opId }
+    )
+  }
+  if (!row.has_subtypes && (row.base_price_iqd == null || row.base_price_iqd < 0)) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'base_price_iqd must be non-negative when has_subtypes=false',
+      422,
+      { op_id: opId }
+    )
   }
 }
 

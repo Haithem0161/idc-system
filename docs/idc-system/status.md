@@ -8,7 +8,7 @@ _Last updated: 2026-05-11. Source: [roadmap.md](./roadmap.md)._
 |-|-|-|-|-|-|-|-|-|-|-|
 | 01 | Foundation & Sync Plumbing | All | complete | 2026-05-11 | 2026-05-11 | 4 (`outbox`, `sync_state`, `audit_log`, `metrics_events`) | 4 (`AuditLog`, `ProcessedOp`, `SyncCursor`, `ConflictParked`) | 9 | 5 | 6 |
 | 02 | Authentication & Users | All | complete | 2026-05-11 | 2026-05-11 | 2 (`users`, `settings`) | 3 (`User`, `Setting`, `RefreshToken`) + enums (`UserRole`, `SettingType`) | 15 (auth: 6, users: 7, settings: 3 minus overlap) | 5 (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/change-password`, `/auth/bootstrap-superadmin`) | 4 (AuthService [Rust], UserService, SettingsService, AuthService [TS]) |
-| 03 | Catalog & Reference Data | All | not_started | - | - | 9 (8 tables + 1 FTS5 `doctors_fts`) | 8 | ~16 | 0 | 8 |
+| 03 | Catalog & Reference Data | All | complete | 2026-05-12 | 2026-05-12 | 9 (8 tables + 1 FTS5 `doctors_fts`) | 8 | 38 | 0 | 8 |
 | 04 | Operator Shifts | Frontend, Tauri, Server | not_started | - | - | 1 (`operator_shifts`) | 1 (`OperatorShift`) | 5 | 0 | 1 |
 | 05 | Reception & Visit Lock | All | not_started | - | - | 4 (`patients`, `patients_fts`, `visits`, `inventory_adjustments`) | 3 (`Patient`, `Visit`, `InventoryAdjustment`) | ~12 | 0 | 5 |
 | 06 | Inventory Operations | All | not_started | - | - | 0 | 0 | 5 | 0 | 1 |
@@ -21,15 +21,15 @@ Aggregate ship target after Phase 08: 17 base SQLite tables + 2 FTS5 virtual tab
 
 | Metric | Before | Current | Target |
 |-|-|-|-|
-| SQLite syncable tables | 0 | 3 (`audit_log`, `users`, `settings`) | 15 (PRD §6.1.1-§6.1.15) |
+| SQLite syncable tables | 0 | 11 (`audit_log`, `users`, `settings`, `check_types`, `check_subtypes`, `doctors`, `doctor_check_pricing`, `operators`, `operator_specialties`, `inventory_items`, `inventory_consumption_map`) | 15 (PRD §6.1.1-§6.1.15) |
 | SQLite engine tables | 0 | 3 (`outbox`, `sync_state`, `metrics_events`) | 3 |
-| SQLite FTS5 virtual tables | 0 | 0 | 2 (`patients_fts`, `doctors_fts`) |
-| Prisma syncable models | 0 | 3 (`AuditLog`, `User`, `Setting`) | 15 |
+| SQLite FTS5 virtual tables | 0 | 1 (`doctors_fts`) | 2 (`patients_fts`, `doctors_fts`) |
+| Prisma syncable models | 0 | 11 (`AuditLog`, `User`, `Setting`, `CheckType`, `CheckSubtype`, `Doctor`, `DoctorCheckPricing`, `Operator`, `OperatorSpecialty`, `InventoryItem`, `InventoryConsumptionMap`) | 15 |
 | Prisma server-only models | 0 | 4 (`ProcessedOp`, `SyncCursor`, `ConflictParked`, `RefreshToken`) | 4 |
-| Tauri IPC commands | 0 | 24 (sync: 9, auth: 6, users: 7, settings: 3 -- counted unique) | ~55-67 |
+| Tauri IPC commands | 0 | 62 (sync: 9, auth: 6, users: 7, settings: 3, catalog: 37 -- counted unique) | ~55-67 |
 | Sync-server routes | 2 (template only) | 11 (`/`, `/healthz`, `/sync/push`, `/sync/pull`, `/sync/lookup-op`, `/sync/conflicts/:opId/resolve`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/change-password`, `/auth/bootstrap-superadmin`) | 11 (incl. `/healthz` and `/documentation`) |
-| Frontend pages | 2 (`/`, `*`) | 9 (`/`, `*`, `/login`, `/no-access`, `/lock`, `/setup/first-run`, `/admin/users`, `/admin/users/:id`, `/admin/settings`) | 31 |
-| Conflict policies in use | 0 | 3 (`additive-only` for `audit_log`, `last-write-wins` for `users`, `manual` for `settings`) | 3 |
+| Frontend pages | 2 (`/`, `*`) | 17 (Phase 1+2: 9 + Phase 3: 8 admin pages: `/admin/check-types`, `/admin/check-types/:id`, `/admin/doctors`, `/admin/doctors/:id`, `/admin/operators`, `/admin/operators/:id`, `/admin/inventory`, `/admin/inventory/:id`) | 31 |
+| Conflict policies in use | 0 | 3 (`additive-only` for `audit_log`, `last-write-wins` for `users` + all 8 catalog entities, `manual` for `settings`) | 3 |
 | Locales | 2 (ar+en) | 2 (5 namespaces: `common`, `errors`, `receipts`, `auth`, `admin`) | 2 |
 | Audit retention (local) | n/a | n/a | 90 days |
 | Audit retention (server) | n/a | n/a | indefinite |
@@ -168,6 +168,16 @@ After Phases 1 and 2 shipped, the editorial design system in `.claude/rules/desi
 - Root redirect simplified -- all roles land on `/home` until per-role landing screens ship in later phases.
 - i18n: added `nav.group.{operations,records,admin}`, `auth.role_{role}`, `auth.*_eyebrow`, `admin.eyebrow`, `admin.settings.group.*` + `admin.settings.key.*`, `home.*`, `not_found.*`, `setup.eyebrow` keys to both `en` and `ar` locales.
 - Verification: `pnpm lint` clean (only pre-existing unused-disable warnings in unrelated files), `pnpm build` succeeds, fonts bundled into `dist/assets/`.
+
+### Phase 03 completion notes (2026-05-12)
+
+- **Local schema**: migration `003_catalog.sql` adds 8 syncable tables (`check_types`, `check_subtypes`, `doctors`, `doctor_check_pricing`, `operators`, `operator_specialties`, `inventory_items`, `inventory_consumption_map`) plus FTS5 virtual sibling `doctors_fts` with triggers that filter soft-deleted rows (§7.33). Migration runner extended to parse `CREATE TRIGGER ... BEGIN ... END;` blocks (was previously single-statement). Partial unique indexes on `doctor_check_pricing` and `inventory_consumption_map` handle the SQLite-`IFNULL(...)` and Postgres-NULL-distinct uniqueness flaws from §7.20 / §7.21.
+- **Server schema**: 8 Prisma models added with `pulledAt` columns (§7.19), `CutKind` enum (`pct` / `fixed`), foreign-key relations between catalog parents (`CheckType`, `Doctor`, `Operator`) and their children. Schema validates via `tsc`; the in-memory store is the runtime backing for Phase-3 same as Phase-1/2.
+- **Tauri / Rust**: New `catalog` bounded context (`src-tauri/src/domains/catalog/`) with 8 entities, 8 repository traits, 8 sqlx implementations, 8 application services, `PricingResolver` domain service (§7.26), and a `catalog:pricing_changed` Tauri event with `PricingChangedPayload` (§7.27 / §7.35). 37 new IPC commands wired into `lib.rs::generate_handler!` and `AppState`. Audit-first ordering preserved via the Phase-1 `AuditWriter::with_audit` closure (every catalog mutation writes an audit row before its business row, then enqueues an outbox op per affected entity -- doctor / operator soft-delete cascades through pricings / specialties).
+- **Sync server**: `MemorySyncStore` extended with 8 catalog maps and a `upsertLWW` helper that implements the `(version, updated_at, origin_device_id)` tiebreak from §7.17. `SyncPushService` dispatches each catalog entity through superadmin-gated branches with cross-row invariant guards (check-type XOR, subtype-required, dye-supported, cut-kind bounds). Pull `changesSince` returns catalog rows. 5 new tests in `test/routes/catalog-sync.test.ts` cover push success, XOR rejection, role gate, pull round-trip, and parent-mismatch rejection.
+- **Frontend**: New `features/catalog/queries.ts` with full TanStack React Query hooks (list / detail / mutations) per entity. Eight new admin pages under `/admin/check-types/{,:id}`, `/admin/doctors/{,:id}`, `/admin/operators/{,:id}`, `/admin/inventory/{,:id}` -- all guarded by the existing `<AdminGate>` (superadmin only, §7.36). Sidebar nav extended with check-types, doctors, operators, inventory links (visible only to superadmins). Reusable `<AdminHeader>` + `<FieldLabel>` + `<EmptyRow>` + `<ErrorBanner>` primitives factored out into `components/admin/admin-panel.tsx`. `resolveLocaleName` helper at `src/lib/format/locale-name.ts` (§7.16).
+- **Deferred**: Subtype picker in `<DoctorPricingEditor>` (MVP form supports flat-only; subtype-aware row will land alongside the visit form in phase-05). `<InventoryAdminTable>` audit-log join column (§7.13). `set_active` IPC for operators is wired in the Rust service but the operator detail page uses an inline button rather than a dedicated `operators::set_active` IPC entry (the existing `operators_update` covers it for now -- a follow-up will register `operators::set_active` directly when phase-04 needs it).
+- **Verification**: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (15 unit + 7 catalog integration + 6 sync integration = 28 Rust tests), sync-server `pnpm build:ts` and `pnpm test` (22/22, including 5 new catalog tests), `pnpm lint` (0 errors), `pnpm build` (frontend) all green. Sync round-trip verified end-to-end via Fastify `app.inject()` in the sync-server tests (functionally equivalent to curl through the HTTP layer; same auth, validation, store).
 
 ### Phase 02 completion notes (2026-05-11)
 

@@ -29,6 +29,30 @@ use crate::domains::auth::commands::{
 use crate::domains::auth::domain::repositories::UserRepo;
 use crate::domains::auth::infrastructure::SqliteUserRepo;
 use crate::domains::auth::{AuthService, UserService};
+use crate::domains::catalog::commands::{
+    check_subtypes_create, check_subtypes_list_by_type, check_subtypes_soft_delete,
+    check_subtypes_update, check_types_create, check_types_get, check_types_list,
+    check_types_soft_delete, check_types_toggle_subtypes, check_types_update,
+    doctor_pricing_soft_delete, doctor_pricing_upsert, doctors_create, doctors_get, doctors_list,
+    doctors_set_active, doctors_soft_delete, doctors_update, inventory_catalog_create,
+    inventory_catalog_get, inventory_catalog_list, inventory_catalog_soft_delete,
+    inventory_catalog_update, inventory_consumption_create, inventory_consumption_list_by_type,
+    inventory_consumption_soft_delete, inventory_consumption_update,
+    operator_specialties_soft_delete, operator_specialties_upsert, operators_create, operators_get,
+    operators_list, operators_set_active, operators_soft_delete, operators_update,
+    pricing_effective,
+};
+use crate::domains::catalog::domain::repositories::{
+    CheckSubtypeRepo, CheckTypeRepo, DoctorPricingRepo, DoctorRepo, InventoryConsumptionRepo,
+    InventoryItemRepo, OperatorRepo, OperatorSpecialtyRepo,
+};
+use crate::domains::catalog::infrastructure::{
+    SqliteCheckSubtypeRepo, SqliteCheckTypeRepo, SqliteDoctorPricingRepo, SqliteDoctorRepo,
+    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
+    SqliteOperatorSpecialtyRepo,
+};
+use crate::domains::catalog::service::CatalogServicesConfig;
+use crate::domains::catalog::CatalogServices;
 use crate::domains::settings::commands::{settings_get, settings_list, settings_update};
 use crate::domains::settings::domain::repositories::SettingRepo;
 use crate::domains::settings::infrastructure::SqliteSettingRepo;
@@ -142,6 +166,50 @@ pub fn run() {
             settings_list,
             settings_get,
             settings_update,
+            // catalog: check_types
+            check_types_list,
+            check_types_get,
+            check_types_create,
+            check_types_update,
+            check_types_toggle_subtypes,
+            check_types_soft_delete,
+            // catalog: check_subtypes
+            check_subtypes_list_by_type,
+            check_subtypes_create,
+            check_subtypes_update,
+            check_subtypes_soft_delete,
+            // catalog: doctors
+            doctors_list,
+            doctors_get,
+            doctors_create,
+            doctors_update,
+            doctors_set_active,
+            doctors_soft_delete,
+            // catalog: doctor pricing
+            doctor_pricing_upsert,
+            doctor_pricing_soft_delete,
+            pricing_effective,
+            // catalog: operators
+            operators_list,
+            operators_get,
+            operators_create,
+            operators_update,
+            operators_set_active,
+            operators_soft_delete,
+            // catalog: operator specialties
+            operator_specialties_upsert,
+            operator_specialties_soft_delete,
+            // catalog: inventory items
+            inventory_catalog_list,
+            inventory_catalog_get,
+            inventory_catalog_create,
+            inventory_catalog_update,
+            inventory_catalog_soft_delete,
+            // catalog: consumption map
+            inventory_consumption_create,
+            inventory_consumption_update,
+            inventory_consumption_soft_delete,
+            inventory_consumption_list_by_type,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -166,6 +234,20 @@ async fn bootstrap(
     let state_repo: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
     let user_repo: Arc<dyn UserRepo> = Arc::new(SqliteUserRepo::new(pool.clone()));
     let setting_repo: Arc<dyn SettingRepo> = Arc::new(SqliteSettingRepo::new(pool.clone()));
+
+    let check_type_repo: Arc<dyn CheckTypeRepo> = Arc::new(SqliteCheckTypeRepo::new(pool.clone()));
+    let check_subtype_repo: Arc<dyn CheckSubtypeRepo> =
+        Arc::new(SqliteCheckSubtypeRepo::new(pool.clone()));
+    let doctor_repo: Arc<dyn DoctorRepo> = Arc::new(SqliteDoctorRepo::new(pool.clone()));
+    let doctor_pricing_repo: Arc<dyn DoctorPricingRepo> =
+        Arc::new(SqliteDoctorPricingRepo::new(pool.clone()));
+    let operator_repo: Arc<dyn OperatorRepo> = Arc::new(SqliteOperatorRepo::new(pool.clone()));
+    let operator_specialty_repo: Arc<dyn OperatorSpecialtyRepo> =
+        Arc::new(SqliteOperatorSpecialtyRepo::new(pool.clone()));
+    let inventory_item_repo: Arc<dyn InventoryItemRepo> =
+        Arc::new(SqliteInventoryItemRepo::new(pool.clone()));
+    let consumption_repo: Arc<dyn InventoryConsumptionRepo> =
+        Arc::new(SqliteInventoryConsumptionRepo::new(pool.clone()));
 
     let engine_handle: SyncEngineHandle = SyncEngine::spawn(
         crate::sync::engine::SyncEngineConfig {
@@ -200,10 +282,26 @@ async fn bootstrap(
     let settings_service = Arc::new(SettingsService::new(
         pool.clone(),
         setting_repo,
-        audit_repo,
-        outbox_repo,
+        audit_repo.clone(),
+        outbox_repo.clone(),
         device_id.clone(),
     ));
+
+    let catalog_services = CatalogServices::new(CatalogServicesConfig {
+        pool: pool.clone(),
+        check_type_repo,
+        check_subtype_repo,
+        doctor_repo,
+        doctor_pricing_repo,
+        operator_repo,
+        operator_specialty_repo,
+        inventory_item_repo,
+        consumption_repo,
+        audit_repo,
+        outbox_repo,
+        device_id: device_id.clone(),
+        app_handle: app.clone(),
+    });
 
     let state = AppState::new(AppStateConfig {
         db_pool: pool,
@@ -211,6 +309,7 @@ async fn bootstrap(
         auth_service,
         user_service,
         settings_service,
+        catalog_services,
         user_repo,
         device_id,
         app_version,

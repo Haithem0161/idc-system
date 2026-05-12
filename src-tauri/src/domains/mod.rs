@@ -11,5 +11,6 @@
 
 pub mod _example;
 pub mod auth;
+pub mod catalog;
 pub mod settings;
 pub mod sync;

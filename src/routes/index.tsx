@@ -14,6 +14,14 @@ import NotFoundPage from "@/pages/not-found"
 import UsersListPage from "@/pages/admin/users/list"
 import UserDetailPage from "@/pages/admin/users/detail"
 import SettingsPage from "@/pages/admin/settings"
+import CheckTypesListPage from "@/pages/admin/check-types/list"
+import CheckTypeDetailPage from "@/pages/admin/check-types/detail"
+import DoctorsListPage from "@/pages/admin/doctors/list"
+import DoctorDetailPage from "@/pages/admin/doctors/detail"
+import OperatorsListPage from "@/pages/admin/operators/list"
+import OperatorDetailPage from "@/pages/admin/operators/detail"
+import InventoryCatalogListPage from "@/pages/admin/inventory/list"
+import InventoryItemDetailPage from "@/pages/admin/inventory/detail"
 
 export const router = createBrowserRouter([
   {
@@ -39,6 +47,14 @@ export const router = createBrowserRouter([
             children: [
               { path: "users", Component: UsersListPage },
               { path: "users/:id", Component: UserDetailPage },
+              { path: "check-types", Component: CheckTypesListPage },
+              { path: "check-types/:id", Component: CheckTypeDetailPage },
+              { path: "doctors", Component: DoctorsListPage },
+              { path: "doctors/:id", Component: DoctorDetailPage },
+              { path: "operators", Component: OperatorsListPage },
+              { path: "operators/:id", Component: OperatorDetailPage },
+              { path: "inventory", Component: InventoryCatalogListPage },
+              { path: "inventory/:id", Component: InventoryItemDetailPage },
               { path: "settings", Component: SettingsPage },
             ],
           },

@@ -13,6 +13,7 @@ use tokio::sync::RwLock;
 
 use crate::domains::auth::domain::repositories::UserRepo;
 use crate::domains::auth::{AuthService, UserService};
+use crate::domains::catalog::CatalogServices;
 use crate::domains::settings::service::SettingsService;
 use crate::sync::SyncEngineHandle;
 
@@ -36,6 +37,7 @@ pub struct AppState {
     auth_service: Option<Arc<AuthService>>,
     user_service: Option<Arc<UserService>>,
     settings_service: Option<Arc<SettingsService>>,
+    catalog_services: Option<CatalogServices>,
     user_repo: Option<Arc<dyn UserRepo>>,
     user_context: RwLock<Option<UserContext>>,
     settings_cache: RwLock<HashMap<String, SettingValue>>,
@@ -53,6 +55,7 @@ pub struct AppStateConfig {
     pub auth_service: Arc<AuthService>,
     pub user_service: Arc<UserService>,
     pub settings_service: Arc<SettingsService>,
+    pub catalog_services: CatalogServices,
     pub user_repo: Arc<dyn UserRepo>,
     pub device_id: String,
     pub app_version: String,
@@ -67,6 +70,7 @@ impl AppState {
             auth_service: Some(cfg.auth_service),
             user_service: Some(cfg.user_service),
             settings_service: Some(cfg.settings_service),
+            catalog_services: Some(cfg.catalog_services),
             user_repo: Some(cfg.user_repo),
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
@@ -86,6 +90,7 @@ impl AppState {
             auth_service: None,
             user_service: None,
             settings_service: None,
+            catalog_services: None,
             user_repo: None,
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
@@ -122,6 +127,10 @@ impl AppState {
 
     pub fn settings_service(&self) -> Option<Arc<SettingsService>> {
         self.settings_service.clone()
+    }
+
+    pub fn catalog_services(&self) -> Option<CatalogServices> {
+        self.catalog_services.clone()
     }
 
     pub fn user_repo(&self) -> Option<Arc<dyn UserRepo>> {

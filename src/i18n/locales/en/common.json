@@ -19,6 +19,8 @@
     "home": "Home",
     "reception": "Reception",
     "doctors": "Doctors",
+    "operators": "Operators",
+    "check_types": "Check types",
     "inventory": "Inventory",
     "reports": "Reports",
     "users": "Users",

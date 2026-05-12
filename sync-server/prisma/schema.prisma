@@ -142,3 +142,200 @@ model RefreshToken {
   @@index([entityIdTenant, userId])
   @@map("refresh_tokens")
 }
+
+// ---- Phase 3: Catalog & Reference Data ------------------------------------
+
+model CheckType {
+  id              String    @id
+  nameAr          String    @map("name_ar")
+  nameEn          String?   @map("name_en")
+  hasSubtypes     Boolean   @map("has_subtypes")
+  basePriceIqd    Int?      @map("base_price_iqd")
+  dyeSupported    Boolean   @default(false) @map("dye_supported")
+  reportSupported Boolean   @default(false) @map("report_supported")
+  sortOrder       Int       @default(0) @map("sort_order")
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+  version         Int       @default(0)
+  lastSyncedAt    DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt        DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId  String?   @map("origin_device_id")
+  entityId        String    @map("entity_id")
+
+  subtypes              CheckSubtype[]
+  doctorPricings        DoctorCheckPricing[]
+  inventoryConsumption  InventoryConsumptionMap[]
+  operatorSpecialties   OperatorSpecialty[]
+
+  @@index([entityId, sortOrder])
+  @@map("check_types")
+}
+
+model CheckSubtype {
+  id              String    @id
+  checkTypeId     String    @map("check_type_id")
+  nameAr          String    @map("name_ar")
+  nameEn          String?   @map("name_en")
+  priceIqd        Int       @map("price_iqd")
+  sortOrder       Int       @default(0) @map("sort_order")
+  createdAt       DateTime  @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+  version         Int       @default(0)
+  lastSyncedAt    DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt        DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId  String?   @map("origin_device_id")
+  entityId        String    @map("entity_id")
+
+  checkType             CheckType                 @relation(fields: [checkTypeId], references: [id])
+  doctorPricings        DoctorCheckPricing[]
+  inventoryConsumption  InventoryConsumptionMap[]
+
+  @@index([checkTypeId])
+  @@map("check_subtypes")
+}
+
+model Doctor {
+  id              String    @id
+  name            String
+  specialty       String?
+  phone           String?
+  isActive        Boolean   @default(true) @map("is_active")
+  notes           String?
+  createdAt       DateTime  @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+  version         Int       @default(0)
+  lastSyncedAt    DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt        DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId  String?   @map("origin_device_id")
+  entityId        String    @map("entity_id")
+
+  pricings    DoctorCheckPricing[]
+
+  @@index([entityId, name])
+  @@map("doctors")
+}
+
+model DoctorCheckPricing {
+  id                String    @id
+  doctorId          String    @map("doctor_id")
+  checkTypeId       String    @map("check_type_id")
+  checkSubtypeId    String?   @map("check_subtype_id")
+  priceOverrideIqd  Int?      @map("price_override_iqd")
+  cutKind           CutKind   @map("cut_kind")
+  cutValue          Int       @map("cut_value")
+  createdAt         DateTime  @map("created_at") @db.Timestamptz
+  updatedAt         DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz
+  version           Int       @default(0)
+  lastSyncedAt      DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt          DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId    String?   @map("origin_device_id")
+  entityId          String    @map("entity_id")
+
+  doctor        Doctor        @relation(fields: [doctorId], references: [id])
+  checkType     CheckType     @relation(fields: [checkTypeId], references: [id])
+  checkSubtype  CheckSubtype? @relation(fields: [checkSubtypeId], references: [id])
+
+  @@index([doctorId])
+  @@index([checkTypeId])
+  @@map("doctor_check_pricing")
+}
+
+enum CutKind {
+  pct
+  fixed
+}
+
+model Operator {
+  id                    String    @id
+  name                  String
+  phone                 String?
+  baseCutPerCheckIqd    Int       @map("base_cut_per_check_iqd")
+  isActive              Boolean   @default(true) @map("is_active")
+  notes                 String?
+  createdAt             DateTime  @map("created_at") @db.Timestamptz
+  updatedAt             DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt             DateTime? @map("deleted_at") @db.Timestamptz
+  version               Int       @default(0)
+  lastSyncedAt          DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt              DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId        String?   @map("origin_device_id")
+  entityId              String    @map("entity_id")
+
+  specialties OperatorSpecialty[]
+
+  @@index([entityId, isActive])
+  @@map("operators")
+}
+
+model OperatorSpecialty {
+  id              String    @id
+  operatorId      String    @map("operator_id")
+  checkTypeId     String    @map("check_type_id")
+  createdAt       DateTime  @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+  version         Int       @default(0)
+  lastSyncedAt    DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt        DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId  String?   @map("origin_device_id")
+  entityId        String    @map("entity_id")
+
+  operator    Operator   @relation(fields: [operatorId], references: [id])
+  checkType   CheckType  @relation(fields: [checkTypeId], references: [id])
+
+  @@index([operatorId])
+  @@index([checkTypeId])
+  @@map("operator_specialties")
+}
+
+model InventoryItem {
+  id                  String    @id
+  nameAr              String    @map("name_ar")
+  nameEn              String?   @map("name_en")
+  unit                String
+  quantityOnHand      Int       @default(0) @map("quantity_on_hand")
+  lowStockThreshold   Int       @default(0) @map("low_stock_threshold")
+  isActive            Boolean   @default(true) @map("is_active")
+  createdAt           DateTime  @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz
+  version             Int       @default(0)
+  lastSyncedAt        DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt            DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId      String?   @map("origin_device_id")
+  entityId            String    @map("entity_id")
+
+  consumptionMap   InventoryConsumptionMap[]
+
+  @@index([entityId, isActive])
+  @@map("inventory_items")
+}
+
+model InventoryConsumptionMap {
+  id                  String    @id
+  checkTypeId         String    @map("check_type_id")
+  checkSubtypeId      String?   @map("check_subtype_id")
+  itemId              String    @map("item_id")
+  quantityPerCheck    Int       @map("quantity_per_check")
+  onDyeOnly           Boolean   @default(false) @map("on_dye_only")
+  createdAt           DateTime  @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz
+  version             Int       @default(0)
+  lastSyncedAt        DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt            DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId      String?   @map("origin_device_id")
+  entityId            String    @map("entity_id")
+
+  checkType     CheckType     @relation(fields: [checkTypeId], references: [id])
+  checkSubtype  CheckSubtype? @relation(fields: [checkSubtypeId], references: [id])
+  item          InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@index([itemId])
+  @@map("inventory_consumption_map")
+}

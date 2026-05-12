@@ -11,6 +11,8 @@ import {
   ShieldCheck,
   Lock,
   LogOut,
+  Microscope,
+  HardHat,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -66,6 +68,10 @@ export function Sidebar() {
       key: "admin",
       items: [
         { key: "users", to: "/admin/users", icon: Users, enabled: role === "superadmin" },
+        { key: "check_types", to: "/admin/check-types", icon: Microscope, enabled: role === "superadmin" },
+        { key: "doctors", to: "/admin/doctors", icon: Stethoscope, enabled: role === "superadmin" },
+        { key: "operators", to: "/admin/operators", icon: HardHat, enabled: role === "superadmin" },
+        { key: "inventory", to: "/admin/inventory", icon: Package, enabled: role === "superadmin" },
         { key: "settings", to: "/admin/settings", icon: Settings, enabled: role === "superadmin" },
       ],
     },

@@ -20,6 +20,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "002_users_settings.sql",
         include_str!("../../migrations/002_users_settings.sql"),
     ),
+    (
+        "003_catalog.sql",
+        include_str!("../../migrations/003_catalog.sql"),
+    ),
 ];
 
 /// Apply every embedded migration that has not already run.
@@ -77,15 +81,28 @@ pub async fn run(pool: &SqlitePool) -> AppResult<()> {
 
 /// Split a SQL file into individual statements on top-level semicolons.
 ///
-/// Skips `;` inside `--` line comments and inside single-quoted string
-/// literals. Migrations here never use multi-line `/* ... */` comments or
-/// dollar-quoted strings; extend this parser if that changes.
+/// Skips `;` inside `--` line comments, inside single-quoted string literals,
+/// and inside `BEGIN ... END;` blocks (CREATE TRIGGER bodies). Migrations
+/// here never use multi-line `/* ... */` comments or dollar-quoted strings;
+/// extend this parser if that changes.
 fn split_statements(sql: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut in_string = false;
     let mut in_line_comment = false;
+    let mut block_depth: u32 = 0;
+    let mut word = String::new();
     let mut chars = sql.chars().peekable();
+
+    fn flush_word(word: &mut String, depth: &mut u32) {
+        if word.eq_ignore_ascii_case("BEGIN") {
+            *depth += 1;
+        } else if word.eq_ignore_ascii_case("END") && *depth > 0 {
+            *depth -= 1;
+        }
+        word.clear();
+    }
+
     while let Some(c) = chars.next() {
         if in_line_comment {
             current.push(c);
@@ -103,23 +120,38 @@ fn split_statements(sql: &str) -> Vec<String> {
         }
         match c {
             '-' if matches!(chars.peek(), Some('-')) => {
+                flush_word(&mut word, &mut block_depth);
                 current.push(c);
                 in_line_comment = true;
             }
             '\'' => {
+                flush_word(&mut word, &mut block_depth);
                 current.push(c);
                 in_string = true;
             }
             ';' => {
-                let trimmed = current.trim().to_string();
-                if !trimmed.is_empty() {
-                    out.push(format!("{trimmed};"));
+                flush_word(&mut word, &mut block_depth);
+                if block_depth == 0 {
+                    let trimmed = current.trim().to_string();
+                    if !trimmed.is_empty() {
+                        out.push(format!("{trimmed};"));
+                    }
+                    current.clear();
+                } else {
+                    current.push(c);
                 }
-                current.clear();
             }
-            _ => current.push(c),
+            _ => {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    word.push(c);
+                } else {
+                    flush_word(&mut word, &mut block_depth);
+                }
+                current.push(c);
+            }
         }
     }
+    flush_word(&mut word, &mut block_depth);
     let trimmed = current.trim().to_string();
     if !trimmed.is_empty() {
         out.push(format!("{trimmed};"));
@@ -147,12 +179,23 @@ mod tests {
         // Tables exist
         let (count,): (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN \
-            ('outbox', 'sync_state', 'audit_log', 'metrics_events', 'users', 'settings')",
+            ('outbox', 'sync_state', 'audit_log', 'metrics_events', 'users', 'settings', \
+             'check_types', 'check_subtypes', 'doctors', 'doctor_check_pricing', \
+             'operators', 'operator_specialties', 'inventory_items', \
+             'inventory_consumption_map')",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(count, 6);
+        assert_eq!(count, 14);
+
+        // FTS5 virtual table also created.
+        let (vcount,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE name = 'doctors_fts'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(vcount >= 1);
 
         // Seed populated 10 setting keys
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM settings")
@@ -160,5 +203,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(n, 10);
+    }
+
+    #[test]
+    fn split_handles_trigger_blocks() {
+        let sql = "CREATE TABLE x (id TEXT); \
+                   CREATE TRIGGER t AFTER INSERT ON x BEGIN \
+                       INSERT INTO x(id) VALUES ('a'); \
+                       INSERT INTO x(id) VALUES ('b'); \
+                   END; \
+                   CREATE TABLE y (id TEXT);";
+        let stmts = split_statements(sql);
+        assert_eq!(stmts.len(), 3);
+        assert!(stmts[1].to_uppercase().contains("CREATE TRIGGER"));
+        assert!(stmts[1].to_uppercase().contains("END"));
     }
 }
