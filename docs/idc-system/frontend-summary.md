@@ -130,7 +130,35 @@ _pending_
 
 ### Phase 04
 
-_pending_
+Shipped 2026-05-12.
+
+**Route surface**
+- `/reception/shifts` -- new page guarded by `<RequireRole roles={['receptionist','superadmin']}>` wrapper around the `/reception/*` outlet (lays the groundwork for phase-05).
+- Sidebar: new Shifts link under the Operations group; visible to receptionist + superadmin, hidden for accountant.
+
+**Pages / components**
+- `src/pages/reception/shifts.tsx` -- header (eyebrow + refresh + crimson primary "Clock in operator"), conflict banner slot, two stacked tables.
+- `src/components/reception/clock-in-dialog.tsx` -- operator combobox filtered to active operators NOT on an open shift; optional note; submit dispatches `shifts::clock_in`. Inner-body component pattern (wrapper returns `null` when closed) avoids `react-hooks/set-state-in-effect`.
+- `src/components/reception/on-shift-table.tsx` -- Operator / phone / since (with pulsing live status pill) / clock-out button.
+- `src/components/reception/shift-history-today.tsx` -- Operator / in / out / duration / lines-run (placeholder `0`) / edit (superadmin only).
+- `src/components/reception/retroactive-shift-editor.tsx` -- superadmin form for `(check_in_at, check_out_at, note)` with `<input type="datetime-local">` paired to RFC3339 round-trip.
+- `src/components/reception/open-shift-conflict-banner.tsx` + `resolve-overlapping-shifts.tsx` -- render only when `useShiftOverlaps()` returns rows; resolver lists the involved shifts and lets an admin close-now or soft-delete duplicates.
+
+**State + IPC**
+- `src/features/shifts/queries.ts` -- `useOpenShifts`, `useShiftHistoryToday`, `useShiftOverlaps`, `useShiftClockIn`, `useShiftClockOut`, `useShiftEdit`, `useShiftSoftDelete`. Mutations invalidate the shared `['shifts']` key on success.
+- `src/lib/schemas/shift.ts` -- Zod schemas for clock-in / clock-out / edit / soft-delete inputs (used by future React Hook Form integrations and also as runtime guards before IPC).
+- `src/lib/format/duration.ts` -- `formatTime`, `formatDuration`, `formatSince` helpers (mono Geist with `tnum`).
+- IPC type map gained `shifts_clock_in` / `shifts_clock_out` / `shifts_list_open` / `shifts_history_today` / `shifts_edit` / `shifts_soft_delete` / `shifts_list_overlaps` plus shared `ShiftRecord` / `ShiftWithMetaRecord` / `ShiftOverlapPair` shapes.
+
+**i18n**
+- New `reception` namespace (en + ar) with `reception.shifts.*` keys for the page title, table headers, dialog copy, and the overlap banner / resolver.
+- Added missing `admin.close` / `admin.refresh` / `admin.loading` keys to keep the editorial chrome consistent.
+- Sidebar `nav.shifts` added in en + ar.
+
+**Notes for downstream phases**
+- The lines-run column is a `0` placeholder. Phase-05 must add `shifts::lines_run_today(operator_id) -> u32` and update `<ShiftHistoryToday>` (§7.7).
+- Visit lock eligibility in phase-05 should use `useOpenShifts()` to filter operators available to assign on a visit.
+- The conflict resolver currently soft-deletes orphans; phase-08 may add an audit-log filter to surface the resolution trail in the global audit view.
 
 ### Phase 05
 

@@ -53,6 +53,12 @@ export function Sidebar() {
       items: [
         { key: "home", to: "/home", icon: Home, enabled: true },
         { key: "reception", to: "/reception", icon: ClipboardList, enabled: false },
+        {
+          key: "shifts",
+          to: "/reception/shifts",
+          icon: HardHat,
+          enabled: role === "receptionist" || role === "superadmin",
+        },
         { key: "doctors", to: "/doctors", icon: Stethoscope, enabled: false },
         { key: "inventory", to: "/inventory", icon: Package, enabled: false },
       ],

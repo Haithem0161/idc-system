@@ -156,6 +156,22 @@ export interface ConsumptionSyncRecord {
   origin_device_id: string | null
 }
 
+export interface OperatorShiftSyncRecord {
+  id: string
+  operator_id: string
+  check_in_at: string
+  check_out_at: string | null
+  check_in_by_user_id: string
+  check_out_by_user_id: string | null
+  note: string | null
+  entity_id: string
+  version: number
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  origin_device_id: string | null
+}
+
 export type CatalogSyncRecord =
   | CheckTypeSyncRecord
   | CheckSubtypeSyncRecord
@@ -183,6 +199,7 @@ export class MemorySyncStore implements
   readonly operatorSpecialties = new Map<string, OperatorSpecialtySyncRecord>()
   readonly inventoryItems = new Map<string, InventoryItemSyncRecord>()
   readonly consumptionMap = new Map<string, ConsumptionSyncRecord>()
+  readonly operatorShifts = new Map<string, OperatorShiftSyncRecord>()
   private readonly processed = new Map<string, { tenantId: string, response: ProcessedOpResponse, processedAt: Date }>()
   private readonly cursors = new Map<string, string>()
   private readonly conflicts = new Map<string, ParkedConflict & {
@@ -253,6 +270,19 @@ export class MemorySyncStore implements
     row: ConsumptionSyncRecord
   ): Promise<{ applied: boolean }> {
     return upsertLWW(this.consumptionMap, row)
+  }
+
+  /**
+   * `operator_shifts` follows an additive-only policy:
+   * - Pure inserts (new `id`) survive unconditionally.
+   * - Updates of an existing `id` (clock_out, retroactive edit, soft_delete)
+   *   resolve LWW by `(version, updated_at, origin_device_id)`.
+   * See phase-04 §4 Sync Semantics + §7.6 + §7.9.
+   */
+  async upsertOperatorShift (
+    row: OperatorShiftSyncRecord
+  ): Promise<{ applied: boolean }> {
+    return upsertLWW(this.operatorShifts, row)
   }
 
   async upsertSetting (row: SettingSyncRecord): Promise<{ applied: boolean }> {
@@ -339,7 +369,11 @@ export class MemorySyncStore implements
       ),
     ]
 
-    const merged = [...auditChanges, ...userChanges, ...settingChanges, ...catalogChanges]
+    // Shifts use additive-only semantics: include soft-deleted rows so the
+    // tombstone propagates. mapShiftChanges keeps deleted_at on the payload.
+    const shiftChanges: ChangeRow[] = mapShiftChanges(this.operatorShifts, tenantId)
+
+    const merged = [...auditChanges, ...userChanges, ...settingChanges, ...catalogChanges, ...shiftChanges]
       .sort((a, b) => {
         const cmp = a.updated_at.localeCompare(b.updated_at)
         return cmp !== 0 ? cmp : a.entity_id.localeCompare(b.entity_id)
@@ -433,6 +467,25 @@ function mapCatalogChanges<T extends SyncRow> (
     .filter((row) => (row.entity_id ?? '') === tenantId && (row.deleted_at ?? null) == null)
     .map((row) => ({
       entity,
+      entity_id: row.id,
+      payload: row as unknown as Record<string, unknown>,
+      updated_at: row.updated_at,
+      version: row.version,
+    }))
+}
+
+/**
+ * Shifts are additive: even soft-deleted rows ship to other devices so the
+ * tombstone propagates. Phase-04 §7.9.
+ */
+function mapShiftChanges (
+  store: Map<string, OperatorShiftSyncRecord>,
+  tenantId: string
+): ChangeRow[] {
+  return [...store.values()]
+    .filter((row) => row.entity_id === tenantId)
+    .map((row) => ({
+      entity: 'operator_shifts',
       entity_id: row.id,
       payload: row as unknown as Record<string, unknown>,
       updated_at: row.updated_at,

@@ -15,6 +15,7 @@ use crate::domains::auth::domain::repositories::UserRepo;
 use crate::domains::auth::{AuthService, UserService};
 use crate::domains::catalog::CatalogServices;
 use crate::domains::settings::service::SettingsService;
+use crate::domains::shifts::ShiftService;
 use crate::sync::SyncEngineHandle;
 
 /// User context received from Business OS (embedded mode) or the auth flow
@@ -38,6 +39,7 @@ pub struct AppState {
     user_service: Option<Arc<UserService>>,
     settings_service: Option<Arc<SettingsService>>,
     catalog_services: Option<CatalogServices>,
+    shift_service: Option<Arc<ShiftService>>,
     user_repo: Option<Arc<dyn UserRepo>>,
     user_context: RwLock<Option<UserContext>>,
     settings_cache: RwLock<HashMap<String, SettingValue>>,
@@ -56,6 +58,7 @@ pub struct AppStateConfig {
     pub user_service: Arc<UserService>,
     pub settings_service: Arc<SettingsService>,
     pub catalog_services: CatalogServices,
+    pub shift_service: Arc<ShiftService>,
     pub user_repo: Arc<dyn UserRepo>,
     pub device_id: String,
     pub app_version: String,
@@ -71,6 +74,7 @@ impl AppState {
             user_service: Some(cfg.user_service),
             settings_service: Some(cfg.settings_service),
             catalog_services: Some(cfg.catalog_services),
+            shift_service: Some(cfg.shift_service),
             user_repo: Some(cfg.user_repo),
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
@@ -91,6 +95,7 @@ impl AppState {
             user_service: None,
             settings_service: None,
             catalog_services: None,
+            shift_service: None,
             user_repo: None,
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
@@ -131,6 +136,10 @@ impl AppState {
 
     pub fn catalog_services(&self) -> Option<CatalogServices> {
         self.catalog_services.clone()
+    }
+
+    pub fn shift_service(&self) -> Option<Arc<ShiftService>> {
+        self.shift_service.clone()
     }
 
     pub fn user_repo(&self) -> Option<Arc<dyn UserRepo>> {

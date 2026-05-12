@@ -1,6 +1,18 @@
 {
   "admin": {
     "eyebrow": "Administration",
+    "close": "Close",
+    "refresh": "Refresh",
+    "loading": "Loading...",
+    "save": "Save",
+    "cancel": "Cancel",
+    "edit": "Edit",
+    "search_placeholder": "Search...",
+    "include_inactive": "Include inactive",
+    "actions": "Actions",
+    "active": "Active",
+    "inactive": "Inactive",
+    "status": "Status",
     "users": {
       "title": "Users",
       "subtitle": "Operators with access to the clinic system.",

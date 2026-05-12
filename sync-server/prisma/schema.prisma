@@ -91,6 +91,8 @@ model User {
 
   refreshTokens   RefreshToken[]
   auditEntries    AuditLog[]     @relation("AuditActor")
+  shiftCheckIns   OperatorShift[] @relation("ShiftCheckIn")
+  shiftCheckOuts  OperatorShift[] @relation("ShiftCheckOut")
 
   @@unique([entityId, email], name: "user_email_unique")
   @@map("users")
@@ -267,6 +269,7 @@ model Operator {
   entityId              String    @map("entity_id")
 
   specialties OperatorSpecialty[]
+  shifts      OperatorShift[]
 
   @@index([entityId, isActive])
   @@map("operators")
@@ -338,4 +341,32 @@ model InventoryConsumptionMap {
 
   @@index([itemId])
   @@map("inventory_consumption_map")
+}
+
+// ---- Phase 4: Operator Shifts ---------------------------------------------
+
+model OperatorShift {
+  id                  String    @id
+  operatorId          String    @map("operator_id")
+  checkInAt           DateTime  @map("check_in_at") @db.Timestamptz
+  checkOutAt          DateTime? @map("check_out_at") @db.Timestamptz
+  checkInByUserId     String    @map("check_in_by_user_id")
+  checkOutByUserId    String?   @map("check_out_by_user_id")
+  note                String?
+  createdAt           DateTime  @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz
+  version             Int       @default(0)
+  lastSyncedAt        DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt            DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId      String?   @map("origin_device_id")
+  entityId            String    @map("entity_id")
+
+  operator         Operator @relation(fields: [operatorId], references: [id])
+  checkInByUser    User     @relation("ShiftCheckIn", fields: [checkInByUserId], references: [id], onDelete: Restrict)
+  checkOutByUser   User?    @relation("ShiftCheckOut", fields: [checkOutByUserId], references: [id], onDelete: Restrict)
+
+  @@index([entityId, checkInAt])
+  @@index([operatorId, checkOutAt])
+  @@map("operator_shifts")
 }

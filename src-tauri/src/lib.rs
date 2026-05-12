@@ -57,6 +57,13 @@ use crate::domains::settings::commands::{settings_get, settings_list, settings_u
 use crate::domains::settings::domain::repositories::SettingRepo;
 use crate::domains::settings::infrastructure::SqliteSettingRepo;
 use crate::domains::settings::service::SettingsService;
+use crate::domains::shifts::commands::{
+    shifts_clock_in, shifts_clock_out, shifts_edit, shifts_history_today, shifts_list_open,
+    shifts_list_overlaps, shifts_soft_delete,
+};
+use crate::domains::shifts::domain::repositories::OperatorShiftRepo;
+use crate::domains::shifts::infrastructure::SqliteOperatorShiftRepo;
+use crate::domains::shifts::ShiftService;
 use crate::domains::sync::commands::{
     config_get_sync_server_url, config_set_sync_server_url, device_info, sync_list_conflicts,
     sync_outbox_count, sync_resolve_conflict, sync_status, sync_trigger_pull, sync_trigger_push,
@@ -210,6 +217,14 @@ pub fn run() {
             inventory_consumption_update,
             inventory_consumption_soft_delete,
             inventory_consumption_list_by_type,
+            // shifts
+            shifts_clock_in,
+            shifts_clock_out,
+            shifts_list_open,
+            shifts_history_today,
+            shifts_edit,
+            shifts_soft_delete,
+            shifts_list_overlaps,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -248,6 +263,8 @@ async fn bootstrap(
         Arc::new(SqliteInventoryItemRepo::new(pool.clone()));
     let consumption_repo: Arc<dyn InventoryConsumptionRepo> =
         Arc::new(SqliteInventoryConsumptionRepo::new(pool.clone()));
+    let shift_repo: Arc<dyn OperatorShiftRepo> =
+        Arc::new(SqliteOperatorShiftRepo::new(pool.clone()));
 
     let engine_handle: SyncEngineHandle = SyncEngine::spawn(
         crate::sync::engine::SyncEngineConfig {
@@ -293,15 +310,24 @@ async fn bootstrap(
         check_subtype_repo,
         doctor_repo,
         doctor_pricing_repo,
-        operator_repo,
+        operator_repo: operator_repo.clone(),
         operator_specialty_repo,
         inventory_item_repo,
         consumption_repo,
-        audit_repo,
-        outbox_repo,
+        audit_repo: audit_repo.clone(),
+        outbox_repo: outbox_repo.clone(),
         device_id: device_id.clone(),
         app_handle: app.clone(),
     });
+
+    let shift_service = Arc::new(ShiftService::new(
+        pool.clone(),
+        shift_repo,
+        operator_repo,
+        audit_repo,
+        outbox_repo,
+        device_id.clone(),
+    ));
 
     let state = AppState::new(AppStateConfig {
         db_pool: pool,
@@ -310,6 +336,7 @@ async fn bootstrap(
         user_service,
         settings_service,
         catalog_services,
+        shift_service,
         user_repo,
         device_id,
         app_version,

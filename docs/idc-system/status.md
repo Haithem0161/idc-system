@@ -1,6 +1,6 @@
 # IDC System v0.1.x Status
 
-_Last updated: 2026-05-11. Source: [roadmap.md](./roadmap.md)._
+_Last updated: 2026-05-12. Source: [roadmap.md](./roadmap.md)._
 
 ## Phase Status Table
 
@@ -9,7 +9,7 @@ _Last updated: 2026-05-11. Source: [roadmap.md](./roadmap.md)._
 | 01 | Foundation & Sync Plumbing | All | complete | 2026-05-11 | 2026-05-11 | 4 (`outbox`, `sync_state`, `audit_log`, `metrics_events`) | 4 (`AuditLog`, `ProcessedOp`, `SyncCursor`, `ConflictParked`) | 9 | 5 | 6 |
 | 02 | Authentication & Users | All | complete | 2026-05-11 | 2026-05-11 | 2 (`users`, `settings`) | 3 (`User`, `Setting`, `RefreshToken`) + enums (`UserRole`, `SettingType`) | 15 (auth: 6, users: 7, settings: 3 minus overlap) | 5 (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/change-password`, `/auth/bootstrap-superadmin`) | 4 (AuthService [Rust], UserService, SettingsService, AuthService [TS]) |
 | 03 | Catalog & Reference Data | All | complete | 2026-05-12 | 2026-05-12 | 9 (8 tables + 1 FTS5 `doctors_fts`) | 8 | 38 | 0 | 8 |
-| 04 | Operator Shifts | Frontend, Tauri, Server | not_started | - | - | 1 (`operator_shifts`) | 1 (`OperatorShift`) | 5 | 0 | 1 |
+| 04 | Operator Shifts | Frontend, Tauri, Server | complete | 2026-05-12 | 2026-05-12 | 1 (`operator_shifts`) | 1 (`OperatorShift`) + back-relations on `User` (`ShiftCheckIn` / `ShiftCheckOut`) and `Operator` (`shifts`) | 7 | 0 | 1 |
 | 05 | Reception & Visit Lock | All | not_started | - | - | 4 (`patients`, `patients_fts`, `visits`, `inventory_adjustments`) | 3 (`Patient`, `Visit`, `InventoryAdjustment`) | ~12 | 0 | 5 |
 | 06 | Inventory Operations | All | not_started | - | - | 0 | 0 | 5 | 0 | 1 |
 | 07 | Accounting & Reports | All | not_started | - | - | 0 | 0 | ~9 | 2 | 3 |
@@ -21,16 +21,16 @@ Aggregate ship target after Phase 08: 17 base SQLite tables + 2 FTS5 virtual tab
 
 | Metric | Before | Current | Target |
 |-|-|-|-|
-| SQLite syncable tables | 0 | 11 (`audit_log`, `users`, `settings`, `check_types`, `check_subtypes`, `doctors`, `doctor_check_pricing`, `operators`, `operator_specialties`, `inventory_items`, `inventory_consumption_map`) | 15 (PRD §6.1.1-§6.1.15) |
+| SQLite syncable tables | 0 | 12 (`audit_log`, `users`, `settings`, `check_types`, `check_subtypes`, `doctors`, `doctor_check_pricing`, `operators`, `operator_specialties`, `inventory_items`, `inventory_consumption_map`, `operator_shifts`) | 15 (PRD §6.1.1-§6.1.15) |
 | SQLite engine tables | 0 | 3 (`outbox`, `sync_state`, `metrics_events`) | 3 |
 | SQLite FTS5 virtual tables | 0 | 1 (`doctors_fts`) | 2 (`patients_fts`, `doctors_fts`) |
-| Prisma syncable models | 0 | 11 (`AuditLog`, `User`, `Setting`, `CheckType`, `CheckSubtype`, `Doctor`, `DoctorCheckPricing`, `Operator`, `OperatorSpecialty`, `InventoryItem`, `InventoryConsumptionMap`) | 15 |
+| Prisma syncable models | 0 | 12 (`AuditLog`, `User`, `Setting`, `CheckType`, `CheckSubtype`, `Doctor`, `DoctorCheckPricing`, `Operator`, `OperatorSpecialty`, `InventoryItem`, `InventoryConsumptionMap`, `OperatorShift`) | 15 |
 | Prisma server-only models | 0 | 4 (`ProcessedOp`, `SyncCursor`, `ConflictParked`, `RefreshToken`) | 4 |
-| Tauri IPC commands | 0 | 62 (sync: 9, auth: 6, users: 7, settings: 3, catalog: 37 -- counted unique) | ~55-67 |
+| Tauri IPC commands | 0 | 69 (sync: 9, auth: 6, users: 7, settings: 3, catalog: 37, shifts: 7) | ~55-67 |
 | Sync-server routes | 2 (template only) | 11 (`/`, `/healthz`, `/sync/push`, `/sync/pull`, `/sync/lookup-op`, `/sync/conflicts/:opId/resolve`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/change-password`, `/auth/bootstrap-superadmin`) | 11 (incl. `/healthz` and `/documentation`) |
-| Frontend pages | 2 (`/`, `*`) | 17 (Phase 1+2: 9 + Phase 3: 8 admin pages: `/admin/check-types`, `/admin/check-types/:id`, `/admin/doctors`, `/admin/doctors/:id`, `/admin/operators`, `/admin/operators/:id`, `/admin/inventory`, `/admin/inventory/:id`) | 31 |
-| Conflict policies in use | 0 | 3 (`additive-only` for `audit_log`, `last-write-wins` for `users` + all 8 catalog entities, `manual` for `settings`) | 3 |
-| Locales | 2 (ar+en) | 2 (5 namespaces: `common`, `errors`, `receipts`, `auth`, `admin`) | 2 |
+| Frontend pages | 2 (`/`, `*`) | 18 (Phase 1+2: 9 + Phase 3: 8 admin pages + Phase 4: 1 reception page (`/reception/shifts`)) | 31 |
+| Conflict policies in use | 0 | 4 (`additive-only` for `audit_log` + `operator_shifts`, `last-write-wins` for `users` + all 8 catalog entities, `manual` for `settings`) | 3 |
+| Locales | 2 (ar+en) | 2 (6 namespaces: `common`, `errors`, `receipts`, `auth`, `admin`, `reception`) | 2 |
 | Audit retention (local) | n/a | n/a | 90 days |
 | Audit retention (server) | n/a | n/a | indefinite |
 
@@ -178,6 +178,21 @@ After Phases 1 and 2 shipped, the editorial design system in `.claude/rules/desi
 - **Frontend**: New `features/catalog/queries.ts` with full TanStack React Query hooks (list / detail / mutations) per entity. Eight new admin pages under `/admin/check-types/{,:id}`, `/admin/doctors/{,:id}`, `/admin/operators/{,:id}`, `/admin/inventory/{,:id}` -- all guarded by the existing `<AdminGate>` (superadmin only, §7.36). Sidebar nav extended with check-types, doctors, operators, inventory links (visible only to superadmins). Reusable `<AdminHeader>` + `<FieldLabel>` + `<EmptyRow>` + `<ErrorBanner>` primitives factored out into `components/admin/admin-panel.tsx`. `resolveLocaleName` helper at `src/lib/format/locale-name.ts` (§7.16).
 - **Deferred**: Subtype picker in `<DoctorPricingEditor>` (MVP form supports flat-only; subtype-aware row will land alongside the visit form in phase-05). `<InventoryAdminTable>` audit-log join column (§7.13). `set_active` IPC for operators is wired in the Rust service but the operator detail page uses an inline button rather than a dedicated `operators::set_active` IPC entry (the existing `operators_update` covers it for now -- a follow-up will register `operators::set_active` directly when phase-04 needs it).
 - **Verification**: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (15 unit + 7 catalog integration + 6 sync integration = 28 Rust tests), sync-server `pnpm build:ts` and `pnpm test` (22/22, including 5 new catalog tests), `pnpm lint` (0 errors), `pnpm build` (frontend) all green. Sync round-trip verified end-to-end via Fastify `app.inject()` in the sync-server tests (functionally equivalent to curl through the HTTP layer; same auth, validation, store).
+
+### Phase 04 completion notes (2026-05-12)
+
+- **Local schema**: migration `004_operator_shifts.sql` adds `operator_shifts` with the partial unique index `operator_shifts_open` (single open shift per operator), the `(entity_id, check_in_at)` history index (§7.2), and an `operator_id` index. FK declarations on `check_in_by_user_id` / `check_out_by_user_id` are `ON DELETE RESTRICT` (§7.14) to document the no-hard-delete-user contract.
+- **Server schema**: `OperatorShift` Prisma model added with the `pulledAt` column (§7.13); back-relations `ShiftCheckIn` / `ShiftCheckOut` wired on `User` and `shifts` on `Operator` (closes the Pass-3 CRITICAL §7.29 / §7.30 gaps for shifts).
+- **Tauri / Rust**: new `shifts` bounded context (`src-tauri/src/domains/shifts/`) with the `OperatorShift` entity (open/close/edit_times/soft_deleted state transitions with future-time, ordering and double-close guards), `OperatorShiftRepo` trait, sqlx `SqliteOperatorShiftRepo`, and `ShiftService` exposing `clock_in` / `clock_out` / `edit` / `soft_delete` / `list_open` / `history_today` / `list_overlaps`. All mutators go through the Phase-1 `AuditWriter::with_audit` so the audit row precedes the business write (PRD §4.3). Audit-action enum reused the existing `ClockIn` / `ClockOut` variants from phase-01 §7.8 (already in `AuditAction`). 7 new IPC commands registered in `lib.rs::generate_handler!`; `AppState` gained a `shift_service` slot wired in `bootstrap()`.
+- **Sync server**: `MemorySyncStore` gained an `operatorShifts` map and a `upsertOperatorShift` LWW helper. `SyncPushService` dispatches `operator_shifts` with a `validateOperatorShift` guard (required fields, `check_out_at >= check_in_at`, `check_out_by_user_id` paired with `check_out_at`, note length). Role gate accepts `receptionist` OR `superadmin` (clock-in path requires only receptionist). `changesSince` includes shifts including soft-deleted rows so the tombstone propagates under additive policy (§7.9).
+- **Frontend**: new `features/shifts/queries.ts` with TanStack Query hooks (`useOpenShifts`, `useShiftHistoryToday`, `useShiftOverlaps`, `useShiftClockIn`, `useShiftClockOut`, `useShiftEdit`, `useShiftSoftDelete`); Zod schemas in `lib/schemas/shift.ts`; reception components `<ClockInDialog>`, `<OnShiftTable>`, `<ShiftHistoryToday>`, `<RetroactiveShiftEditor>`, `<OpenShiftConflictBanner>`, `<ResolveOverlappingShifts>`; the `/reception/shifts` page wired in `src/routes/index.tsx` under a `<RequireRole roles={['receptionist','superadmin']}>` wrapper (§7.16). Sidebar nav got a Shifts link visible to receptionist + superadmin. New `reception` i18n namespace shipped in EN + AR.
+- **Deferred**: lines-run column is rendered as `0` placeholder pending phase-05's `shifts::lines_run_today` IPC (cross-referenced in §7.7). Server `pulledAt` is declared on the model but not yet stamped by the pull service (will be wired alongside Prisma migration in a later sync-engine slice -- mirrors the catalog phase-03 status).
+- **Verification**:
+  - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` clean.
+  - `cargo test`: 20 + 7 + 13 + 6 = **46 Rust tests pass** (13 new in `tests/shifts_phase04.rs` cover clock_in success, double-clock-in rejection, inactive-operator rejection, clock-out, role-gated edit (reject + accept), edit overlap rejection, soft-delete idempotency, audit-row counts for each action, outbox enqueue, overlap detection across simulated concurrent rows, history-today window, and migration-applied assertion).
+  - `pnpm lint` clean (0 errors, 6 pre-existing warnings in unrelated files); `pnpm build` succeeds.
+  - Sync-server `pnpm build:ts` clean; `pnpm test`: **28 tests pass** (6 new in `test/routes/shifts-sync.test.ts` cover push acceptance for receptionist, validation rejection on `check_out_at < check_in_at`, role rejection for accountant, idempotent op_id replay, tombstone pull including `deleted_at`, and LWW resolution to higher version).
+  - **Live curl round-trip** (server booted on `:3161`, JWT minted via `/auth/login`): clock_in push -> `applied`; replay -> `duplicate`; bad ordering payload -> `422 VALIDATION_ERROR`; accountant role -> `403`; pull from new device returns the row; clock_out push at v2 -> `applied`; second pull returns v2 with `check_out_at`; soft-delete at v3 -> `applied`; third pull returns the tombstone (`deleted_at` set); missing `operator_id` -> `422`; cross-tenant `entity_id` -> `403`.
 
 ### Phase 02 completion notes (2026-05-11)
 

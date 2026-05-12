@@ -24,6 +24,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "003_catalog.sql",
         include_str!("../../migrations/003_catalog.sql"),
     ),
+    (
+        "004_operator_shifts.sql",
+        include_str!("../../migrations/004_operator_shifts.sql"),
+    ),
 ];
 
 /// Apply every embedded migration that has not already run.
@@ -182,12 +186,12 @@ mod tests {
             ('outbox', 'sync_state', 'audit_log', 'metrics_events', 'users', 'settings', \
              'check_types', 'check_subtypes', 'doctors', 'doctor_check_pricing', \
              'operators', 'operator_specialties', 'inventory_items', \
-             'inventory_consumption_map')",
+             'inventory_consumption_map', 'operator_shifts')",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(count, 14);
+        assert_eq!(count, 15);
 
         // FTS5 virtual table also created.
         let (vcount,): (i64,) =

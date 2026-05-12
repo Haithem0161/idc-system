@@ -1,0 +1,50 @@
+{
+  "reception": {
+    "eyebrow": "Reception",
+    "shifts": {
+      "title": "Operator shifts",
+      "subtitle": "Clock operators in and out for the day.",
+      "on_shift": "On shift",
+      "today_history": "Today's shifts",
+      "operator": "Operator",
+      "phone": "Phone",
+      "since": "Since",
+      "check_in": "In",
+      "check_out": "Out",
+      "duration": "Duration",
+      "lines_run": "Lines run",
+      "clock_out": "Clock out",
+      "open": "Open",
+      "empty_open": "No operators on shift right now.",
+      "empty_today": "No shifts today.",
+      "actions": {
+        "clock_in_operator": "Clock in operator",
+        "edit_shift": "Edit shift retroactively"
+      },
+      "clock_in": {
+        "title": "Clock in operator",
+        "operator": "Operator",
+        "placeholder": "Select an operator",
+        "note": "Note (optional)",
+        "submit": "Clock in",
+        "all_on_shift": "All active operators are on shift."
+      },
+      "edit": {
+        "title": "Edit shift",
+        "out_hint": "Leave blank to keep the shift open."
+      },
+      "errors": {
+        "choose_operator": "Choose an operator"
+      },
+      "overlap": {
+        "title": "Overlapping shifts detected",
+        "body": "Two devices recorded overlapping shifts for {{count}} operator(s). Resolve before locking visits.",
+        "resolve": "Resolve",
+        "modal_hint": "Pick the canonical shift; close or delete the duplicates.",
+        "cleared": "Overlaps cleared.",
+        "close_now": "Close now",
+        "delete": "Delete"
+      }
+    }
+  }
+}

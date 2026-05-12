@@ -171,6 +171,43 @@ export type CommandMap = {
     args: { args: { check_type_id: string } }
     result: ConsumptionRecord[]
   }
+
+  // Phase 4: shifts
+  shifts_clock_in: {
+    args: { args: { operator_id: string; note?: string | null } }
+    result: ShiftRecord
+  }
+  shifts_clock_out: {
+    args: { args: { shift_id: string } }
+    result: ShiftRecord
+  }
+  shifts_list_open: {
+    args: void
+    result: ShiftWithMetaRecord[]
+  }
+  shifts_history_today: {
+    args: void
+    result: ShiftWithMetaRecord[]
+  }
+  shifts_edit: {
+    args: {
+      args: {
+        shift_id: string
+        check_in_at: string
+        check_out_at?: string | null
+        note?: { value: string | null } | null
+      }
+    }
+    result: ShiftRecord
+  }
+  shifts_soft_delete: {
+    args: { args: { shift_id: string; reason: string } }
+    result: null
+  }
+  shifts_list_overlaps: {
+    args: { args: { operator_id?: string } }
+    result: ShiftOverlapPair[]
+  }
 }
 
 // ---- Catalog wire shapes -------------------------------------------------
@@ -375,6 +412,33 @@ export interface ConsumptionCreateArgs {
   item_id: string
   quantity_per_check: number
   on_dye_only?: boolean
+}
+
+// ---- Phase 4: shifts ----------------------------------------------------
+
+export interface ShiftRecord {
+  id: string
+  operator_id: string
+  check_in_at: string
+  check_out_at: string | null
+  check_in_by_user_id: string
+  check_out_by_user_id: string | null
+  note: string | null
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  version: number
+  entity_id: string
+}
+
+export interface ShiftWithMetaRecord extends ShiftRecord {
+  operator_name: string
+  operator_phone: string | null
+}
+
+export interface ShiftOverlapPair {
+  left: ShiftRecord
+  right: ShiftRecord
 }
 
 export type UserRoleLiteral = "superadmin" | "receptionist" | "accountant"

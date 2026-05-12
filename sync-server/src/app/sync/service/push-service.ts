@@ -13,6 +13,7 @@ import type {
   DoctorSyncRecord,
   InventoryItemSyncRecord,
   MemorySyncStore,
+  OperatorShiftSyncRecord,
   OperatorSpecialtySyncRecord,
   OperatorSyncRecord,
   SettingSyncRecord,
@@ -242,6 +243,26 @@ export class SyncPushService {
           await this.store.upsertConsumption(row)
           break
         }
+        case 'operator_shifts': {
+          // Receptionists and superadmins both push shift rows: the local
+          // ShiftService gates clock_in/clock_out to those roles. Retroactive
+          // edits and soft-deletes are superadmin-only locally; the server
+          // accepts the payload as additive but trusts the local audit row
+          // for the role check.
+          if (!actor || (actor.role !== 'receptionist' && actor.role !== 'superadmin')) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'operator_shifts push requires receptionist or superadmin role',
+              403,
+              { op_id: op.op_id }
+            )
+          }
+          const row = decodeJsonPayload<OperatorShiftSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          validateOperatorShift(row, op.op_id)
+          await this.store.upsertOperatorShift(row)
+          break
+        }
         default:
           throw new DomainError(
             'VALIDATION_ERROR',
@@ -391,6 +412,56 @@ export class SyncPushService {
         { op_id: opId }
       )
     }
+  }
+}
+
+function validateOperatorShift (row: OperatorShiftSyncRecord, opId: string): void {
+  if (!row.operator_id) {
+    throw new DomainError('VALIDATION_ERROR', 'operator_id required', 422, {
+      op_id: opId,
+    })
+  }
+  if (!row.check_in_at) {
+    throw new DomainError('VALIDATION_ERROR', 'check_in_at required', 422, {
+      op_id: opId,
+    })
+  }
+  if (!row.check_in_by_user_id) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'check_in_by_user_id required',
+      422,
+      { op_id: opId }
+    )
+  }
+  if (row.check_out_at != null && row.check_out_at < row.check_in_at) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'check_out_at must be >= check_in_at',
+      422,
+      { op_id: opId }
+    )
+  }
+  if (row.check_out_at != null && row.check_out_by_user_id == null) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'check_out_by_user_id required when check_out_at is set',
+      422,
+      { op_id: opId }
+    )
+  }
+  if (row.version < 0) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'version must be non-negative',
+      422,
+      { op_id: opId }
+    )
+  }
+  if (row.note != null && row.note.length > 1024) {
+    throw new DomainError('VALIDATION_ERROR', 'note too long', 422, {
+      op_id: opId,
+    })
   }
 }
 

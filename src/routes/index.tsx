@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router"
+import { createBrowserRouter, Outlet } from "react-router"
 
 import App from "@/App"
 import { AppShell } from "@/components/shell/app-shell"
@@ -22,6 +22,8 @@ import OperatorsListPage from "@/pages/admin/operators/list"
 import OperatorDetailPage from "@/pages/admin/operators/detail"
 import InventoryCatalogListPage from "@/pages/admin/inventory/list"
 import InventoryItemDetailPage from "@/pages/admin/inventory/detail"
+import ShiftsPage from "@/pages/reception/shifts"
+import { RequireRole } from "@/components/auth/require-role"
 
 export const router = createBrowserRouter([
   {
@@ -56,6 +58,17 @@ export const router = createBrowserRouter([
               { path: "inventory", Component: InventoryCatalogListPage },
               { path: "inventory/:id", Component: InventoryItemDetailPage },
               { path: "settings", Component: SettingsPage },
+            ],
+          },
+          {
+            path: "reception",
+            element: (
+              <RequireRole roles={["receptionist", "superadmin"]}>
+                <Outlet />
+              </RequireRole>
+            ),
+            children: [
+              { path: "shifts", Component: ShiftsPage },
             ],
           },
         ],

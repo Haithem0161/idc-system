@@ -1,6 +1,18 @@
 {
   "admin": {
     "eyebrow": "الإدارة",
+    "close": "إغلاق",
+    "refresh": "تحديث",
+    "loading": "جاري التحميل...",
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "edit": "تعديل",
+    "search_placeholder": "بحث...",
+    "include_inactive": "تضمين غير النشطين",
+    "actions": "إجراءات",
+    "active": "نشط",
+    "inactive": "غير نشط",
+    "status": "الحالة",
     "users": {
       "title": "المستخدمون",
       "subtitle": "المشغّلون الذين لديهم وصول إلى نظام العيادة.",
