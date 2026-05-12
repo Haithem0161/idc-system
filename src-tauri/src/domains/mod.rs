@@ -12,6 +12,9 @@
 pub mod _example;
 pub mod auth;
 pub mod catalog;
+pub mod patients;
+pub mod receipts;
 pub mod settings;
 pub mod shifts;
 pub mod sync;
+pub mod visits;

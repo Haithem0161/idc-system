@@ -89,10 +89,13 @@ model User {
   originDeviceId  String?   @map("origin_device_id")
   entityId        String    @map("entity_id")
 
-  refreshTokens   RefreshToken[]
-  auditEntries    AuditLog[]     @relation("AuditActor")
-  shiftCheckIns   OperatorShift[] @relation("ShiftCheckIn")
-  shiftCheckOuts  OperatorShift[] @relation("ShiftCheckOut")
+  refreshTokens         RefreshToken[]
+  auditEntries          AuditLog[]            @relation("AuditActor")
+  shiftCheckIns         OperatorShift[]       @relation("ShiftCheckIn")
+  shiftCheckOuts        OperatorShift[]       @relation("ShiftCheckOut")
+  receptionistVisits    Visit[]               @relation("VisitReceptionist")
+  voidedVisits          Visit[]               @relation("VisitVoider")
+  inventoryAdjustments  InventoryAdjustment[]
 
   @@unique([entityId, email], name: "user_email_unique")
   @@map("users")
@@ -170,6 +173,7 @@ model CheckType {
   doctorPricings        DoctorCheckPricing[]
   inventoryConsumption  InventoryConsumptionMap[]
   operatorSpecialties   OperatorSpecialty[]
+  visits                Visit[]
 
   @@index([entityId, sortOrder])
   @@map("check_types")
@@ -194,6 +198,7 @@ model CheckSubtype {
   checkType             CheckType                 @relation(fields: [checkTypeId], references: [id])
   doctorPricings        DoctorCheckPricing[]
   inventoryConsumption  InventoryConsumptionMap[]
+  visits                Visit[]
 
   @@index([checkTypeId])
   @@map("check_subtypes")
@@ -216,6 +221,7 @@ model Doctor {
   entityId        String    @map("entity_id")
 
   pricings    DoctorCheckPricing[]
+  visits      Visit[]
 
   @@index([entityId, name])
   @@map("doctors")
@@ -270,6 +276,7 @@ model Operator {
 
   specialties OperatorSpecialty[]
   shifts      OperatorShift[]
+  visits      Visit[]
 
   @@index([entityId, isActive])
   @@map("operators")
@@ -313,7 +320,8 @@ model InventoryItem {
   originDeviceId      String?   @map("origin_device_id")
   entityId            String    @map("entity_id")
 
-  consumptionMap   InventoryConsumptionMap[]
+  consumptionMap        InventoryConsumptionMap[]
+  inventoryAdjustments  InventoryAdjustment[]
 
   @@index([entityId, isActive])
   @@map("inventory_items")
@@ -369,4 +377,118 @@ model OperatorShift {
   @@index([entityId, checkInAt])
   @@index([operatorId, checkOutAt])
   @@map("operator_shifts")
+}
+
+// ---- Phase 5: Reception & Visits ------------------------------------------
+
+model Patient {
+  id              String    @id
+  name            String
+  createdAt       DateTime  @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+  version         Int       @default(0)
+  lastSyncedAt    DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt        DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId  String?   @map("origin_device_id")
+  entityId        String    @map("entity_id")
+
+  visits Visit[]
+
+  @@index([entityId, name])
+  @@map("patients")
+}
+
+model Visit {
+  id                              String       @id
+  patientId                       String       @map("patient_id")
+  status                          VisitStatus
+  receptionistUserId              String       @map("receptionist_user_id")
+  checkTypeId                     String       @map("check_type_id")
+  checkSubtypeId                  String?      @map("check_subtype_id")
+  doctorId                        String?      @map("doctor_id")
+  operatorId                      String?      @map("operator_id")
+  dye                             Boolean      @default(false)
+  report                          Boolean      @default(false)
+  lockedAt                        DateTime?    @map("locked_at") @db.Timestamptz
+  voidedAt                        DateTime?    @map("voided_at") @db.Timestamptz
+  voidedByUserId                  String?      @map("voided_by_user_id")
+  voidReason                      String?      @map("void_reason")
+  priceSnapshotIqd                Int?         @map("price_snapshot_iqd")
+  dyeCostSnapshotIqd              Int?         @map("dye_cost_snapshot_iqd")
+  reportCostSnapshotIqd           Int?         @map("report_cost_snapshot_iqd")
+  doctorCutSnapshotIqd            Int?         @map("doctor_cut_snapshot_iqd")
+  operatorCutSnapshotIqd          Int?         @map("operator_cut_snapshot_iqd")
+  internalPctSnapshot             Int?         @map("internal_pct_snapshot")
+  totalAmountIqdSnapshot          Int?         @map("total_amount_iqd_snapshot")
+  patientNameSnapshot             String?      @map("patient_name_snapshot")
+  doctorNameSnapshot              String?      @map("doctor_name_snapshot")
+  operatorNameSnapshot            String?      @map("operator_name_snapshot")
+  checkTypeNameArSnapshot         String?      @map("check_type_name_ar_snapshot")
+  checkTypeNameEnSnapshot         String?      @map("check_type_name_en_snapshot")
+  checkSubtypeNameArSnapshot      String?      @map("check_subtype_name_ar_snapshot")
+  checkSubtypeNameEnSnapshot      String?      @map("check_subtype_name_en_snapshot")
+  createdAt                       DateTime     @map("created_at") @db.Timestamptz
+  updatedAt                       DateTime     @map("updated_at") @db.Timestamptz
+  deletedAt                       DateTime?    @map("deleted_at") @db.Timestamptz
+  version                         Int          @default(0)
+  lastSyncedAt                    DateTime?    @map("last_synced_at") @db.Timestamptz
+  pulledAt                        DateTime?    @map("pulled_at") @db.Timestamptz
+  originDeviceId                  String?      @map("origin_device_id")
+  entityId                        String       @map("entity_id")
+
+  patient              Patient                @relation(fields: [patientId], references: [id])
+  receptionist         User                   @relation("VisitReceptionist", fields: [receptionistUserId], references: [id])
+  voidedBy             User?                  @relation("VisitVoider", fields: [voidedByUserId], references: [id])
+  checkType            CheckType              @relation(fields: [checkTypeId], references: [id])
+  checkSubtype         CheckSubtype?          @relation(fields: [checkSubtypeId], references: [id])
+  doctor               Doctor?                @relation(fields: [doctorId], references: [id])
+  operator             Operator?              @relation(fields: [operatorId], references: [id])
+  inventoryAdjustments InventoryAdjustment[]
+
+  @@index([entityId, status, lockedAt])
+  @@index([entityId, patientId])
+  @@index([entityId, checkTypeId, status])
+  @@index([entityId, doctorId, lockedAt])
+  @@index([entityId, operatorId, lockedAt])
+  @@map("visits")
+}
+
+enum VisitStatus {
+  draft
+  locked
+  voided
+}
+
+model InventoryAdjustment {
+  id              String           @id
+  itemId          String           @map("item_id")
+  delta           Int
+  reason          AdjustmentReason
+  visitId         String?          @map("visit_id")
+  note            String?
+  byUserId        String           @map("by_user_id")
+  createdAt       DateTime         @map("created_at") @db.Timestamptz
+  updatedAt       DateTime         @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime?        @map("deleted_at") @db.Timestamptz
+  version         Int              @default(0)
+  lastSyncedAt    DateTime?        @map("last_synced_at") @db.Timestamptz
+  pulledAt        DateTime?        @map("pulled_at") @db.Timestamptz
+  originDeviceId  String?          @map("origin_device_id")
+  entityId        String           @map("entity_id")
+
+  item   InventoryItem @relation(fields: [itemId], references: [id])
+  visit  Visit?        @relation(fields: [visitId], references: [id])
+  byUser User          @relation(fields: [byUserId], references: [id])
+
+  @@index([entityId, itemId, createdAt])
+  @@index([entityId, visitId])
+  @@map("inventory_adjustments")
+}
+
+enum AdjustmentReason {
+  receive
+  writeoff
+  count_correction
+  consume_visit
 }

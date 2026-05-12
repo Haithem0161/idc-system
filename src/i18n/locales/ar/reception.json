@@ -1,6 +1,131 @@
 {
   "reception": {
     "eyebrow": "الاستقبال",
+    "checks_grid": {
+      "title": "الفحوصات",
+      "subtitle": "اختر مساحة عمل الفحص.",
+      "todays_visits_one": "{{count}} زيارة اليوم",
+      "todays_visits_other": "{{count}} زيارة اليوم",
+      "operator_shifts": "ورديات المشغلين",
+      "open_workspace": "فتح المساحة",
+      "empty": "لا توجد فحوصات نشطة. أعدّها من لوحة الإدارة أولاً.",
+      "house_only": "البيت",
+      "has_subtypes": "أنواع فرعية"
+    },
+    "workspace": {
+      "title": "{{check}}",
+      "subtitle": "زيارات اليوم في هذه المساحة.",
+      "back_to_grid": "عودة للفحوصات",
+      "new_visit": "زيارة جديدة",
+      "filters": {
+        "all": "الكل",
+        "draft": "مسودة",
+        "locked": "مقفلة",
+        "voided": "ملغاة"
+      },
+      "columns": {
+        "row": "#",
+        "created": "أُنشئت",
+        "patient": "المريض",
+        "doctor": "الطبيب",
+        "operator": "المشغل",
+        "dye": "الصبغة",
+        "report": "التقرير",
+        "total": "الإجمالي",
+        "status": "الحالة",
+        "sync": "المزامنة",
+        "actions": "إجراءات"
+      },
+      "empty": "لا توجد زيارات في هذه المساحة اليوم.",
+      "open_detail": "فتح"
+    },
+    "new_visit": {
+      "title": "زيارة جديدة",
+      "subtitle": "أدخل بيانات المريض والتسعير.",
+      "back_to_workspace": "عودة للمساحة",
+      "patient": "المريض",
+      "patient_placeholder": "اكتب للبحث أو إضافة مريض جديد",
+      "patient_create_hint": "اضغط Enter لإضافة كمريض جديد.",
+      "subtype": "النوع الفرعي",
+      "subtype_required": "اختر نوعاً فرعياً",
+      "doctor": "الطبيب",
+      "doctor_placeholder": "اتركه فارغاً للبيت",
+      "house": "البيت",
+      "dye": "صبغة",
+      "report": "تقرير",
+      "total_label": "الإجمالي الحالي",
+      "save_draft": "حفظ المسودة",
+      "discard": "تجاهل",
+      "lock_and_print": "قفل وطباعة",
+      "operator_picker": {
+        "title": "اختر مشغلاً",
+        "subtitle": "فقط المشغلون في وردية والمختصون بهذا الفحص.",
+        "no_qualified": "لا يوجد مشغل مؤهل في وردية. سجّل دخول مشغل من صفحة الورديات.",
+        "confirm": "قفل الزيارة"
+      },
+      "errors": {
+        "patient_required": "المريض مطلوب.",
+        "lock_failed": "فشل القفل.",
+        "discarded": "تم تجاهل الزيارة.",
+        "locked": "تم قفل الزيارة. تم إصدار الإيصال.",
+        "void_too_short": "السبب يجب أن يكون 5 أحرف على الأقل."
+      },
+      "saved": "تم حفظ المسودة."
+    },
+    "visit_detail": {
+      "title": "الزيارة",
+      "back_to_workspace": "عودة للمساحة",
+      "tabs": {
+        "details": "التفاصيل",
+        "audit": "السجل",
+        "receipts": "الإيصالات"
+      },
+      "status_pill": {
+        "draft": "مسودة",
+        "locked": "مقفلة",
+        "voided": "ملغاة"
+      },
+      "snapshot": {
+        "patient": "المريض",
+        "doctor": "الطبيب",
+        "operator": "المشغل",
+        "check": "الفحص",
+        "subtype": "النوع الفرعي",
+        "price": "السعر",
+        "dye": "تكلفة الصبغة",
+        "report": "تكلفة التقرير",
+        "doctor_cut": "حصة الطبيب",
+        "internal_pct": "النسبة الداخلية",
+        "operator_cut": "حصة المشغل",
+        "total": "الإجمالي"
+      },
+      "actions": {
+        "void": "إلغاء الزيارة",
+        "reprint": "إعادة طباعة",
+        "open_pdf": "فتح PDF",
+        "open_thermal": "فتح إيصال حراري"
+      },
+      "void_modal": {
+        "title": "إلغاء هذه الزيارة",
+        "subtitle": "الإلغاء يعيد المخزون المستهلك.",
+        "reason_label": "السبب",
+        "reason_placeholder": "لماذا تُلغى هذه الزيارة؟",
+        "submit": "إلغاء",
+        "cancel": "تراجع"
+      },
+      "receipts": {
+        "empty": "ستظهر الإيصالات بعد قفل الزيارة.",
+        "a5_label": "إيصال A5",
+        "thermal_label": "إيصال حراري"
+      },
+      "audit_empty": "لا توجد سجلات بعد.",
+      "reprinted": "تم إعادة إصدار الإيصالات."
+    },
+    "crumb": {
+      "checks": "الفحوصات",
+      "new_visit": "زيارة جديدة",
+      "visit": "الزيارة"
+    },
     "shifts": {
       "title": "ورديات المشغلين",
       "subtitle": "سجّل دخول وخروج المشغلين خلال اليوم.",

@@ -52,7 +52,12 @@ export function Sidebar() {
       key: "operations",
       items: [
         { key: "home", to: "/home", icon: Home, enabled: true },
-        { key: "reception", to: "/reception", icon: ClipboardList, enabled: false },
+        {
+          key: "reception",
+          to: "/reception",
+          icon: ClipboardList,
+          enabled: role === "receptionist" || role === "superadmin",
+        },
         {
           key: "shifts",
           to: "/reception/shifts",

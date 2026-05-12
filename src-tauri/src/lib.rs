@@ -53,6 +53,12 @@ use crate::domains::catalog::infrastructure::{
 };
 use crate::domains::catalog::service::CatalogServicesConfig;
 use crate::domains::catalog::CatalogServices;
+use crate::domains::patients::commands::{
+    patients_create, patients_get, patients_search, patients_update,
+};
+use crate::domains::patients::domain::repositories::PatientRepo;
+use crate::domains::patients::infrastructure::SqlitePatientRepo;
+use crate::domains::patients::PatientService;
 use crate::domains::settings::commands::{settings_get, settings_list, settings_update};
 use crate::domains::settings::domain::repositories::SettingRepo;
 use crate::domains::settings::infrastructure::SqliteSettingRepo;
@@ -72,6 +78,16 @@ use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo, SyncStat
 use crate::domains::sync::infrastructure::{
     SqliteAuditRepo, SqliteOutboxRepo, SqliteSyncStateRepo,
 };
+use crate::domains::visits::commands::{
+    receipts_reprint, shifts_lines_run_today, visits_checks_grid, visits_create_draft,
+    visits_discard, visits_get, visits_list_drafts_by_check, visits_list_today_by_check,
+    visits_list_workspace, visits_lock, visits_pricing_resolve, visits_qualified_operators,
+    visits_update_draft, visits_void,
+};
+use crate::domains::visits::domain::repositories::{InventoryAdjustmentRepo, VisitRepo};
+use crate::domains::visits::infrastructure::{SqliteInventoryAdjustmentRepo, SqliteVisitRepo};
+use crate::domains::visits::service::VisitServiceConfig;
+use crate::domains::visits::VisitService;
 use crate::state::{AppState, AppStateConfig};
 use crate::sync::{SyncEngine, SyncEngineHandle};
 
@@ -225,6 +241,26 @@ pub fn run() {
             shifts_edit,
             shifts_soft_delete,
             shifts_list_overlaps,
+            shifts_lines_run_today,
+            // patients
+            patients_search,
+            patients_create,
+            patients_get,
+            patients_update,
+            // visits
+            visits_checks_grid,
+            visits_list_today_by_check,
+            visits_list_drafts_by_check,
+            visits_list_workspace,
+            visits_get,
+            visits_create_draft,
+            visits_update_draft,
+            visits_discard,
+            visits_qualified_operators,
+            visits_lock,
+            visits_void,
+            visits_pricing_resolve,
+            receipts_reprint,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -265,6 +301,10 @@ async fn bootstrap(
         Arc::new(SqliteInventoryConsumptionRepo::new(pool.clone()));
     let shift_repo: Arc<dyn OperatorShiftRepo> =
         Arc::new(SqliteOperatorShiftRepo::new(pool.clone()));
+    let patient_repo: Arc<dyn PatientRepo> = Arc::new(SqlitePatientRepo::new(pool.clone()));
+    let visit_repo: Arc<dyn VisitRepo> = Arc::new(SqliteVisitRepo::new(pool.clone()));
+    let adjustment_repo: Arc<dyn InventoryAdjustmentRepo> =
+        Arc::new(SqliteInventoryAdjustmentRepo::new(pool.clone()));
 
     let engine_handle: SyncEngineHandle = SyncEngine::spawn(
         crate::sync::engine::SyncEngineConfig {
@@ -322,12 +362,42 @@ async fn bootstrap(
 
     let shift_service = Arc::new(ShiftService::new(
         pool.clone(),
-        shift_repo,
-        operator_repo,
-        audit_repo,
-        outbox_repo,
+        shift_repo.clone(),
+        operator_repo.clone(),
+        audit_repo.clone(),
+        outbox_repo.clone(),
         device_id.clone(),
     ));
+
+    let patient_service = Arc::new(PatientService::new(
+        pool.clone(),
+        patient_repo.clone(),
+        audit_repo.clone(),
+        outbox_repo.clone(),
+        device_id.clone(),
+    ));
+
+    let receipts_dir = resolve_receipts_dir(app)?;
+
+    let visit_service = Arc::new(VisitService::new(VisitServiceConfig {
+        pool: pool.clone(),
+        visits: visit_repo,
+        adjustments: adjustment_repo,
+        patients: patient_repo,
+        check_types: catalog_services.check_type_repo.clone(),
+        check_subtypes: catalog_services.check_subtype_repo.clone(),
+        doctors: catalog_services.doctor_repo.clone(),
+        doctor_pricing: catalog_services.doctor_pricing_repo.clone(),
+        operators: operator_repo.clone(),
+        operator_specialties: catalog_services.operator_specialty_repo.clone(),
+        consumption: catalog_services.consumption_repo.clone(),
+        inventory_items: catalog_services.inventory_item_repo.clone(),
+        shifts: shift_repo,
+        audit_repo: audit_repo.clone(),
+        outbox_repo: outbox_repo.clone(),
+        receipts_dir,
+        device_id: device_id.clone(),
+    }));
 
     let state = AppState::new(AppStateConfig {
         db_pool: pool,
@@ -337,6 +407,8 @@ async fn bootstrap(
         settings_service,
         catalog_services,
         shift_service,
+        patient_service,
+        visit_service,
         user_repo,
         device_id,
         app_version,
@@ -354,6 +426,14 @@ fn resolve_db_path(
     let dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join("idc-local.db"))
+}
+
+fn resolve_receipts_dir(
+    app: &tauri::AppHandle,
+) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+    let dir = app.path().app_data_dir()?.join("receipts");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
 }
 
 async fn resolve_device_id(

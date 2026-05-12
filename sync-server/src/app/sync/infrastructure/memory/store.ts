@@ -172,6 +172,72 @@ export interface OperatorShiftSyncRecord {
   origin_device_id: string | null
 }
 
+// ---- Reception records (phase-05) ----------------------------------------
+
+export interface PatientSyncRecord {
+  id: string
+  name: string
+  entity_id: string
+  version: number
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  origin_device_id: string | null
+}
+
+export interface VisitSyncRecord {
+  id: string
+  patient_id: string
+  status: 'draft' | 'locked' | 'voided'
+  receptionist_user_id: string
+  check_type_id: string
+  check_subtype_id: string | null
+  doctor_id: string | null
+  operator_id: string | null
+  dye: boolean
+  report: boolean
+  locked_at: string | null
+  voided_at: string | null
+  voided_by_user_id: string | null
+  void_reason: string | null
+  price_snapshot_iqd: number | null
+  dye_cost_snapshot_iqd: number | null
+  report_cost_snapshot_iqd: number | null
+  doctor_cut_snapshot_iqd: number | null
+  operator_cut_snapshot_iqd: number | null
+  internal_pct_snapshot: number | null
+  total_amount_iqd_snapshot: number | null
+  patient_name_snapshot: string | null
+  doctor_name_snapshot: string | null
+  operator_name_snapshot: string | null
+  check_type_name_ar_snapshot: string | null
+  check_type_name_en_snapshot: string | null
+  check_subtype_name_ar_snapshot: string | null
+  check_subtype_name_en_snapshot: string | null
+  entity_id: string
+  version: number
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  origin_device_id: string | null
+}
+
+export interface InventoryAdjustmentSyncRecord {
+  id: string
+  item_id: string
+  delta: number
+  reason: 'receive' | 'writeoff' | 'count_correction' | 'consume_visit'
+  visit_id: string | null
+  note: string | null
+  by_user_id: string
+  entity_id: string
+  version: number
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  origin_device_id: string | null
+}
+
 export type CatalogSyncRecord =
   | CheckTypeSyncRecord
   | CheckSubtypeSyncRecord
@@ -200,6 +266,9 @@ export class MemorySyncStore implements
   readonly inventoryItems = new Map<string, InventoryItemSyncRecord>()
   readonly consumptionMap = new Map<string, ConsumptionSyncRecord>()
   readonly operatorShifts = new Map<string, OperatorShiftSyncRecord>()
+  readonly patients = new Map<string, PatientSyncRecord>()
+  readonly visits = new Map<string, VisitSyncRecord>()
+  readonly inventoryAdjustments = new Map<string, InventoryAdjustmentSyncRecord>()
   private readonly processed = new Map<string, { tenantId: string, response: ProcessedOpResponse, processedAt: Date }>()
   private readonly cursors = new Map<string, string>()
   private readonly conflicts = new Map<string, ParkedConflict & {
@@ -283,6 +352,79 @@ export class MemorySyncStore implements
     row: OperatorShiftSyncRecord
   ): Promise<{ applied: boolean }> {
     return upsertLWW(this.operatorShifts, row)
+  }
+
+  async upsertPatient (row: PatientSyncRecord): Promise<{ applied: boolean }> {
+    return upsertLWW(this.patients, row)
+  }
+
+  /**
+   * `visits` follows a manual conflict policy. The server compares pushed
+   * version vs existing.version; older or snapshot-divergent pushes are
+   * parked for the resolver UI. See phase-05 §4 Sync Semantics + §7.40.
+   */
+  async upsertVisit (row: VisitSyncRecord): Promise<{ applied: boolean }> {
+    const existing = this.visits.get(row.id)
+    if (!existing) {
+      this.visits.set(row.id, row)
+      return { applied: true }
+    }
+    if (row.version > existing.version) {
+      this.visits.set(row.id, { ...existing, ...row })
+      return { applied: true }
+    }
+    if (row.version === existing.version) {
+      const cmp = row.updated_at.localeCompare(existing.updated_at)
+      if (cmp > 0) {
+        this.visits.set(row.id, { ...existing, ...row })
+        return { applied: true }
+      }
+    }
+    return { applied: false }
+  }
+
+  /**
+   * Detect a manual conflict on a visit push. Returns the existing row when
+   * the incoming push would lose data: older version with diverging
+   * snapshot/status, OR same version with diverging snapshot.
+   */
+  detectVisitConflict (incoming: VisitSyncRecord): VisitSyncRecord | null {
+    const existing = this.visits.get(incoming.id)
+    if (!existing) return null
+    const snapshotKeys: (keyof VisitSyncRecord)[] = [
+      'status',
+      'price_snapshot_iqd',
+      'dye_cost_snapshot_iqd',
+      'report_cost_snapshot_iqd',
+      'doctor_cut_snapshot_iqd',
+      'operator_cut_snapshot_iqd',
+      'internal_pct_snapshot',
+      'total_amount_iqd_snapshot',
+    ]
+    const snapshotDiffers = snapshotKeys.some((k) => existing[k] !== incoming[k])
+    if (incoming.version < existing.version && snapshotDiffers) {
+      return existing
+    }
+    if (incoming.version === existing.version && snapshotDiffers) {
+      return existing
+    }
+    return null
+  }
+
+  /**
+   * Append-only inventory_adjustments. Returns `{ applied: true }` only on
+   * a brand-new id; an existing id is a duplicate (handled via
+   * ProcessedOp). See phase-05 §7.36.
+   */
+  async upsertInventoryAdjustment (
+    row: InventoryAdjustmentSyncRecord
+  ): Promise<{ applied: boolean, duplicate: boolean }> {
+    const existing = this.inventoryAdjustments.get(row.id)
+    if (!existing) {
+      this.inventoryAdjustments.set(row.id, row)
+      return { applied: true, duplicate: false }
+    }
+    return { applied: false, duplicate: true }
   }
 
   async upsertSetting (row: SettingSyncRecord): Promise<{ applied: boolean }> {
@@ -373,7 +515,21 @@ export class MemorySyncStore implements
     // tombstone propagates. mapShiftChanges keeps deleted_at on the payload.
     const shiftChanges: ChangeRow[] = mapShiftChanges(this.operatorShifts, tenantId)
 
-    const merged = [...auditChanges, ...userChanges, ...settingChanges, ...catalogChanges, ...shiftChanges]
+    // Reception entities. Patients = LWW (filter deleted). Visits = manual
+    // policy (filter deleted). Inventory adjustments = additive (keep
+    // tombstones for symmetry though we never actually soft-delete).
+    const receptionChanges: ChangeRow[] = [
+      ...mapReceptionChanges('patients', this.patients, tenantId, false),
+      ...mapReceptionChanges('visits', this.visits, tenantId, false),
+      ...mapReceptionChanges(
+        'inventory_adjustments',
+        this.inventoryAdjustments,
+        tenantId,
+        true
+      ),
+    ]
+
+    const merged = [...auditChanges, ...userChanges, ...settingChanges, ...catalogChanges, ...shiftChanges, ...receptionChanges]
       .sort((a, b) => {
         const cmp = a.updated_at.localeCompare(b.updated_at)
         return cmp !== 0 ? cmp : a.entity_id.localeCompare(b.entity_id)
@@ -486,6 +642,29 @@ function mapShiftChanges (
     .filter((row) => row.entity_id === tenantId)
     .map((row) => ({
       entity: 'operator_shifts',
+      entity_id: row.id,
+      payload: row as unknown as Record<string, unknown>,
+      updated_at: row.updated_at,
+      version: row.version,
+    }))
+}
+
+/**
+ * Reception entity changes (patients / visits / inventory_adjustments).
+ * `includeDeleted` controls whether tombstone rows propagate (additive
+ * entities ship them, LWW + manual entities hide them).
+ */
+function mapReceptionChanges<T extends SyncRow> (
+  entity: string,
+  store: Map<string, T>,
+  tenantId: string,
+  includeDeleted: boolean
+): ChangeRow[] {
+  return [...store.values()]
+    .filter((row) => (row.entity_id ?? '') === tenantId)
+    .filter((row) => includeDeleted || (row.deleted_at ?? null) == null)
+    .map((row) => ({
+      entity,
       entity_id: row.id,
       payload: row as unknown as Record<string, unknown>,
       updated_at: row.updated_at,

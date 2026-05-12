@@ -208,6 +208,102 @@ export type CommandMap = {
     args: { args: { operator_id?: string } }
     result: ShiftOverlapPair[]
   }
+  shifts_lines_run_today: {
+    args: { args: { operator_id: string } }
+    result: number
+  }
+  // ---- Phase 5: patients ----
+  patients_search: {
+    args: { args: { query?: string; limit?: number } }
+    result: PatientRecord[]
+  }
+  patients_create: {
+    args: { args: { name: string } }
+    result: PatientRecord
+  }
+  patients_get: {
+    args: { args: { id: string } }
+    result: PatientRecord
+  }
+  patients_update: {
+    args: { args: { id: string; name: string } }
+    result: PatientRecord
+  }
+  // ---- Phase 5: visits ----
+  visits_checks_grid: { args: void; result: ChecksGridCardRecord[] }
+  visits_list_today_by_check: {
+    args: { args: { check_type_id: string } }
+    result: VisitRecord[]
+  }
+  visits_list_drafts_by_check: {
+    args: { args: { check_type_id: string } }
+    result: VisitRecord[]
+  }
+  visits_list_workspace: {
+    args: {
+      args: {
+        check_type_id: string
+        statuses?: string[]
+        doctor_ids?: string[]
+        subtype_ids?: string[]
+        limit?: number
+      }
+    }
+    result: VisitRecord[]
+  }
+  visits_get: {
+    args: { args: { visit_id: string } }
+    result: VisitRecord
+  }
+  visits_create_draft: {
+    args: {
+      args: {
+        patient_id: string
+        check_type_id: string
+        check_subtype_id?: string | null
+        doctor_id?: string | null
+        dye?: boolean
+        report?: boolean
+      }
+    }
+    result: VisitRecord
+  }
+  visits_update_draft: {
+    args: {
+      args: {
+        visit_id: string
+        check_subtype_id?: string | null
+        doctor_id?: string | null
+        dye?: boolean
+        report?: boolean
+      }
+    }
+    result: VisitRecord
+  }
+  visits_discard: {
+    args: { args: { visit_id: string } }
+    result: null
+  }
+  visits_qualified_operators: {
+    args: { args: { check_type_id: string } }
+    result: QualifiedOperatorRecord[]
+  }
+  visits_lock: {
+    args: { args: { visit_id: string; operator_id: string } }
+    result: LockResultRecord
+  }
+  visits_void: {
+    args: { args: { visit_id: string; reason: string } }
+    result: VisitRecord
+  }
+  visits_pricing_resolve: {
+    args: { args: { visit_id: string } }
+    result: ResolvedSnapshotsRecord
+  }
+  receipts_reprint: {
+    args: { args: { visit_id: string } }
+    result: ReceiptArtifactsRecord
+  }
 }
 
 // ---- Catalog wire shapes -------------------------------------------------
@@ -439,6 +535,90 @@ export interface ShiftWithMetaRecord extends ShiftRecord {
 export interface ShiftOverlapPair {
   left: ShiftRecord
   right: ShiftRecord
+}
+
+// ---- Phase 5 wire shapes ----------------------------------------------
+
+export interface PatientRecord {
+  id: string
+  name: string
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  version: number
+  dirty: boolean
+  entity_id: string
+}
+
+export interface ChecksGridCardRecord {
+  check_type_id: string
+  name_ar: string
+  name_en: string | null
+  has_subtypes: boolean
+  dye_supported: boolean
+  report_supported: boolean
+  todays_visits: number
+}
+
+export interface VisitSnapshotRecord {
+  price_iqd: number
+  dye_cost_iqd: number
+  report_cost_iqd: number
+  doctor_cut_iqd: number
+  operator_cut_iqd: number
+  internal_pct: number | null
+  total_amount_iqd: number
+  patient_name: string
+  doctor_name: string | null
+  operator_name: string
+  check_type_name_ar: string
+  check_type_name_en: string | null
+  check_subtype_name_ar: string | null
+  check_subtype_name_en: string | null
+}
+
+export interface VisitRecord {
+  id: string
+  patient_id: string
+  status: "draft" | "locked" | "voided"
+  receptionist_user_id: string
+  check_type_id: string
+  check_subtype_id: string | null
+  doctor_id: string | null
+  operator_id: string | null
+  dye: boolean
+  report: boolean
+  locked_at: string | null
+  voided_at: string | null
+  voided_by_user_id: string | null
+  void_reason: string | null
+  snapshots: VisitSnapshotRecord | null
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  version: number
+  dirty: boolean
+  entity_id: string
+}
+
+export interface QualifiedOperatorRecord {
+  id: string
+  name: string
+  is_active: boolean
+}
+
+export interface ReceiptArtifactsRecord {
+  a5_path: string
+  thermal_path: string
+}
+
+export interface LockResultRecord {
+  visit: VisitRecord
+  artifacts: ReceiptArtifactsRecord
+}
+
+export interface ResolvedSnapshotsRecord {
+  snapshots: VisitSnapshotRecord
 }
 
 export type UserRoleLiteral = "superadmin" | "receptionist" | "accountant"

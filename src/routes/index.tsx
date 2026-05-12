@@ -23,6 +23,10 @@ import OperatorDetailPage from "@/pages/admin/operators/detail"
 import InventoryCatalogListPage from "@/pages/admin/inventory/list"
 import InventoryItemDetailPage from "@/pages/admin/inventory/detail"
 import ShiftsPage from "@/pages/reception/shifts"
+import ChecksGridPage from "@/pages/reception/checks-grid"
+import CheckWorkspacePage from "@/pages/reception/check-workspace"
+import NewVisitPage from "@/pages/reception/new-visit"
+import VisitDetailPage from "@/pages/reception/visit-detail"
 import { RequireRole } from "@/components/auth/require-role"
 
 export const router = createBrowserRouter([
@@ -68,7 +72,11 @@ export const router = createBrowserRouter([
               </RequireRole>
             ),
             children: [
+              { index: true, Component: ChecksGridPage },
               { path: "shifts", Component: ShiftsPage },
+              { path: "checks/:slug", Component: CheckWorkspacePage },
+              { path: "checks/:slug/new", Component: NewVisitPage },
+              { path: "visits/:id", Component: VisitDetailPage },
             ],
           },
         ],

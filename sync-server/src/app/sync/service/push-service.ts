@@ -11,13 +11,16 @@ import type {
   ConsumptionSyncRecord,
   DoctorPricingSyncRecord,
   DoctorSyncRecord,
+  InventoryAdjustmentSyncRecord,
   InventoryItemSyncRecord,
   MemorySyncStore,
   OperatorShiftSyncRecord,
   OperatorSpecialtySyncRecord,
   OperatorSyncRecord,
+  PatientSyncRecord,
   SettingSyncRecord,
   UserSyncRecord,
+  VisitSyncRecord,
 } from '../infrastructure/memory/store'
 import { decodeAuditPayload, decodeJsonPayload } from './push-decoders'
 
@@ -241,6 +244,85 @@ export class SyncPushService {
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           this.validateConsumption(row, op.op_id)
           await this.store.upsertConsumption(row)
+          break
+        }
+        case 'patients': {
+          // Receptionist + superadmin can push patient rows. LWW.
+          if (!actor || (actor.role !== 'receptionist' && actor.role !== 'superadmin')) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'patients push requires receptionist or superadmin role',
+              403,
+              { op_id: op.op_id }
+            )
+          }
+          const row = decodeJsonPayload<PatientSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          if (row.name.trim().length === 0) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'patient name required',
+              422,
+              { op_id: op.op_id }
+            )
+          }
+          await this.store.upsertPatient(row)
+          break
+        }
+        case 'visits': {
+          if (!actor || (actor.role !== 'receptionist' && actor.role !== 'superadmin')) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'visits push requires receptionist or superadmin role',
+              403,
+              { op_id: op.op_id }
+            )
+          }
+          const row = decodeJsonPayload<VisitSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          validateVisit(row, op.op_id)
+          const conflict = this.store.detectVisitConflict(row)
+          if (conflict) {
+            const envelope: ParkedConflict = {
+              opId: op.op_id,
+              entity: 'visits',
+              entityId: row.id,
+              serverPayload: conflict,
+              localPayload: row,
+              reason: 'manual_policy_visit_divergence',
+            }
+            await this.conflicts.park({ ...envelope, tenantId })
+            conflicts.push(envelope)
+            continue
+          }
+          await this.store.upsertVisit(row)
+          break
+        }
+        case 'inventory_adjustments': {
+          // Receptionist + superadmin push these. Additive-only: identical
+          // id + ProcessedOp hit returns the cached response; identical id
+          // without a ProcessedOp hit means a peer tried to mutate an
+          // immutable row -- reject (§7.36).
+          if (!actor || (actor.role !== 'receptionist' && actor.role !== 'superadmin' && actor.role !== 'accountant')) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'inventory_adjustments push requires authenticated role',
+              403,
+              { op_id: op.op_id }
+            )
+          }
+          const row = decodeJsonPayload<InventoryAdjustmentSyncRecord>(op.payload_b64)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          validateAdjustment(row, op.op_id)
+          const result = await this.store.upsertInventoryAdjustment(row)
+          if (!result.applied && result.duplicate) {
+            throw new DomainError(
+              'ADDITIVE_VIOLATION',
+              'inventory_adjustments are append-only',
+              409,
+              { op_id: op.op_id }
+            )
+          }
           break
         }
         case 'operator_shifts': {
@@ -493,6 +575,153 @@ function assertTenantMatches (rowTenant: string, tenantId: string, opId: string)
       'VALIDATION_ERROR',
       'payload entity_id must match JWT entityId',
       403,
+      { op_id: opId }
+    )
+  }
+}
+
+function validateVisit (row: VisitSyncRecord, opId: string): void {
+  if (!row.patient_id || !row.receptionist_user_id || !row.check_type_id) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'visit missing required fields',
+      422,
+      { op_id: opId }
+    )
+  }
+  if (!['draft', 'locked', 'voided'].includes(row.status)) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      `visit status invalid: ${row.status}`,
+      422,
+      { op_id: opId }
+    )
+  }
+  if (row.status === 'locked') {
+    if (row.operator_id == null) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'locked visit must have operator_id',
+        422,
+        { op_id: opId }
+      )
+    }
+    const snapKeys: Array<keyof VisitSyncRecord> = [
+      'price_snapshot_iqd',
+      'dye_cost_snapshot_iqd',
+      'report_cost_snapshot_iqd',
+      'doctor_cut_snapshot_iqd',
+      'operator_cut_snapshot_iqd',
+      'total_amount_iqd_snapshot',
+    ]
+    for (const k of snapKeys) {
+      if (row[k] == null) {
+        throw new DomainError(
+          'VALIDATION_ERROR',
+          `locked visit missing snapshot field: ${String(k)}`,
+          422,
+          { op_id: opId }
+        )
+      }
+    }
+    const total =
+      (row.price_snapshot_iqd ?? 0) +
+      (row.dye_cost_snapshot_iqd ?? 0) +
+      (row.report_cost_snapshot_iqd ?? 0)
+    if (total !== row.total_amount_iqd_snapshot) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'total_amount_iqd_snapshot must equal price + dye + report',
+        422,
+        { op_id: opId }
+      )
+    }
+    if (row.doctor_id == null && row.internal_pct_snapshot == null) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'internal_pct_snapshot required when doctor_id is null',
+        422,
+        { op_id: opId }
+      )
+    }
+    if (row.doctor_id != null && row.internal_pct_snapshot != null) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'internal_pct_snapshot must be null when doctor_id is set',
+        422,
+        { op_id: opId }
+      )
+    }
+    if (row.patient_name_snapshot == null || row.operator_name_snapshot == null || row.check_type_name_ar_snapshot == null) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'locked visit missing name snapshot fields',
+        422,
+        { op_id: opId }
+      )
+    }
+  }
+  if (row.status === 'voided') {
+    if (!row.voided_by_user_id || row.void_reason == null || row.void_reason.trim().length < 5) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'voided visit requires voided_by_user_id and a >= 5-char void_reason',
+        422,
+        { op_id: opId }
+      )
+    }
+  }
+  if (row.dye && !row.check_type_id) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'visit dye requires check_type_id',
+      422,
+      { op_id: opId }
+    )
+  }
+}
+
+function validateAdjustment (
+  row: InventoryAdjustmentSyncRecord,
+  opId: string
+): void {
+  if (!row.item_id || !row.by_user_id) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'inventory_adjustment missing required fields',
+      422,
+      { op_id: opId }
+    )
+  }
+  if (!['receive', 'writeoff', 'count_correction', 'consume_visit'].includes(row.reason)) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      `inventory_adjustment reason invalid: ${row.reason}`,
+      422,
+      { op_id: opId }
+    )
+  }
+  if (row.reason === 'consume_visit' && row.visit_id == null) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'consume_visit adjustments require visit_id',
+      422,
+      { op_id: opId }
+    )
+  }
+  if (row.reason === 'receive' && row.delta <= 0) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'receive adjustments must have positive delta',
+      422,
+      { op_id: opId }
+    )
+  }
+  if (row.reason === 'writeoff' && row.delta >= 0) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'writeoff adjustments must have negative delta',
+      422,
       { op_id: opId }
     )
   }

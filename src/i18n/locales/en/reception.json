@@ -1,6 +1,131 @@
 {
   "reception": {
     "eyebrow": "Reception",
+    "checks_grid": {
+      "title": "Checks",
+      "subtitle": "Pick a check workspace.",
+      "todays_visits_one": "{{count}} visit today",
+      "todays_visits_other": "{{count}} visits today",
+      "operator_shifts": "Operator shifts",
+      "open_workspace": "Open workspace",
+      "empty": "No active checks configured. Set them up in admin first.",
+      "house_only": "House",
+      "has_subtypes": "subtypes"
+    },
+    "workspace": {
+      "title": "{{check}}",
+      "subtitle": "Today's visits in this workspace.",
+      "back_to_grid": "Back to checks",
+      "new_visit": "New visit",
+      "filters": {
+        "all": "All",
+        "draft": "Draft",
+        "locked": "Locked",
+        "voided": "Voided"
+      },
+      "columns": {
+        "row": "#",
+        "created": "Created",
+        "patient": "Patient",
+        "doctor": "Doctor",
+        "operator": "Operator",
+        "dye": "Dye",
+        "report": "Report",
+        "total": "Total",
+        "status": "Status",
+        "sync": "Sync",
+        "actions": "Actions"
+      },
+      "empty": "No visits in this workspace yet today.",
+      "open_detail": "Open"
+    },
+    "new_visit": {
+      "title": "New visit",
+      "subtitle": "Capture patient and pricing.",
+      "back_to_workspace": "Back to workspace",
+      "patient": "Patient",
+      "patient_placeholder": "Type to search or add a new patient",
+      "patient_create_hint": "Press Enter to add as a new patient.",
+      "subtype": "Subtype",
+      "subtype_required": "Pick a subtype",
+      "doctor": "Doctor",
+      "doctor_placeholder": "Leave empty for house",
+      "house": "House",
+      "dye": "Dye",
+      "report": "Report",
+      "total_label": "Running total",
+      "save_draft": "Save draft",
+      "discard": "Discard",
+      "lock_and_print": "Lock & print",
+      "operator_picker": {
+        "title": "Pick operator",
+        "subtitle": "Only operators on shift with matching specialty.",
+        "no_qualified": "No qualified operator on shift. Open the shifts page to clock one in.",
+        "confirm": "Lock visit"
+      },
+      "errors": {
+        "patient_required": "Patient is required.",
+        "lock_failed": "Lock failed.",
+        "discarded": "Visit discarded.",
+        "locked": "Visit locked. Receipt rendered.",
+        "void_too_short": "Reason must be at least 5 characters."
+      },
+      "saved": "Draft saved."
+    },
+    "visit_detail": {
+      "title": "Visit",
+      "back_to_workspace": "Back to workspace",
+      "tabs": {
+        "details": "Details",
+        "audit": "Audit",
+        "receipts": "Receipts"
+      },
+      "status_pill": {
+        "draft": "Draft",
+        "locked": "Locked",
+        "voided": "Voided"
+      },
+      "snapshot": {
+        "patient": "Patient",
+        "doctor": "Doctor",
+        "operator": "Operator",
+        "check": "Check",
+        "subtype": "Subtype",
+        "price": "Price",
+        "dye": "Dye cost",
+        "report": "Report cost",
+        "doctor_cut": "Doctor cut",
+        "internal_pct": "Internal %",
+        "operator_cut": "Operator cut",
+        "total": "Total"
+      },
+      "actions": {
+        "void": "Void visit",
+        "reprint": "Reprint",
+        "open_pdf": "Open PDF",
+        "open_thermal": "Open thermal text"
+      },
+      "void_modal": {
+        "title": "Void this visit",
+        "subtitle": "Voiding restores inventory consumed by the visit.",
+        "reason_label": "Reason",
+        "reason_placeholder": "Why is this visit being voided?",
+        "submit": "Void",
+        "cancel": "Cancel"
+      },
+      "receipts": {
+        "empty": "Receipts will appear here after locking the visit.",
+        "a5_label": "A5 receipt",
+        "thermal_label": "Thermal receipt"
+      },
+      "audit_empty": "No audit entries yet.",
+      "reprinted": "Receipts re-rendered."
+    },
+    "crumb": {
+      "checks": "Checks",
+      "new_visit": "New visit",
+      "visit": "Visit"
+    },
     "shifts": {
       "title": "Operator shifts",
       "subtitle": "Clock operators in and out for the day.",
