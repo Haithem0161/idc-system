@@ -15,6 +15,7 @@ pub mod catalog;
 pub mod inventory;
 pub mod patients;
 pub mod receipts;
+pub mod reports;
 pub mod settings;
 pub mod shifts;
 pub mod sync;

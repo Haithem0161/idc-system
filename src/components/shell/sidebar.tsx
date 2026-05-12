@@ -76,7 +76,12 @@ export function Sidebar() {
     {
       key: "records",
       items: [
-        { key: "reports", to: "/reports", icon: FileText, enabled: false },
+        {
+          key: "accounting",
+          to: "/accounting",
+          icon: FileText,
+          enabled: role === "accountant" || role === "superadmin",
+        },
         { key: "audit", to: "/audit", icon: ShieldCheck, enabled: false },
       ],
     },

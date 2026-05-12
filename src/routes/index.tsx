@@ -30,6 +30,14 @@ import VisitDetailPage from "@/pages/reception/visit-detail"
 import InventoryListPage from "@/pages/inventory/list"
 import InventoryItemDetailOpsPage from "@/pages/inventory/detail"
 import InventoryAdjustPage from "@/pages/inventory/adjust"
+import AccountingDashboardPage from "@/pages/accounting/dashboard"
+import AccountingVisitsPage from "@/pages/accounting/visits"
+import AccountingVisitDrillPage from "@/pages/accounting/visit-drill"
+import AccountingDoctorsPage from "@/pages/accounting/doctors"
+import AccountingDoctorDetailPage from "@/pages/accounting/doctor-detail"
+import AccountingOperatorsPage from "@/pages/accounting/operators"
+import AccountingOperatorDetailPage from "@/pages/accounting/operator-detail"
+import AccountingDailyClosePage from "@/pages/accounting/daily-close"
 import { RequireRole } from "@/components/auth/require-role"
 
 export const router = createBrowserRouter([
@@ -93,6 +101,24 @@ export const router = createBrowserRouter([
               { index: true, Component: InventoryListPage },
               { path: "adjust", Component: InventoryAdjustPage },
               { path: "items/:id", Component: InventoryItemDetailOpsPage },
+            ],
+          },
+          {
+            path: "accounting",
+            element: (
+              <RequireRole roles={["accountant", "superadmin"]}>
+                <Outlet />
+              </RequireRole>
+            ),
+            children: [
+              { index: true, Component: AccountingDashboardPage },
+              { path: "visits", Component: AccountingVisitsPage },
+              { path: "visits/:id", Component: AccountingVisitDrillPage },
+              { path: "doctors", Component: AccountingDoctorsPage },
+              { path: "doctors/:id", Component: AccountingDoctorDetailPage },
+              { path: "operators", Component: AccountingOperatorsPage },
+              { path: "operators/:id", Component: AccountingOperatorDetailPage },
+              { path: "daily-close", Component: AccountingDailyClosePage },
             ],
           },
         ],

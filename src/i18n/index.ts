@@ -10,6 +10,7 @@ import enAuth from "./locales/en/auth.json"
 import enAdmin from "./locales/en/admin.json"
 import enReception from "./locales/en/reception.json"
 import enInventory from "./locales/en/inventory.json"
+import enAccounting from "./locales/en/accounting.json"
 import arCommon from "./locales/ar/common.json"
 import arErrors from "./locales/ar/errors.json"
 import arReceipts from "./locales/ar/receipts.json"
@@ -18,6 +19,7 @@ import arAuth from "./locales/ar/auth.json"
 import arAdmin from "./locales/ar/admin.json"
 import arReception from "./locales/ar/reception.json"
 import arInventory from "./locales/ar/inventory.json"
+import arAccounting from "./locales/ar/accounting.json"
 
 // Phase-01 §7.10: split locales into namespaces. The legacy `translation.json`
 // stays as the default namespace for backwards compatibility with existing
@@ -33,6 +35,7 @@ const resources = {
       ...enAdmin,
       ...enReception,
       ...enInventory,
+      ...enAccounting,
     },
     common: enCommon,
     errors: enErrors,
@@ -41,6 +44,7 @@ const resources = {
     admin: enAdmin,
     reception: enReception,
     inventory: enInventory,
+    accounting: enAccounting,
   },
   ar: {
     translation: {
@@ -52,6 +56,7 @@ const resources = {
       ...arAdmin,
       ...arReception,
       ...arInventory,
+      ...arAccounting,
     },
     common: arCommon,
     errors: arErrors,
@@ -60,6 +65,7 @@ const resources = {
     admin: arAdmin,
     reception: arReception,
     inventory: arInventory,
+    accounting: arAccounting,
   },
 }
 

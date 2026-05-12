@@ -65,6 +65,16 @@ use crate::domains::patients::commands::{
 use crate::domains::patients::domain::repositories::PatientRepo;
 use crate::domains::patients::infrastructure::SqlitePatientRepo;
 use crate::domains::patients::PatientService;
+use crate::domains::reports::commands::{
+    reports_daily_close, reports_dashboard_kpis, reports_dashboard_tops, reports_doctor_drilldown,
+    reports_doctor_earnings, reports_export_daily_close_pdf, reports_export_doctors_csv,
+    reports_export_operators_csv, reports_export_visits_csv, reports_operator_drilldown,
+    reports_operator_earnings, reports_visits,
+};
+use crate::domains::reports::domain::repositories::ReportsReadModel;
+use crate::domains::reports::infrastructure::SqliteReportsReadModel;
+use crate::domains::reports::service::ReportsServiceConfig;
+use crate::domains::reports::ReportsService;
 use crate::domains::settings::commands::{settings_get, settings_list, settings_update};
 use crate::domains::settings::domain::repositories::SettingRepo;
 use crate::domains::settings::infrastructure::SqliteSettingRepo;
@@ -273,6 +283,19 @@ pub fn run() {
             inventory_list_adjustments,
             inventory_create_adjustment,
             inventory_recompute_on_hand,
+            // reports
+            reports_dashboard_kpis,
+            reports_dashboard_tops,
+            reports_visits,
+            reports_doctor_earnings,
+            reports_doctor_drilldown,
+            reports_operator_earnings,
+            reports_operator_drilldown,
+            reports_daily_close,
+            reports_export_visits_csv,
+            reports_export_doctors_csv,
+            reports_export_operators_csv,
+            reports_export_daily_close_pdf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -403,6 +426,16 @@ async fn bootstrap(
         },
     ));
 
+    let reports_read_model: Arc<dyn ReportsReadModel> =
+        Arc::new(SqliteReportsReadModel::new(pool.clone()));
+    let reports_service = Arc::new(ReportsService::new(ReportsServiceConfig {
+        pool: pool.clone(),
+        read_model: reports_read_model,
+        audit_repo: audit_repo.clone(),
+        outbox_repo: outbox_repo.clone(),
+        device_id: device_id.clone(),
+    }));
+
     let visit_service = Arc::new(VisitService::new(VisitServiceConfig {
         pool: pool.clone(),
         visits: visit_repo,
@@ -434,6 +467,7 @@ async fn bootstrap(
         patient_service,
         visit_service,
         inventory_adjustment_service,
+        reports_service,
         user_repo,
         device_id,
         app_version,

@@ -16,6 +16,7 @@ use crate::domains::auth::{AuthService, UserService};
 use crate::domains::catalog::CatalogServices;
 use crate::domains::inventory::InventoryAdjustmentService;
 use crate::domains::patients::PatientService;
+use crate::domains::reports::ReportsService;
 use crate::domains::settings::service::SettingsService;
 use crate::domains::shifts::ShiftService;
 use crate::domains::visits::VisitService;
@@ -46,6 +47,7 @@ pub struct AppState {
     patient_service: Option<Arc<PatientService>>,
     visit_service: Option<Arc<VisitService>>,
     inventory_adjustment_service: Option<Arc<InventoryAdjustmentService>>,
+    reports_service: Option<Arc<ReportsService>>,
     user_repo: Option<Arc<dyn UserRepo>>,
     user_context: RwLock<Option<UserContext>>,
     settings_cache: RwLock<HashMap<String, SettingValue>>,
@@ -68,6 +70,7 @@ pub struct AppStateConfig {
     pub patient_service: Arc<PatientService>,
     pub visit_service: Arc<VisitService>,
     pub inventory_adjustment_service: Arc<InventoryAdjustmentService>,
+    pub reports_service: Arc<ReportsService>,
     pub user_repo: Arc<dyn UserRepo>,
     pub device_id: String,
     pub app_version: String,
@@ -87,6 +90,7 @@ impl AppState {
             patient_service: Some(cfg.patient_service),
             visit_service: Some(cfg.visit_service),
             inventory_adjustment_service: Some(cfg.inventory_adjustment_service),
+            reports_service: Some(cfg.reports_service),
             user_repo: Some(cfg.user_repo),
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
@@ -111,6 +115,7 @@ impl AppState {
             patient_service: None,
             visit_service: None,
             inventory_adjustment_service: None,
+            reports_service: None,
             user_repo: None,
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
@@ -167,6 +172,10 @@ impl AppState {
 
     pub fn inventory_adjustment_service(&self) -> Option<Arc<InventoryAdjustmentService>> {
         self.inventory_adjustment_service.clone()
+    }
+
+    pub fn reports_service(&self) -> Option<Arc<ReportsService>> {
+        self.reports_service.clone()
     }
 
     pub fn user_repo(&self) -> Option<Arc<dyn UserRepo>> {

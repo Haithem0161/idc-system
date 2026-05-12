@@ -338,6 +338,55 @@ export type CommandMap = {
     args: { args: { item_id: string } }
     result: { new_on_hand: number }
   }
+  // ---- Phase 7: reports ----
+  reports_dashboard_kpis: {
+    args: { args: ReportsRangeArgs }
+    result: DashboardKpisRecord
+  }
+  reports_dashboard_tops: {
+    args: { args: ReportsRangeArgs }
+    result: DashboardTopsRecord
+  }
+  reports_visits: {
+    args: { args: ReportsVisitsArgs }
+    result: VisitsReportRecord
+  }
+  reports_doctor_earnings: {
+    args: { args: ReportsRangeArgs }
+    result: DoctorEarningsRecord[]
+  }
+  reports_doctor_drilldown: {
+    args: { args: ReportsDoctorDrilldownArgs }
+    result: DoctorDrilldownRecord
+  }
+  reports_operator_earnings: {
+    args: { args: ReportsRangeArgs }
+    result: OperatorEarningsRecord[]
+  }
+  reports_operator_drilldown: {
+    args: { args: ReportsOperatorDrilldownArgs }
+    result: OperatorDrilldownRecord
+  }
+  reports_daily_close: {
+    args: { args: { date: string } }
+    result: DailyCloseRecord
+  }
+  reports_export_visits_csv: {
+    args: { args: { filters: ReportsVisitsArgs; path: string } }
+    result: { path: string }
+  }
+  reports_export_doctors_csv: {
+    args: { args: { from_utc: string; to_utc: string; include_voided?: boolean; path: string } }
+    result: { path: string }
+  }
+  reports_export_operators_csv: {
+    args: { args: { from_utc: string; to_utc: string; include_voided?: boolean; path: string } }
+    result: { path: string }
+  }
+  reports_export_daily_close_pdf: {
+    args: { args: { date: string; path: string } }
+    result: { path: string }
+  }
 }
 
 // ---- Catalog wire shapes -------------------------------------------------
@@ -787,6 +836,236 @@ export interface ConflictRecord {
   serverPayload: unknown
   localPayload: unknown
   reason: string
+}
+
+// ---- Phase 7 wire shapes -------------------------------------------------
+
+export interface ReportsRangeArgs {
+  from_utc: string
+  to_utc: string
+  include_voided?: boolean
+}
+
+export type VisitsReportGroupByLiteral =
+  | "none"
+  | "by_date"
+  | "by_doctor"
+  | "by_operator"
+  | "by_check_type"
+  | "by_subtype"
+  | "by_status"
+
+export interface ReportsVisitsArgs {
+  from_utc: string
+  to_utc: string
+  include_voided?: boolean
+  statuses?: string[]
+  check_type_ids?: string[]
+  subtype_ids?: string[]
+  doctor_ids?: string[]
+  operator_ids?: string[]
+  include_house?: boolean
+  dye?: boolean | null
+  report?: boolean | null
+  group_by?: VisitsReportGroupByLiteral
+  limit?: number
+}
+
+export interface ReportsDoctorDrilldownArgs {
+  doctor_id?: string | null
+  from_utc: string
+  to_utc: string
+  include_voided?: boolean
+}
+
+export interface ReportsOperatorDrilldownArgs {
+  operator_id: string
+  from_utc: string
+  to_utc: string
+  include_voided?: boolean
+}
+
+export interface TrendCellRecord {
+  current_iqd: number
+  prior_iqd: number
+  delta_iqd: number
+  delta_permille: number
+}
+
+export interface TrendMatrixRecord {
+  revenue: TrendCellRecord
+  doctor_cuts: TrendCellRecord
+  operator_cuts: TrendCellRecord
+  inventory_value: TrendCellRecord
+  net: TrendCellRecord
+}
+
+export interface DashboardKpisRecord {
+  range_from: string
+  range_to: string
+  revenue_iqd: number
+  doctor_cuts_iqd: number
+  operator_cuts_iqd: number
+  inventory_consumption_value_iqd: number
+  net_iqd: number
+  trend_today_vs_yesterday: TrendMatrixRecord
+  trend_week_vs_last_week: TrendMatrixRecord
+  trend_month_vs_last_month: TrendMatrixRecord
+}
+
+export interface DashboardTopsRecord {
+  top_doctors: DoctorEarningsRecord[]
+  top_operators: OperatorEarningsRecord[]
+  top_check_types: CheckTypeDailyRecord[]
+}
+
+export interface VisitReportRowRecord {
+  visit_id: string
+  locked_at: string | null
+  status: string
+  patient_name: string
+  check_type_name_ar: string
+  check_type_name_en: string | null
+  check_subtype_name_ar: string | null
+  check_subtype_name_en: string | null
+  doctor_name: string | null
+  operator_name: string
+  dye: boolean
+  report: boolean
+  price_iqd: number
+  doctor_cut_iqd: number
+  operator_cut_iqd: number
+  net_iqd: number
+}
+
+export interface VisitsReportTotalsRecord {
+  visits: number
+  revenue_iqd: number
+  doctor_cut_iqd: number
+  operator_cut_iqd: number
+  net_iqd: number
+}
+
+export interface VisitsReportGroupRecord {
+  key: string
+  label: string
+  visits: number
+  revenue_iqd: number
+  doctor_cut_iqd: number
+  operator_cut_iqd: number
+  net_iqd: number
+}
+
+export type VisitsReportRecord =
+  | { mode: "rows"; rows: VisitReportRowRecord[]; totals: VisitsReportTotalsRecord }
+  | { mode: "groups"; groups: VisitsReportGroupRecord[]; totals: VisitsReportTotalsRecord }
+
+export interface DoctorEarningsRecord {
+  doctor_id: string | null
+  name: string
+  specialty: string | null
+  visits: number
+  revenue_iqd: number
+  doctor_cut_total_iqd: number
+  avg_cut_per_visit_iqd: number
+}
+
+export interface DoctorPerCheckRowRecord {
+  check_type_id: string
+  check_type_name_ar: string
+  check_type_name_en: string | null
+  check_subtype_id: string | null
+  check_subtype_name_ar: string | null
+  check_subtype_name_en: string | null
+  visits: number
+  revenue_iqd: number
+  doctor_cut_iqd: number
+  avg_cut_iqd: number
+}
+
+export interface DoctorDrilldownRecord {
+  doctor_id: string | null
+  name: string
+  specialty: string | null
+  per_check: DoctorPerCheckRowRecord[]
+  source_visits: VisitReportRowRecord[]
+  totals: VisitsReportTotalsRecord
+}
+
+export interface OperatorEarningsRecord {
+  operator_id: string
+  name: string
+  visits: number
+  visits_with_dye: number
+  operator_cut_total_iqd: number
+  hours_on_shift_milli: number
+  avg_cut_per_hour_iqd: number
+}
+
+export interface OperatorShiftRowRecord {
+  shift_id: string
+  check_in_at: string
+  check_out_at: string | null
+  duration_milli: number | null
+  lines_run: number
+  cut_earned_iqd: number
+}
+
+export interface OperatorDrilldownRecord {
+  operator_id: string
+  name: string
+  shifts: OperatorShiftRowRecord[]
+  attributed_visits: VisitReportRowRecord[]
+  totals: VisitsReportTotalsRecord
+  total_hours_milli: number
+}
+
+export interface DoctorDailyRowRecord {
+  doctor_id: string | null
+  name: string
+  visits: number
+  revenue_iqd: number
+  doctor_cut_iqd: number
+}
+
+export interface OperatorDailyRowRecord {
+  operator_id: string
+  name: string
+  visits: number
+  dye_visits: number
+  operator_cut_iqd: number
+  hours_on_shift_milli: number
+}
+
+export interface CheckTypeDailyRecord {
+  check_type_id: string
+  name_ar: string
+  name_en: string | null
+  visits: number
+  revenue_iqd: number
+  doctor_cut_iqd: number
+  operator_cut_iqd: number
+}
+
+export interface DailyCloseRecord {
+  tenant_id: string
+  target_date: string
+  tz_offset: string
+  total_revenue_iqd: number
+  total_doctor_cuts_iqd: number
+  total_operator_cuts_iqd: number
+  total_inventory_consumption_value_iqd: number
+  net_iqd: number
+  locked_count: number
+  voided_count: number
+  voided_value_iqd: number
+  per_doctor: DoctorDailyRowRecord[]
+  per_operator: OperatorDailyRowRecord[]
+  per_check_type: CheckTypeDailyRecord[]
+  pending_sync: number
+  provisional: boolean
+  input_hash: string
+  generated_at: string
 }
 
 export async function invoke<K extends keyof CommandMap>(
