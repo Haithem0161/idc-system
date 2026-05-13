@@ -164,14 +164,6 @@ pub fn run() {
         .setup({
             let cancel = cancel.clone();
             move |app| {
-                if cfg!(debug_assertions) {
-                    app.handle().plugin(
-                        tauri_plugin_log::Builder::default()
-                            .level(log::LevelFilter::Info)
-                            .build(),
-                    )?;
-                }
-
                 let handle = app.handle().clone();
                 let cancel = cancel.clone();
                 tauri::async_runtime::spawn(async move {

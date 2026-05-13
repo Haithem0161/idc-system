@@ -8,7 +8,6 @@
     "store:default",
     "os:default",
     "dialog:default",
-    "fs:default",
-    "log:default"
+    "fs:default"
   ]
 }

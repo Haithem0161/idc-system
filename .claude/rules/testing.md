@@ -71,22 +71,25 @@ Every `phase-XX-test.md` MUST have these sections in this exact order:
 **Surfaces under test:** Frontend | Tauri/Rust | Sync Server | All
 **Dependencies (other test plans):** Phase X test, Phase Y test (or "None")
 **Test Data:** <which factories, which fixtures>
+**Tool prerequisites:** <list every tool that this plan's execution will install or rely on -- see §13 -- e.g. `cargo-llvm-cov`, `webdriverio` + `tauri-driver`, `vitest` + `@testing-library/react`, `ajv@8`, or "none new -- inherits from phase-XX-test">
+**Out of scope (cross-cutting tests):** <list anything this phase touches but tests in a cross-cutting plan (`security.md`, `sync-conflicts.md`, `i18n-rtl.md`, `performance-soak.md`) or another phase plan. The §6 categories MAY mark these `N/A -- owned by <plan>`. Use `none` when everything is in-scope.>
+**Cross-phase commands:** <list IPC commands or routes registered in this phase's modules but conceptually owned by another phase, with a pointer to the test plan that covers them. Example: `shifts_lines_run_today` -- registered in phase-04 `lib.rs`, tested in `phase-05-test.md` §2.2. Use `none` when no such commands exist.>
 ```
 
 ### Section 1: Unit Tests (Pyramid Layer 1)
 - §1.1 Rust domain services -- list module paths and what each test asserts.
 - §1.2 TS pure functions / value objects.
-- §1.3 Coverage target: domain layer >= 90%.
+- §1.3 Coverage targets -- table of `| Path glob | Threshold | Tool invocation |`. Drop rows that don't apply, but never silently lower a threshold; thresholds come from §8 and a documented override requires §8 sign-off.
 
 ### Section 2: Integration Tests (Pyramid Layer 2)
 - §2.1 Rust integration tests -- `src-tauri/tests/<entity>_phaseXX.rs`. Continue the existing convention (see `sync_phase01.rs`, `shifts_phase04.rs`).
-- §2.2 Tauri IPC handler tests -- one test per command in this phase; assert happy path + at least one error path.
+- §2.2 Tauri IPC handler tests -- one test per command in this phase; assert happy path + at least one error path. For any **cross-phase command** declared in the header, add a `(cross-ref)` row pointing at the owning phase plan instead of writing tests here.
 - §2.3 Sync server route handlers -- with a real Prisma test DB; tear down per-test.
-- §2.4 React Query mutation/query flows -- with mocked IPC; assert cache invalidation and optimistic update behaviour.
+- §2.4 React Query mutation/query flows -- with mocked IPC; assert cache invalidation and optimistic update behaviour. Every component / hook test that renders DOM MUST run in both `dir=ltr` AND `dir=rtl` (`describe.each([['ltr'],['rtl']])`). Asserting only LTR is incomplete (see §14 anti-pattern "RTL never tested").
 
 ### Section 3: Contract Tests (Pyramid Layer 3)
 - §3.1 Swagger contract -- for every server route in this phase, validate the actual response against the declared TypeBox schema using Ajv.
-- §3.2 IPC shape contract -- diff the Rust `serde` JSON shape against the TS `Zod`/`Type` declaration; fail if they drift.
+- §3.2 IPC shape contract -- diff the Rust `serde` JSON shape against the TS `Zod`/`Type` declaration; fail if they drift. The §3.2 table MUST include a FIXED final row for the shared `AppError` envelope (`AppErrorSchema = z.object({ kind: z.enum([...]), message: z.string() })`); every command's error path references it.
 - §3.3 Sync envelope contract -- assert push/pull payloads conform to the versioned envelope schema; conflict-resolution policy is declared and matches the entity's expected policy.
 
 ### Section 4: E2E Tests (Pyramid Layer 4)
@@ -100,7 +103,12 @@ Every `phase-XX-test.md` MUST have these sections in this exact order:
 
 ### Section 6: Edge Case Coverage (8 mandatory categories)
 
-Every phase plan MUST include all eight subsections. If a category is genuinely irrelevant, write `N/A -- <one-line reason>`. "Not applicable" with no reason is forbidden.
+Every phase plan MUST include all eight subsections. Acceptable forms per subsection:
+- A concrete test or scenario (preferred).
+- `N/A -- <one-line reason>` when the phase genuinely has no surface in that category.
+- `N/A -- owned by <cross-cutting plan or other phase test>` when the surface exists but is tested elsewhere (`security.md`, `sync-conflicts.md`, `i18n-rtl.md`, `performance-soak.md`, or another phase plan). The pointer MUST match the value listed in the header's `Out of scope` line.
+
+"Not applicable" with no reason is forbidden. Empty is forbidden.
 
 - §6.1 Time / Timezone -- Iraq TZ (Asia/Baghdad), DST, midnight rollover, clock skew vs server, day-boundary edges.
 - §6.2 i18n & RTL -- en/ar swap, Arabic-Indic numerals toggle, RTL layout, mixed-direction text in inputs/tables.
@@ -115,14 +123,17 @@ Every phase plan MUST include all eight subsections. If a category is genuinely 
 
 Table:
 
-| Surface | Operation | Threshold | Test name | Notes |
-|-|-|-|-|-|
+| Surface | Operation | Threshold | Default? | Test name | Rationale |
+|-|-|-|-|-|-|
 
-Concrete numbers, not "fast." Hard pass/fail gates in CI. Default SLOs from §9 apply unless this phase overrides.
+Concrete numbers, not "fast." Hard pass/fail gates in CI. Default SLOs from §9 apply unless this phase overrides. The `Default?` column declares `yes` when the threshold matches §9 and `no` when the phase overrides it; an override row MUST carry a rationale in the last column. A silent override is forbidden.
 
 ### Section 8: Definition of Done
 
-Checkbox checklist mirroring §11. The phase is `complete` in `testing-status.md` only when every box is checked.
+Checkbox checklist mirroring §11. The phase is `complete` in `testing-status.md` only when every box is checked. Two specific items the template enforces and the rule reiterates:
+
+- **Snapshot listing.** The "Snapshot files committed" checkbox MUST list the concrete paths this phase owns (or state `none -- phase adds no snapshot artifacts`). A vague "snapshots committed" without paths is not acceptable.
+- **Canonical persona row.** The §8 "Persona run record" table MUST have a first row explicitly labelled the **canonical persona** -- the single `personas.md` script that gates `complete` per §11. Additional persona rows are reinforcement and optional; the canonical row is not.
 
 ## §4 Cross-Cutting Plans
 
