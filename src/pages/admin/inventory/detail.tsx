@@ -74,7 +74,7 @@ export default function InventoryItemDetailPage () {
     const parent = checkTypeById.get(consumptionForm.check_type_id)
     if (!parent) return
     if (parent.has_subtypes) {
-      setError(t("admin.inventory.consumption_subtype_picker", { defaultValue: "Pick a flat check type for now; subtype mapping not in this MVP form." }) ?? "")
+      setError(t("admin.inventory.consumption_subtype_picker", { defaultValue: "Subtype mapping is not supported in this form. Pick a flat check type." }) ?? "")
       return
     }
     if (consumptionForm.on_dye_only && !parent.dye_supported) {
@@ -98,7 +98,7 @@ export default function InventoryItemDetailPage () {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <Link to="/admin/inventory" className="inline-flex items-center gap-1 text-[12px] font-medium text-ink-3 hover:text-ink">
-        <ArrowLeft className="h-3 w-3" strokeWidth={1.8} />
+        <ArrowLeft className="h-3 w-3 rtl:rotate-180" strokeWidth={1.8} />
         <span>{t("admin.inventory.back", { defaultValue: "Back to inventory" })}</span>
       </Link>
 

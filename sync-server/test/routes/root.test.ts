@@ -13,5 +13,11 @@ test('GET /healthz returns ok', async (t) => {
   const app = await build(t)
   const res = await app.inject({ url: '/healthz' })
   assert.strictEqual(res.statusCode, 200)
-  assert.deepStrictEqual(JSON.parse(res.payload), { status: 'ok', version: '0.1.0' })
+  // Phase-08 §7.17 enriches /healthz with db/redis/migrationsApplied.
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.status, 'ok')
+  assert.strictEqual(body.version, '0.1.0')
+  assert.strictEqual(body.db, 'ok')
+  assert.strictEqual(body.redis, 'ok')
+  assert.strictEqual(body.migrationsApplied, true)
 })

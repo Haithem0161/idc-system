@@ -1,0 +1,46 @@
+services:
+  sync-db:
+    image: postgres:16.4-alpine
+    container_name: idc-sync-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: idc_sync
+    ports:
+      - "5449:5432"
+    volumes:
+      - sync_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d idc_sync"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  sync-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: idc-sync-server
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@sync-db:5432/idc_sync
+      PORT: 3161
+      HOST: 0.0.0.0
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      BOOTSTRAP_SUPERADMIN_EMAIL: ${BOOTSTRAP_SUPERADMIN_EMAIL:-}
+      BOOTSTRAP_SUPERADMIN_PASSWORD: ${BOOTSTRAP_SUPERADMIN_PASSWORD:-}
+      BOOTSTRAP_TENANT_ID: ${BOOTSTRAP_TENANT_ID:-}
+      DEFAULT_ENTITY_ID: ${DEFAULT_ENTITY_ID:-}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+    ports:
+      - "3161:3161"
+    depends_on:
+      sync-db:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./prisma:/app/prisma
+
+volumes:
+  sync_db_data:

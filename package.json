@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
+    "lint": "eslint . && node tools/lint-i18n.mjs && node tools/lint-rtl.mjs",
+    "lint:eslint": "eslint .",
+    "lint:i18n": "node tools/lint-i18n.mjs",
+    "lint:rtl": "node tools/lint-rtl.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

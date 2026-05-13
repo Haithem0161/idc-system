@@ -45,6 +45,10 @@
       "delete_confirm": "Soft-delete this user? Active sessions will be revoked.",
       "delete_warning": "Soft-deletes the user and revokes all active sessions."
     },
+    "inventory": {
+      "consumption_subtype_picker": "Subtype mapping is not supported in this form. Pick a flat check type.",
+      "consumption_dye_unsupported": "Selected check type does not support dye."
+    },
     "settings": {
       "title": "Settings",
       "subtitle": "Configure clinic operations.",

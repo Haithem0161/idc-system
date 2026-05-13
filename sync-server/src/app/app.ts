@@ -48,6 +48,13 @@ const app: FastifyPluginAsync<AppOptions> = async (
     dir: join(__dirname, 'domains', 'reports', 'routes'),
     options: opts,
   })
+
+  // Audit bounded context routes (phase-08).
+  // eslint-disable-next-line no-void
+  void fastify.register(AutoLoad, {
+    dir: join(__dirname, 'domains', 'audit', 'routes'),
+    options: opts,
+  })
 }
 
 export default app

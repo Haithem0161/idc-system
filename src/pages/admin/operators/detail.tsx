@@ -79,7 +79,7 @@ export default function OperatorDetailPage () {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <Link to="/admin/operators" className="inline-flex items-center gap-1 text-[12px] font-medium text-ink-3 hover:text-ink">
-        <ArrowLeft className="h-3 w-3" strokeWidth={1.8} />
+        <ArrowLeft className="h-3 w-3 rtl:rotate-180" strokeWidth={1.8} />
         <span>{t("admin.operators.back", { defaultValue: "Back to operators" })}</span>
       </Link>
 

@@ -85,9 +85,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           // Probe returned null — /api/auth not reachable.
           // We're in a regular browser, fall through to standalone.
-          console.log(
-            "[AuthProvider] /api/auth not reachable, falling back to standalone mode",
-          );
         }
 
         // STANDALONE MODE (or dev browser fallback)

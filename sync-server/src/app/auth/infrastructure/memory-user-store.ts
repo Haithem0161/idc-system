@@ -1,5 +1,6 @@
 import { randomUUID, createHash, randomBytes } from 'node:crypto'
 
+import { DomainError } from '../../common/errors/domain'
 import type {
   RefreshTokenRepository,
   UserRepository,
@@ -115,10 +116,10 @@ export class MemoryUserStore implements UserRepository, RefreshTokenRepository {
     const id = this.tokenHashes.get(hash)
     const current = id ? this.tokens.get(id) : null
     if (!current || current.revokedAt !== null) {
-      throw new Error('invalid refresh token')
+      throw new DomainError('SESSION_EXPIRED', 'invalid refresh token', 401)
     }
     if (Date.parse(current.expiresAt) < Date.now()) {
-      throw new Error('expired refresh token')
+      throw new DomainError('SESSION_EXPIRED', 'expired refresh token', 401)
     }
     current.revokedAt = new Date().toISOString()
 

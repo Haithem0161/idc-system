@@ -20,4 +20,7 @@ pub trait SyncStateRepo: Send + Sync {
     /// Ensure a row exists; create it with a fresh `device_id` if not. Returns
     /// the canonical device_id.
     async fn ensure_device_id(&self, device_id: &str) -> AppResult<String>;
+
+    /// Stamp `last_audit_vacuum_at = now` after a successful audit-vacuum run.
+    async fn mark_audit_vacuumed(&self, at: chrono::DateTime<chrono::Utc>) -> AppResult<()>;
 }

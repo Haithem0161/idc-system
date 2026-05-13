@@ -40,6 +40,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "007_reports.sql",
         include_str!("../../migrations/007_reports.sql"),
     ),
+    (
+        "008_polish.sql",
+        include_str!("../../migrations/008_polish.sql"),
+    ),
 ];
 
 /// Apply every embedded migration that has not already run.
@@ -191,6 +195,17 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, MIGRATIONS.len() as i64);
+
+        // `sync_state.last_audit_vacuum_at` column was added by phase-08
+        // §7.19. The column starts NULL until the first vacuum runs.
+        let (vacuum_col,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('sync_state') \
+             WHERE name = 'last_audit_vacuum_at'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(vacuum_col, 1);
 
         // Tables exist
         let (count,): (i64,) = sqlx::query_as(

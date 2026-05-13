@@ -23,7 +23,7 @@ impl SqliteSyncStateRepo {
 impl SyncStateRepo for SqliteSyncStateRepo {
     async fn get(&self) -> AppResult<SyncState> {
         let row: Option<SyncStateRow> = sqlx::query_as::<_, SyncStateRow>(
-            "SELECT pull_cursor, last_pulled_at, last_pushed_at, device_id \
+            "SELECT pull_cursor, last_pulled_at, last_pushed_at, device_id, last_audit_vacuum_at \
              FROM sync_state WHERE id = 1",
         )
         .fetch_optional(&self.pool)
@@ -52,6 +52,14 @@ impl SyncStateRepo for SqliteSyncStateRepo {
         Ok(())
     }
 
+    async fn mark_audit_vacuumed(&self, at: chrono::DateTime<chrono::Utc>) -> AppResult<()> {
+        sqlx::query("UPDATE sync_state SET last_audit_vacuum_at = ? WHERE id = 1")
+            .bind(at.to_rfc3339())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn ensure_device_id(&self, device_id: &str) -> AppResult<String> {
         // INSERT OR IGNORE then read back; cheaper than SELECT-then-INSERT.
         sqlx::query("INSERT OR IGNORE INTO sync_state (id, device_id) VALUES (1, ?)")
@@ -73,6 +81,7 @@ struct SyncStateRow {
     last_pulled_at: Option<String>,
     last_pushed_at: Option<String>,
     device_id: String,
+    last_audit_vacuum_at: Option<String>,
 }
 
 impl SyncStateRow {
@@ -87,6 +96,11 @@ impl SyncStateRow {
             last_pulled_at: self.last_pulled_at.as_deref().map(parse_dt).transpose()?,
             last_pushed_at: self.last_pushed_at.as_deref().map(parse_dt).transpose()?,
             device_id: self.device_id,
+            last_audit_vacuum_at: self
+                .last_audit_vacuum_at
+                .as_deref()
+                .map(parse_dt)
+                .transpose()?,
         })
     }
 }

@@ -1,0 +1,85 @@
+{
+  "eyebrow": "AUDIT LOG",
+  "title": "Audit log",
+  "summary": "{{count}} results, mode: {{mode}}",
+  "empty": "No audit rows match these filters.",
+  "error": "Failed to load audit rows: {{msg}}",
+  "load_more": "Load next page",
+  "filters": {
+    "aria": "Audit filters",
+    "title": "Filters",
+    "actor": "Actor (UUID)",
+    "actor_placeholder": "user uuid",
+    "action": "Action",
+    "entity": "Entity",
+    "entity_id_prefix": "Entity ID prefix",
+    "entity_id_prefix_placeholder": "First 4 to 36 chars of entity_id",
+    "from": "From",
+    "to": "To",
+    "text": "Free text",
+    "text_placeholder": "Search in delta or entity_id (2 to 100 chars)",
+    "any": "Any"
+  },
+  "columns": {
+    "results": "{{count}} results",
+    "at": "At (UTC)",
+    "actor": "Actor",
+    "action": "Action",
+    "entity": "Entity",
+    "entity_id": "Entity ID",
+    "device": "Device",
+    "pending_sync": "Pending sync"
+  },
+  "actions": {
+    "create": "Create",
+    "update": "Update",
+    "soft_delete": "Soft delete",
+    "lock": "Lock",
+    "void": "Void",
+    "discard": "Discard",
+    "clock_in": "Clock in",
+    "clock_out": "Clock out",
+    "password_change": "Password change",
+    "login": "Login",
+    "logout": "Logout",
+    "conflict_resolve": "Conflict resolve",
+    "vacuum": "Vacuum",
+    "daily_close_run": "Daily close"
+  },
+  "entities": {
+    "users": "Users",
+    "settings": "Settings",
+    "check_types": "Check types",
+    "check_subtypes": "Check subtypes",
+    "doctors": "Doctors",
+    "doctor_check_pricing": "Doctor pricing",
+    "operators": "Operators",
+    "operator_specialties": "Operator specialties",
+    "operator_shifts": "Operator shifts",
+    "patients": "Patients",
+    "visits": "Visits",
+    "inventory_items": "Inventory items",
+    "inventory_consumption_map": "Consumption map",
+    "inventory_adjustments": "Inventory adjustments",
+    "audit_log": "Audit log"
+  },
+  "delta": {
+    "field": "Field",
+    "from": "From",
+    "to": "To",
+    "empty": "No changes recorded"
+  },
+  "server_backed": {
+    "local": "Local",
+    "server": "Server",
+    "merged": "Merged",
+    "merged_tooltip": "Range spans the 90-day local retention. Merging local and server results.",
+    "server_tooltip": "Range predates the 90-day local retention. Showing server results."
+  },
+  "vacuum": {
+    "button": "Vacuum now",
+    "aria": "Run audit vacuum now",
+    "success": "Vacuum done: {{audit}} audit, {{metrics}} metrics rows purged",
+    "failure": "Vacuum failed: {{msg}}"
+  }
+}

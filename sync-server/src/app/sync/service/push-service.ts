@@ -5,6 +5,7 @@ import type {
   ConflictParkedRepository,
   ProcessedOpRepository,
 } from '../domain/repositories'
+import type { SyncEntityStore } from '../domain/sync-store'
 import type {
   CheckSubtypeSyncRecord,
   CheckTypeSyncRecord,
@@ -13,7 +14,6 @@ import type {
   DoctorSyncRecord,
   InventoryAdjustmentSyncRecord,
   InventoryItemSyncRecord,
-  MemorySyncStore,
   OperatorShiftSyncRecord,
   OperatorSpecialtySyncRecord,
   OperatorSyncRecord,
@@ -58,7 +58,7 @@ export class SyncPushService {
     private readonly audit: AuditLogRepository,
     private readonly conflicts: ConflictParkedRepository,
     private readonly processed: ProcessedOpRepository,
-    private readonly store: MemorySyncStore
+    private readonly store: SyncEntityStore
   ) {}
 
   async apply (
@@ -127,7 +127,7 @@ export class SyncPushService {
               { op_id: op.op_id }
             )
           }
-          const conflict = this.store.detectSettingConflict(row)
+          const conflict = await this.store.detectSettingConflict(row)
           if (conflict) {
             const envelope: ParkedConflict = {
               opId: op.op_id,
@@ -156,7 +156,7 @@ export class SyncPushService {
           this.requireSuperadmin(actor, 'check_subtypes push')
           const row = decodeJsonPayload<CheckSubtypeSyncRecord>(op.payload_b64)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
-          this.requireSubtypedParent(row.check_type_id, op.op_id)
+          await this.requireSubtypedParent(row.check_type_id, op.op_id)
           await this.store.upsertCheckSubtype(row)
           break
         }
@@ -179,7 +179,7 @@ export class SyncPushService {
           this.requireSuperadmin(actor, 'doctor_check_pricing push')
           const row = decodeJsonPayload<DoctorPricingSyncRecord>(op.payload_b64)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
-          this.validateDoctorPricing(row, op.op_id)
+          await this.validateDoctorPricing(row, op.op_id)
           await this.store.upsertDoctorPricing(row)
           break
         }
@@ -242,7 +242,7 @@ export class SyncPushService {
           this.requireSuperadmin(actor, 'inventory_consumption_map push')
           const row = decodeJsonPayload<ConsumptionSyncRecord>(op.payload_b64)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
-          this.validateConsumption(row, op.op_id)
+          await this.validateConsumption(row, op.op_id)
           await this.store.upsertConsumption(row)
           break
         }
@@ -281,7 +281,7 @@ export class SyncPushService {
           const row = decodeJsonPayload<VisitSyncRecord>(op.payload_b64)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           validateVisit(row, op.op_id)
-          const conflict = this.store.detectVisitConflict(row)
+          const conflict = await this.store.detectVisitConflict(row)
           if (conflict) {
             const envelope: ParkedConflict = {
               opId: op.op_id,
@@ -383,8 +383,8 @@ export class SyncPushService {
     }
   }
 
-  private requireSubtypedParent (checkTypeId: string, opId: string): void {
-    const parent = this.store.checkTypes.get(checkTypeId)
+  private async requireSubtypedParent (checkTypeId: string, opId: string): Promise<void> {
+    const parent = await this.store.getCheckType(checkTypeId)
     if (!parent) {
       throw new DomainError(
         'VALIDATION_ERROR',
@@ -411,8 +411,8 @@ export class SyncPushService {
     }
   }
 
-  private validateDoctorPricing (row: DoctorPricingSyncRecord, opId: string): void {
-    const parent = this.store.checkTypes.get(row.check_type_id)
+  private async validateDoctorPricing (row: DoctorPricingSyncRecord, opId: string): Promise<void> {
+    const parent = await this.store.getCheckType(row.check_type_id)
     if (!parent) {
       throw new DomainError(
         'VALIDATION_ERROR',
@@ -463,8 +463,8 @@ export class SyncPushService {
     }
   }
 
-  private validateConsumption (row: ConsumptionSyncRecord, opId: string): void {
-    const parent = this.store.checkTypes.get(row.check_type_id)
+  private async validateConsumption (row: ConsumptionSyncRecord, opId: string): Promise<void> {
+    const parent = await this.store.getCheckType(row.check_type_id)
     if (!parent) {
       throw new DomainError(
         'VALIDATION_ERROR',

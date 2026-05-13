@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
+use crate::domains::audit::{AuditQueryService, AuditVacuumJob, DiagnosticsService};
 use crate::domains::auth::domain::repositories::UserRepo;
 use crate::domains::auth::{AuthService, UserService};
 use crate::domains::catalog::CatalogServices;
@@ -48,6 +49,9 @@ pub struct AppState {
     visit_service: Option<Arc<VisitService>>,
     inventory_adjustment_service: Option<Arc<InventoryAdjustmentService>>,
     reports_service: Option<Arc<ReportsService>>,
+    audit_query_service: Option<Arc<AuditQueryService>>,
+    audit_vacuum_job: Option<Arc<AuditVacuumJob>>,
+    diagnostics_service: Option<Arc<DiagnosticsService>>,
     user_repo: Option<Arc<dyn UserRepo>>,
     user_context: RwLock<Option<UserContext>>,
     settings_cache: RwLock<HashMap<String, SettingValue>>,
@@ -71,6 +75,9 @@ pub struct AppStateConfig {
     pub visit_service: Arc<VisitService>,
     pub inventory_adjustment_service: Arc<InventoryAdjustmentService>,
     pub reports_service: Arc<ReportsService>,
+    pub audit_query_service: Arc<AuditQueryService>,
+    pub audit_vacuum_job: Arc<AuditVacuumJob>,
+    pub diagnostics_service: Arc<DiagnosticsService>,
     pub user_repo: Arc<dyn UserRepo>,
     pub device_id: String,
     pub app_version: String,
@@ -91,6 +98,9 @@ impl AppState {
             visit_service: Some(cfg.visit_service),
             inventory_adjustment_service: Some(cfg.inventory_adjustment_service),
             reports_service: Some(cfg.reports_service),
+            audit_query_service: Some(cfg.audit_query_service),
+            audit_vacuum_job: Some(cfg.audit_vacuum_job),
+            diagnostics_service: Some(cfg.diagnostics_service),
             user_repo: Some(cfg.user_repo),
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
@@ -116,6 +126,9 @@ impl AppState {
             visit_service: None,
             inventory_adjustment_service: None,
             reports_service: None,
+            audit_query_service: None,
+            audit_vacuum_job: None,
+            diagnostics_service: None,
             user_repo: None,
             user_context: RwLock::new(None),
             settings_cache: RwLock::new(HashMap::new()),
@@ -176,6 +189,18 @@ impl AppState {
 
     pub fn reports_service(&self) -> Option<Arc<ReportsService>> {
         self.reports_service.clone()
+    }
+
+    pub fn audit_query_service(&self) -> Option<Arc<AuditQueryService>> {
+        self.audit_query_service.clone()
+    }
+
+    pub fn audit_vacuum_job(&self) -> Option<Arc<AuditVacuumJob>> {
+        self.audit_vacuum_job.clone()
+    }
+
+    pub fn diagnostics_service(&self) -> Option<Arc<DiagnosticsService>> {
+        self.diagnostics_service.clone()
     }
 
     pub fn user_repo(&self) -> Option<Arc<dyn UserRepo>> {

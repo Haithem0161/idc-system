@@ -5,25 +5,33 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { DomainError } from '../common/errors/domain'
 
 /**
- * JWT auth plugin (RS256).
+ * JWT auth plugin.
  *
- * In Phase-1 the server runs in verify-only mode: the public key arrives via
- * `JWT_PUBLIC_KEY` (PEM-encoded). For tests we accept an HS256 fallback so
- * fixtures can mint tokens without an RSA keypair.
+ * Production (`NODE_ENV=production`): RS256 only. `JWT_PUBLIC_KEY` must be a
+ * PEM-encoded public key; the server refuses to boot otherwise.
+ *
+ * Non-production: falls back to HS256 with `JWT_SECRET` (>= 32 chars) for
+ * local dev and the existing test fixtures. The phase-09 §3 rewrite ELIMINATED
+ * the silent `'dev-only-secret'` fallback.
  */
 async function plugin (fastify: FastifyInstance): Promise<void> {
   const publicKey = process.env.JWT_PUBLIC_KEY
-  const sharedSecret = process.env.JWT_SECRET ?? 'dev-only-secret'
+  const sharedSecret = process.env.JWT_SECRET
+  const isProd = process.env.NODE_ENV === 'production'
 
   if (publicKey && publicKey.trim().length > 0) {
     await fastify.register(fjwt, {
       secret: { public: publicKey },
       verify: { algorithms: ['RS256'] },
     })
-  } else {
-    // Test / dev fallback: HS256 with a shared secret. Production MUST set
-    // JWT_PUBLIC_KEY.
+  } else if (!isProd && sharedSecret && sharedSecret.length >= 32) {
+    fastify.log.warn('JWT running in HS256 dev fallback. Set JWT_PUBLIC_KEY for production.')
     await fastify.register(fjwt, { secret: sharedSecret })
+  } else {
+    throw new Error(
+      'JWT plugin: production requires JWT_PUBLIC_KEY (RS256). '
+      + 'In non-production set JWT_SECRET to a 32+ char shared secret.'
+    )
   }
 
   fastify.decorate('authenticate', async function (request: FastifyRequest, _reply: FastifyReply) {

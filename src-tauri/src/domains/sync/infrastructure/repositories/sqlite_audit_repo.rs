@@ -1,11 +1,12 @@
 //! sqlx-backed implementation of `AuditRepo`.
 
 use async_trait::async_trait;
-use sqlx::SqlitePool;
+use chrono::{DateTime, Utc};
+use sqlx::{Arguments, SqlitePool};
 
 use crate::db::Tx;
 use crate::domains::sync::domain::entities::AuditEntry;
-use crate::domains::sync::domain::repositories::AuditRepo;
+use crate::domains::sync::domain::repositories::{AuditFilter, AuditRepo};
 use crate::domains::sync::domain::value_objects::AuditAction;
 use crate::error::AppResult;
 
@@ -75,6 +76,103 @@ impl AuditRepo for SqliteAuditRepo {
 
         rows.into_iter().map(AuditRow::into_domain).collect()
     }
+
+    async fn query(&self, filter: &AuditFilter) -> AppResult<Vec<AuditEntry>> {
+        let filter = filter.clone().clamp();
+
+        let mut sql = String::from(
+            "SELECT id, actor_user_id, action, entity, entity_id, delta, ip, device_id, at, \
+                    created_at, updated_at, deleted_at, version, dirty, last_synced_at, \
+                    origin_device_id, entity_id_tenant \
+             FROM audit_log \
+             WHERE entity_id_tenant = ? AND deleted_at IS NULL",
+        );
+        let mut args = sqlx::sqlite::SqliteArguments::default();
+        args.add(&filter.entity_id_tenant)
+            .map_err(|e| crate::error::AppError::Database(format!("bind: {e}")))?;
+
+        if let Some(actor) = filter.actor_user_id.as_deref() {
+            sql.push_str(" AND actor_user_id = ?");
+            args.add(actor)
+                .map_err(|e| crate::error::AppError::Database(format!("bind: {e}")))?;
+        }
+        if let Some(action) = filter.action.as_deref() {
+            sql.push_str(" AND action = ?");
+            args.add(action)
+                .map_err(|e| crate::error::AppError::Database(format!("bind: {e}")))?;
+        }
+        if let Some(entity) = filter.entity.as_deref() {
+            sql.push_str(" AND entity = ?");
+            args.add(entity)
+                .map_err(|e| crate::error::AppError::Database(format!("bind: {e}")))?;
+        }
+        if let Some(prefix) = filter.entity_id_prefix.as_deref() {
+            sql.push_str(" AND entity_id LIKE ?");
+            args.add(format!("{prefix}%"))
+                .map_err(|e| crate::error::AppError::Database(format!("bind: {e}")))?;
+        }
+        if let Some(from) = filter.from_utc {
+            sql.push_str(" AND at >= ?");
+            args.add(from.to_rfc3339())
+                .map_err(|e| crate::error::AppError::Database(format!("bind: {e}")))?;
+        }
+        if let Some(to) = filter.to_utc {
+            sql.push_str(" AND at <= ?");
+            args.add(to.to_rfc3339())
+                .map_err(|e| crate::error::AppError::Database(format!("bind: {e}")))?;
+        }
+        if let Some(text) = filter.free_text.as_deref() {
+            if !text.is_empty() {
+                sql.push_str(" AND (INSTR(delta, ?) > 0 OR INSTR(entity_id, ?) > 0)");
+                args.add(text)
+                    .map_err(|e| crate::error::AppError::Database(format!("bind: {e}")))?;
+                args.add(text)
+                    .map_err(|e| crate::error::AppError::Database(format!("bind: {e}")))?;
+            }
+        }
+
+        sql.push_str(" ORDER BY at DESC, id DESC LIMIT ? OFFSET ?");
+        args.add(filter.limit)
+            .map_err(|e| crate::error::AppError::Database(format!("bind: {e}")))?;
+        args.add(filter.offset)
+            .map_err(|e| crate::error::AppError::Database(format!("bind: {e}")))?;
+
+        let rows: Vec<AuditRow> = sqlx::query_as_with::<_, AuditRow, _>(&sql, args)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter().map(AuditRow::into_domain).collect()
+    }
+
+    async fn vacuum_unsynced_safe(&self, cutoff: DateTime<Utc>) -> AppResult<u64> {
+        let result = sqlx::query(
+            "DELETE FROM audit_log \
+             WHERE at < ? AND dirty = 0 AND deleted_at IS NULL",
+        )
+        .bind(cutoff.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    async fn oldest_at(&self, entity_id_tenant: &str) -> AppResult<Option<DateTime<Utc>>> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT at FROM audit_log \
+             WHERE entity_id_tenant = ? AND deleted_at IS NULL \
+             ORDER BY at ASC LIMIT 1",
+        )
+        .bind(entity_id_tenant)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            None => Ok(None),
+            Some((s,)) => {
+                let dt = chrono::DateTime::parse_from_rfc3339(&s)
+                    .map_err(|e| crate::error::AppError::Validation(format!("datetime: {e}")))?
+                    .with_timezone(&Utc);
+                Ok(Some(dt))
+            }
+        }
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -100,8 +198,6 @@ struct AuditRow {
 
 impl AuditRow {
     fn into_domain(self) -> AppResult<AuditEntry> {
-        use chrono::Utc;
-
         let parse_dt = |s: &str| {
             chrono::DateTime::parse_from_rfc3339(s)
                 .map(|d| d.with_timezone(&Utc))

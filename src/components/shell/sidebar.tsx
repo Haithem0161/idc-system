@@ -82,7 +82,12 @@ export function Sidebar() {
           icon: FileText,
           enabled: role === "accountant" || role === "superadmin",
         },
-        { key: "audit", to: "/audit", icon: ShieldCheck, enabled: false },
+        {
+          key: "audit",
+          to: "/audit",
+          icon: ShieldCheck,
+          enabled: role === "superadmin",
+        },
       ],
     },
     {

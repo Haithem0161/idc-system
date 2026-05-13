@@ -104,7 +104,7 @@ export default function UserDetailPage () {
         to="/admin/users"
         className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-ink-3 transition-colors hover:text-ink"
       >
-        <ArrowLeft className="h-3 w-3" strokeWidth={1.8} />
+        <ArrowLeft className="h-3 w-3 rtl:rotate-180" strokeWidth={1.8} />
         {t("admin.users.back", { defaultValue: "Back to users" })}
       </Link>
 

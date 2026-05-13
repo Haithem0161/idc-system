@@ -279,7 +279,11 @@ impl InventoryAdjustmentService {
                 entity_id.to_string(),
                 Some(self.device_id.clone()),
             )?,
-            AdjustmentReason::ConsumeVisit => unreachable!(),
+            AdjustmentReason::ConsumeVisit => {
+                return Err(AppError::Internal(
+                    "ConsumeVisit reached construction switch after early-return guard".into(),
+                ));
+            }
         };
 
         let write = CreateAdjustmentWrite {

@@ -16,7 +16,7 @@ export default function InventoryAdjustPage () {
           to="/inventory"
           className="inline-flex items-center gap-1 text-[12px] font-medium text-ink-3 hover:text-ink"
         >
-          <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.8} />
+          <ArrowLeft className="h-3.5 w-3.5 rtl:rotate-180" strokeWidth={1.8} />
           {t("inventory.adjust.back")}
         </Link>
         <div>

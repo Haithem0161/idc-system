@@ -10,6 +10,7 @@
 //! ```
 
 pub mod _example;
+pub mod audit;
 pub mod auth;
 pub mod catalog;
 pub mod inventory;

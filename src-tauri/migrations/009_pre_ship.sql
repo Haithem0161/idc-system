@@ -1,0 +1,5 @@
+-- Phase 9: Pre-Ship Hardening
+-- No DDL. This file exists so the migration runner records version 009 even
+-- when the phase ships only behavioural / infrastructure changes. Keeping the
+-- slot reserved prevents a future phase from re-using number 009 and breaking
+-- the lex-order convention.

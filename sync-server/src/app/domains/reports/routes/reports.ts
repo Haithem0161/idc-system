@@ -153,7 +153,7 @@ const DailyCloseResponseSchema = Type.Object({
 
 const route: FastifyPluginAsync = async (fastify) => {
   const app = fastify.withTypeProvider<TypeBoxTypeProvider>()
-  const service = new ReportsService(fastify.syncStore)
+  const service = new ReportsService(fastify.entityStore)
 
   app.get('/reports/visits', {
     onRequest: [fastify.authenticate, fastify.requireEntityContext],

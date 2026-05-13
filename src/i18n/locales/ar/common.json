@@ -12,7 +12,10 @@
     "edit": "تعديل",
     "back": "رجوع",
     "next": "التالي",
-    "submit": "إرسال"
+    "submit": "إرسال",
+    "refresh": "تحديث",
+    "pending_sync": "بانتظار المزامنة",
+    "synced": "متزامن"
   },
   "nav": {
     "aria_label": "أساسي",
@@ -53,7 +56,22 @@
   },
   "a11y": {
     "skip_to_content": "تخطٍ إلى المحتوى",
-    "breadcrumbs": "مسار التنقل"
+    "breadcrumbs": "مسار التنقل",
+    "icons": {
+      "close": "إغلاق",
+      "expand": "توسيع",
+      "collapse": "طي",
+      "search": "بحث",
+      "filter": "تصفية",
+      "sort_asc": "ترتيب تصاعدي",
+      "sort_desc": "ترتيب تنازلي",
+      "print": "طباعة",
+      "void": "إبطال",
+      "edit": "تعديل",
+      "delete": "حذف",
+      "retry": "إعادة المحاولة",
+      "refresh": "تحديث"
+    }
   },
   "language": {
     "toggle_aria": "تبديل اللغة",
@@ -68,7 +86,11 @@
       "offline": "غير متصل",
       "error": "خطأ في المزامنة"
     },
-    "pending_aria": "العمليات المعلقة"
+    "pending_aria": "العمليات المعلقة",
+    "pill": {
+      "tooltip_view_conflicts": "عرض التعارضات الموقوفة",
+      "aria_view_conflicts": "فتح أداة حل التعارضات"
+    }
   },
   "status": {
     "build": "الإصدار",

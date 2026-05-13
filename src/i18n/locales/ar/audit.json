@@ -1,0 +1,85 @@
+{
+  "eyebrow": "سجل التدقيق",
+  "title": "سجل التدقيق",
+  "summary": "{{count}} نتيجة، الوضع: {{mode}}",
+  "empty": "لا توجد سجلات تدقيق تطابق هذه المرشحات.",
+  "error": "فشل تحميل سجلات التدقيق: {{msg}}",
+  "load_more": "تحميل الصفحة التالية",
+  "filters": {
+    "aria": "مرشحات التدقيق",
+    "title": "المرشحات",
+    "actor": "الفاعل (UUID)",
+    "actor_placeholder": "معرف المستخدم",
+    "action": "الإجراء",
+    "entity": "الكيان",
+    "entity_id_prefix": "بادئة معرف الكيان",
+    "entity_id_prefix_placeholder": "أول 4 إلى 36 حرفاً من المعرف",
+    "from": "من",
+    "to": "إلى",
+    "text": "نص حر",
+    "text_placeholder": "ابحث في التغييرات أو المعرف (2 إلى 100 حرف)",
+    "any": "الكل"
+  },
+  "columns": {
+    "results": "{{count}} نتيجة",
+    "at": "الوقت (UTC)",
+    "actor": "الفاعل",
+    "action": "الإجراء",
+    "entity": "الكيان",
+    "entity_id": "معرف الكيان",
+    "device": "الجهاز",
+    "pending_sync": "معلق"
+  },
+  "actions": {
+    "create": "إنشاء",
+    "update": "تحديث",
+    "soft_delete": "حذف",
+    "lock": "إقفال",
+    "void": "إبطال",
+    "discard": "تجاهل",
+    "clock_in": "تسجيل دخول",
+    "clock_out": "تسجيل خروج",
+    "password_change": "تغيير كلمة المرور",
+    "login": "دخول",
+    "logout": "خروج",
+    "conflict_resolve": "حل تعارض",
+    "vacuum": "تنظيف",
+    "daily_close_run": "إغلاق اليوم"
+  },
+  "entities": {
+    "users": "المستخدمون",
+    "settings": "الإعدادات",
+    "check_types": "أنواع الفحوصات",
+    "check_subtypes": "الفئات الفرعية",
+    "doctors": "الأطباء",
+    "doctor_check_pricing": "تسعير الأطباء",
+    "operators": "المشغلون",
+    "operator_specialties": "تخصصات المشغلين",
+    "operator_shifts": "ورديات المشغلين",
+    "patients": "المرضى",
+    "visits": "الزيارات",
+    "inventory_items": "أصناف المخزون",
+    "inventory_consumption_map": "خريطة الاستهلاك",
+    "inventory_adjustments": "تعديلات المخزون",
+    "audit_log": "سجل التدقيق"
+  },
+  "delta": {
+    "field": "الحقل",
+    "from": "من",
+    "to": "إلى",
+    "empty": "لا توجد تغييرات"
+  },
+  "server_backed": {
+    "local": "محلي",
+    "server": "خادم",
+    "merged": "مدمج",
+    "merged_tooltip": "النطاق يمتد عبر فترة الاحتفاظ المحلية (90 يوماً). يتم دمج النتائج المحلية والخادم.",
+    "server_tooltip": "النطاق يسبق فترة الاحتفاظ المحلية (90 يوماً). يتم عرض نتائج الخادم."
+  },
+  "vacuum": {
+    "button": "تنظيف الآن",
+    "aria": "تشغيل تنظيف سجل التدقيق الآن",
+    "success": "اكتمل التنظيف: تم حذف {{audit}} سجل تدقيق و{{metrics}} سجل قياس",
+    "failure": "فشل التنظيف: {{msg}}"
+  }
+}

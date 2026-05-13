@@ -1,0 +1,39 @@
+{
+  "eyebrow": "SYNC CONFLICTS",
+  "title": "Conflict resolver",
+  "subtitle": "Server-parked conflicts are listed here. Pick a row to inspect and resolve.",
+  "empty": "No unresolved conflicts. The queue is clear.",
+  "select_prompt": "Select a conflict from the list to inspect and resolve.",
+  "load_error": "Failed to load conflicts: {{msg}}",
+  "local": "Local payload",
+  "server": "Server payload",
+  "choose": "Choose resolution",
+  "submit": "Submit resolution",
+  "submitting": "Submitting...",
+  "resolved_toast": "Conflict resolved.",
+  "resolve_failed": "Failed to resolve conflict: {{msg}}",
+  "already_resolved": "This conflict was already resolved on another device. Refreshing.",
+  "merge_invalid": "Fill in every manual field before submitting the merge.",
+  "panel": {
+    "title": "Resolve conflict"
+  },
+  "choice": {
+    "local": "Keep local",
+    "server": "Keep server",
+    "merged": "Merge"
+  },
+  "merge": {
+    "title": "Per-field merge",
+    "field": "Field",
+    "choice": "Source",
+    "value": "Value",
+    "from_local": "Local",
+    "from_server": "Server",
+    "from_manual": "Manual",
+    "manual_placeholder": "JSON or string"
+  },
+  "reason": {
+    "manual_policy_version_divergence": "Settings changed on two devices",
+    "manual_policy_visit_divergence": "Visit changed on two devices"
+  }
+}

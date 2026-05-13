@@ -16,7 +16,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo, SyncStateRepo};
 use crate::domains::sync::domain::value_objects::SyncStatus;
-use crate::domains::sync::infrastructure::SyncHttpClient;
+use crate::domains::sync::infrastructure::{ServerConflict, SyncHttpClient};
 use crate::error::AppResult;
 
 pub const STATUS_EVENT: &str = "sync:status";
@@ -38,6 +38,9 @@ enum Cmd {
         choice: String,
         merged: Option<serde_json::Value>,
         reply: tokio::sync::oneshot::Sender<AppResult<()>>,
+    },
+    ListConflicts {
+        reply: tokio::sync::oneshot::Sender<AppResult<Vec<ServerConflict>>>,
     },
 }
 
@@ -87,6 +90,17 @@ impl SyncEngineHandle {
                 merged,
                 reply: reply_tx,
             })
+            .await
+            .map_err(|_| crate::error::AppError::Internal("engine offline".into()))?;
+        reply_rx
+            .await
+            .map_err(|_| crate::error::AppError::Internal("engine dropped reply".into()))?
+    }
+
+    pub async fn list_conflicts(&self) -> AppResult<Vec<ServerConflict>> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(Cmd::ListConflicts { reply: reply_tx })
             .await
             .map_err(|_| crate::error::AppError::Internal("engine offline".into()))?;
         reply_rx
@@ -222,6 +236,10 @@ impl SyncEngine {
                 let result = self.resolve_conflict_inner(op_id, choice, merged).await;
                 let _ = reply.send(result);
             }
+            Cmd::ListConflicts { reply } => {
+                let result = self.list_conflicts_inner().await;
+                let _ = reply.send(result);
+            }
         }
     }
 
@@ -323,7 +341,10 @@ impl SyncEngine {
         };
         let token = self.token.read().await.clone();
         let token = token.unwrap_or_default();
-        http.resolve_conflict(&token, &op_id, &choice, merged)
+        // Phase-08 §7.22 idempotency: derive a stable resolve_op_id so a
+        // mid-flight network failure doesn't double-apply on retry.
+        let resolve_op_id = stable_resolve_op_id(&op_id, &choice, merged.as_ref());
+        http.resolve_conflict(&token, &op_id, &resolve_op_id, &choice, merged)
             .await?;
         // Release the parked outbox row so it can be re-pushed under the
         // chosen resolution.
@@ -331,5 +352,59 @@ impl SyncEngine {
             let _ = self.outbox_repo.delete_acked(&[parsed]).await;
         }
         Ok(())
+    }
+
+    async fn list_conflicts_inner(&self) -> AppResult<Vec<ServerConflict>> {
+        let Some(http) = self.current_http().await else {
+            return Ok(Vec::new());
+        };
+        let token = self.token.read().await.clone().unwrap_or_default();
+        http.list_conflicts(&token).await
+    }
+}
+
+/// `sha256(op_id|choice|merged_canonical_json)` (phase-08 §7.22).
+fn stable_resolve_op_id(op_id: &str, choice: &str, merged: Option<&serde_json::Value>) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(op_id.as_bytes());
+    hasher.update([b'|']);
+    hasher.update(choice.as_bytes());
+    hasher.update([b'|']);
+    if let Some(v) = merged {
+        // serde_json `to_string` is canonical for the same input shape -- not
+        // RFC8785 canonical, but stable for the same `merged` dict the UI sent.
+        let canon = serde_json::to_string(v).unwrap_or_default();
+        hasher.update(canon.as_bytes());
+    }
+    let digest = hasher.finalize();
+    hex_encode(&digest)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_op_id_is_stable() {
+        let a = stable_resolve_op_id("op-1", "local", None);
+        let b = stable_resolve_op_id("op-1", "local", None);
+        assert_eq!(a, b);
+        let c = stable_resolve_op_id("op-1", "server", None);
+        assert_ne!(a, c);
+        let merged = serde_json::json!({"k":"v"});
+        let d = stable_resolve_op_id("op-1", "merged", Some(&merged));
+        let e = stable_resolve_op_id("op-1", "merged", Some(&merged));
+        assert_eq!(d, e);
     }
 }

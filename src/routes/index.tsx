@@ -38,6 +38,8 @@ import AccountingDoctorDetailPage from "@/pages/accounting/doctor-detail"
 import AccountingOperatorsPage from "@/pages/accounting/operators"
 import AccountingOperatorDetailPage from "@/pages/accounting/operator-detail"
 import AccountingDailyClosePage from "@/pages/accounting/daily-close"
+import AuditPage from "@/pages/audit"
+import SyncConflictsPage from "@/pages/sync/conflicts"
 import { RequireRole } from "@/components/auth/require-role"
 
 export const router = createBrowserRouter([
@@ -120,6 +122,22 @@ export const router = createBrowserRouter([
               { path: "operators/:id", Component: AccountingOperatorDetailPage },
               { path: "daily-close", Component: AccountingDailyClosePage },
             ],
+          },
+          {
+            path: "audit",
+            element: (
+              <RequireRole roles={["superadmin"]}>
+                <AuditPage />
+              </RequireRole>
+            ),
+          },
+          {
+            path: "sync/conflicts",
+            element: (
+              <RequireRole roles={["superadmin"]}>
+                <SyncConflictsPage />
+              </RequireRole>
+            ),
           },
         ],
       },

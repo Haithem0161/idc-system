@@ -5,6 +5,7 @@ import type {
   ProcessedOpResponse,
   SyncCursorRepository,
 } from '../../domain/repositories'
+import type { SyncEntityStore } from '../../domain/sync-store'
 import type { AuditPayload, ChangeRow, ParkedConflict } from '../../domain/types'
 
 /**
@@ -252,7 +253,8 @@ export class MemorySyncStore implements
   AuditLogRepository,
   ProcessedOpRepository,
   SyncCursorRepository,
-  ConflictParkedRepository {
+  ConflictParkedRepository,
+  SyncEntityStore {
 
   private readonly audit = new Map<string, AuditPayload>()
   readonly users = new Map<string, UserSyncRecord>()
@@ -303,6 +305,32 @@ export class MemorySyncStore implements
 
   async upsertCheckType (row: CheckTypeSyncRecord): Promise<{ applied: boolean }> {
     return upsertLWW(this.checkTypes, row)
+  }
+
+  async getCheckType (id: string): Promise<CheckTypeSyncRecord | null> {
+    return this.checkTypes.get(id) ?? null
+  }
+
+  async listAllVisits (tenantId: string): Promise<VisitSyncRecord[]> {
+    return [...this.visits.values()].filter(
+      (v) => v.entity_id === tenantId && (v.deleted_at ?? null) == null
+    )
+  }
+
+  async listAllInventoryAdjustments (
+    tenantId: string
+  ): Promise<InventoryAdjustmentSyncRecord[]> {
+    return [...this.inventoryAdjustments.values()].filter(
+      (a) => a.entity_id === tenantId && (a.deleted_at ?? null) == null
+    )
+  }
+
+  async listAllOperatorShifts (
+    tenantId: string
+  ): Promise<OperatorShiftSyncRecord[]> {
+    return [...this.operatorShifts.values()].filter(
+      (s) => s.entity_id === tenantId && (s.deleted_at ?? null) == null
+    )
   }
 
   async upsertCheckSubtype (row: CheckSubtypeSyncRecord): Promise<{ applied: boolean }> {
@@ -633,6 +661,83 @@ export class MemorySyncStore implements
     if (hit.tenantId !== tenantId) return
     hit.resolvedAt = new Date().toISOString()
     void userId
+  }
+
+  /**
+   * Phase-08 §7.11: GET /sync/conflicts. Returns unresolved parked
+   * conflicts for the tenant, newest first, capped at 100.
+   */
+  async listOpenConflicts (tenantId: string): Promise<Array<ParkedConflict & {
+    tenantId: string
+    resolvedAt: string | null
+  }>> {
+    return [...this.conflicts.values()]
+      .filter((c) => c.tenantId === tenantId && c.resolvedAt == null)
+      .slice(0, 100)
+  }
+
+  /**
+   * Phase-08 §3 Server: GET /audit/query. Filters by actor/action/entity/
+   * entity_id prefix/free-text/from/to. Sorts by `(at DESC, id DESC)`
+   * (phase-08 §7.5) with a base64-encoded cursor.
+   */
+  async queryAudit (params: {
+    tenantId: string
+    from: string
+    to: string
+    actor?: string
+    action?: string
+    entity?: string
+    entityIdPrefix?: string
+    text?: string
+    cursor?: string
+    limit: number
+  }): Promise<{ rows: AuditPayload[], nextCursor: string | null }> {
+    const rows = [...this.audit.values()]
+      .filter((r) => r.entity_id_tenant === params.tenantId)
+      .filter((r) => r.at >= params.from && r.at <= params.to)
+      .filter((r) => !params.actor || r.actor_user_id === params.actor)
+      .filter((r) => !params.action || r.action === params.action)
+      .filter((r) => !params.entity || r.entity === params.entity)
+      .filter((r) => !params.entityIdPrefix || r.entity_id.startsWith(params.entityIdPrefix))
+      .filter((r) => {
+        if (!params.text) return true
+        const delta = JSON.stringify(r.delta ?? {})
+        return delta.includes(params.text) || r.entity_id.includes(params.text)
+      })
+      .sort((a, b) => {
+        if (b.at !== a.at) return b.at < a.at ? -1 : 1
+        return b.id < a.id ? -1 : 1
+      })
+
+    let start = 0
+    if (params.cursor) {
+      const decoded = (() => {
+        try {
+          const json = Buffer.from(params.cursor, 'base64url').toString('utf-8')
+          return JSON.parse(json) as { at: string, id: string }
+        } catch {
+          return null
+        }
+      })()
+      if (decoded) {
+        start = rows.findIndex((r) => {
+          if (r.at !== decoded.at) return r.at < decoded.at
+          return r.id < decoded.id
+        })
+        if (start < 0) start = rows.length
+      }
+    }
+    const slice = rows.slice(start, start + params.limit)
+    let nextCursor: string | null = null
+    if (start + params.limit < rows.length && slice.length > 0) {
+      const last = slice[slice.length - 1]
+      nextCursor = Buffer.from(
+        JSON.stringify({ at: last.at, id: last.id }),
+        'utf-8'
+      ).toString('base64url')
+    }
+    return { rows: slice, nextCursor }
   }
 }
 

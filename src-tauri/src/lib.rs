@@ -21,6 +21,13 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::db::migrations;
+use crate::domains::audit::commands::{audit_query, audit_vacuum_now, diagnostics_summary};
+use crate::domains::audit::domain::repositories::MetricsRepo;
+use crate::domains::audit::infrastructure::SqliteMetricsRepo;
+use crate::domains::audit::service::{
+    AuditQueryService as AuditQuerySvc, AuditVacuumJob as AuditVacuumSvc,
+    DiagnosticsService as DiagnosticsSvc,
+};
 use crate::domains::auth::commands::{
     auth_current_user, auth_is_locked, auth_lock, auth_login, auth_logout, auth_unlock,
     users_create, users_create_first_admin, users_get, users_list, users_reset_password,
@@ -125,27 +132,27 @@ pub fn run() {
         if !embedded_mode_enabled() {
             tracing::info!("embedded_mode=disabled (IDC_EMBEDDED_MODE != 1)");
         }
-        eprintln!("[STARTUP] Embedded mode detected (TORCH_EMBEDDED_MODE=true)");
+        tracing::info!("startup: embedded mode detected (TORCH_EMBEDDED_MODE=true)");
         match embedded::EmbeddedConfig::from_env() {
             Ok(embedded_config) => {
                 let rt = tokio::runtime::Runtime::new()
                     .expect("Failed to create tokio runtime for embedded mode");
                 if let Err(e) = rt.block_on(embedded::run_embedded(embedded_config)) {
-                    eprintln!("[ERROR] Embedded mode failed: {e}");
+                    tracing::error!(error = %e, "embedded mode failed");
                     std::process::exit(1);
                 }
                 return;
             }
             Err(e) => {
-                eprintln!("[ERROR] Invalid embedded mode configuration: {e}");
-                eprintln!("[ERROR] Required env vars: TORCH_IPC_PORT, TORCH_RUN_ID");
+                tracing::error!(error = %e, "invalid embedded mode configuration");
+                tracing::error!("required env vars: TORCH_IPC_PORT, TORCH_RUN_ID");
                 std::process::exit(1);
             }
         }
     }
 
     tracing::info!("embedded_mode=disabled");
-    eprintln!("[STARTUP] Running in standalone mode");
+    tracing::info!("startup: running in standalone mode");
 
     let cancel = CancellationToken::new();
 
@@ -296,6 +303,10 @@ pub fn run() {
             reports_export_doctors_csv,
             reports_export_operators_csv,
             reports_export_daily_close_pdf,
+            // audit + diagnostics (phase 8)
+            audit_query,
+            audit_vacuum_now,
+            diagnostics_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -318,6 +329,7 @@ async fn bootstrap(
     let outbox_repo: Arc<dyn OutboxRepo> = Arc::new(SqliteOutboxRepo::new(pool.clone()));
     let audit_repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
     let state_repo: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let metrics_repo: Arc<dyn MetricsRepo> = Arc::new(SqliteMetricsRepo::new(pool.clone()));
     let user_repo: Arc<dyn UserRepo> = Arc::new(SqliteUserRepo::new(pool.clone()));
     let setting_repo: Arc<dyn SettingRepo> = Arc::new(SqliteSettingRepo::new(pool.clone()));
 
@@ -346,7 +358,7 @@ async fn bootstrap(
             pool: pool.clone(),
             outbox_repo: outbox_repo.clone(),
             audit_repo: audit_repo.clone(),
-            state_repo,
+            state_repo: state_repo.clone(),
             device_id: device_id.clone(),
             app_version: app_version.clone(),
             initial_server_url: initial_server_url.clone(),
@@ -426,6 +438,31 @@ async fn bootstrap(
         },
     ));
 
+    let audit_query_service = Arc::new(AuditQuerySvc::new(audit_repo.clone()));
+    let audit_vacuum_job = Arc::new(AuditVacuumSvc::new(
+        pool.clone(),
+        audit_repo.clone(),
+        metrics_repo.clone(),
+        outbox_repo.clone(),
+        state_repo.clone(),
+        device_id.clone(),
+    ));
+    let diagnostics_service = Arc::new(DiagnosticsSvc::new(
+        metrics_repo.clone(),
+        outbox_repo.clone(),
+        state_repo.clone(),
+    ));
+
+    // Spawn the daily audit-vacuum scheduler. Phase-08 §4 + §7.2.
+    {
+        let job = audit_vacuum_job.clone();
+        let cancel = cancel.clone();
+        let tenant = entity_id_tenant.clone();
+        tokio::spawn(async move {
+            job.run_scheduler(tenant, cancel).await;
+        });
+    }
+
     let reports_read_model: Arc<dyn ReportsReadModel> =
         Arc::new(SqliteReportsReadModel::new(pool.clone()));
     let reports_service = Arc::new(ReportsService::new(ReportsServiceConfig {
@@ -468,6 +505,9 @@ async fn bootstrap(
         visit_service,
         inventory_adjustment_service,
         reports_service,
+        audit_query_service,
+        audit_vacuum_job,
+        diagnostics_service,
         user_repo,
         device_id,
         app_version,

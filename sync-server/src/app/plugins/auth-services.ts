@@ -3,13 +3,33 @@ import type { FastifyInstance } from 'fastify'
 
 import { AuthService, type TokenSigner } from '../auth/service/auth-service'
 import { MemoryUserStore } from '../auth/infrastructure/memory-user-store'
+import { PrismaUserStore } from '../auth/infrastructure/prisma/user-store'
+import type {
+  RefreshTokenRepository,
+  UserRepository,
+} from '../auth/domain/repositories'
 
+/**
+ * Wires the auth service.
+ *
+ * Production path: Prisma-backed `PrismaUserStore` against the `users` and
+ * `refresh_tokens` tables.
+ *
+ * Test path (no `DATABASE_URL`): falls back to `MemoryUserStore` so the
+ * existing test fixtures keep running without Postgres.
+ *
+ * Authored per phase-09 §3 Sync Server (auth-services rewrite) and §4
+ * (Refresh-token persistence semantics).
+ */
 async function plugin (fastify: FastifyInstance): Promise<void> {
-  const userStore = new MemoryUserStore()
+  const users: UserRepository & RefreshTokenRepository = fastify.prisma
+    ? new PrismaUserStore(fastify.prisma)
+    : (fastify.log.warn(
+        'auth-services: Prisma client not available; falling back to MemoryUserStore (test/dev only)'
+      ), new MemoryUserStore())
+
   const signer: TokenSigner = {
     sign (payload, ttlSec) {
-      // The @fastify/jwt declaration is locked to our payload shape; assert
-      // that the dynamic claim map is structurally compatible.
       return fastify.jwt.sign(
         payload as unknown as { sub: string; email: string; entityId: string; role?: string },
         { expiresIn: ttlSec }
@@ -23,9 +43,9 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
       }
     },
   }
-  const auth = new AuthService(userStore, userStore, signer)
+  const auth = new AuthService(users, users, signer)
 
-  // Optional bootstrap from env (Phase-02 §7.21).
+  // Optional bootstrap from env (phase-02 §7.21).
   const bootEmail = process.env.BOOTSTRAP_SUPERADMIN_EMAIL
   const bootPassword = process.env.BOOTSTRAP_SUPERADMIN_PASSWORD
   const bootTenant = process.env.BOOTSTRAP_TENANT_ID
@@ -36,14 +56,17 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
   }
 
   fastify.decorate('authService', auth)
-  fastify.decorate('userStore', userStore)
+  fastify.decorate('userStore', users)
 }
 
-export default fp(plugin, { name: 'auth-services', dependencies: ['auth-jwt'] })
+export default fp(plugin, {
+  name: 'auth-services',
+  dependencies: ['auth-jwt', 'prisma'],
+})
 
 declare module 'fastify' {
   interface FastifyInstance {
     authService: AuthService
-    userStore: MemoryUserStore
+    userStore: UserRepository & RefreshTokenRepository
   }
 }

@@ -7,6 +7,6 @@ pub mod audit_repo;
 pub mod outbox_repo;
 pub mod sync_state_repo;
 
-pub use audit_repo::AuditRepo;
+pub use audit_repo::{AuditFilter, AuditRepo};
 pub use outbox_repo::OutboxRepo;
 pub use sync_state_repo::SyncStateRepo;

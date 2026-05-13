@@ -35,7 +35,7 @@ that the server has already processed.`,
       const tenantId = request.tenantId
       const found: string[] = []
       for (const opId of request.body.op_ids) {
-        const hit = await fastify.syncStore.has(opId, tenantId)
+        const hit = await fastify.processedOpRepo.has(opId, tenantId)
         if (hit) found.push(opId)
       }
       return { found }

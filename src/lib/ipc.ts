@@ -387,6 +387,20 @@ export type CommandMap = {
     args: { args: { date: string; path: string } }
     result: { path: string }
   }
+
+  // ---- Phase 8: audit + diagnostics ----
+  audit_query: {
+    args: { args: AuditQueryArgs }
+    result: AuditPageRecord
+  }
+  audit_vacuum_now: {
+    args: void
+    result: VacuumResultRecord
+  }
+  diagnostics_summary: {
+    args: void
+    result: DiagnosticsSummaryRecord
+  }
 }
 
 // ---- Catalog wire shapes -------------------------------------------------
@@ -1095,6 +1109,86 @@ export async function listenEvent<T>(
     return async () => undefined
   }
   return await listen<T>(event, (e) => handler(e.payload))
+}
+
+// ---- Phase 8: audit + diagnostics ---------------------------------------
+
+export type AuditActionLiteral =
+  | "create"
+  | "update"
+  | "soft_delete"
+  | "lock"
+  | "void"
+  | "discard"
+  | "clock_in"
+  | "clock_out"
+  | "password_change"
+  | "login"
+  | "logout"
+  | "conflict_resolve"
+  | "vacuum"
+  | "daily_close_run"
+
+export type AuditEntityLiteral =
+  | "users"
+  | "settings"
+  | "check_types"
+  | "check_subtypes"
+  | "doctors"
+  | "doctor_check_pricing"
+  | "operators"
+  | "operator_specialties"
+  | "operator_shifts"
+  | "patients"
+  | "visits"
+  | "inventory_items"
+  | "inventory_consumption_map"
+  | "inventory_adjustments"
+  | "audit_log"
+
+export interface AuditQueryArgs {
+  actor_user_id?: string
+  action?: AuditActionLiteral
+  entity?: AuditEntityLiteral
+  entity_id_prefix?: string
+  from_utc?: string
+  to_utc?: string
+  text?: string
+  limit?: number
+  offset?: number
+}
+
+export interface AuditRowRecord {
+  id: string
+  at: string
+  actor_user_id: string
+  action: string
+  entity: string
+  entity_id: string
+  delta: unknown
+  device_id: string
+  version: number
+  dirty: boolean
+  source: "local" | "server"
+}
+
+export interface AuditPageRecord {
+  rows: AuditRowRecord[]
+  mode: "local" | "server" | "merged"
+  next_offset: number | null
+}
+
+export interface VacuumResultRecord {
+  audit_purged: number
+  metrics_purged: number
+}
+
+export interface DiagnosticsSummaryRecord {
+  lock_latency_p95_ms: number | null
+  outbox_depth: number
+  last_sync_at: string | null
+  conflict_count_7d: number
+  receipt_print_success_rate_30d: number | null
 }
 
 export const SYNC_EVENTS = {

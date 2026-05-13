@@ -1,0 +1,39 @@
+# Substrings that the i18n lint should ignore.
+# One per line; lines starting with # are comments.
+# Each entry matches when contained in the literal text.
+
+# Bilingual labels rendered as fixed text (own translation in label).
+العربية
+
+# Arabic-Indic digit conversion table -- code, not user-facing strings.
+٠
+١
+٢
+٣
+٤
+٥
+٦
+٧
+٨
+٩
+٪
+
+# Regex character class scanning Arabic-letter range; not a label.
+؀-ۿ
+
+# Hardcoded English placeholder reflecting tenant scope (not a label).
+unscoped
+
+# Sample/placeholder URL in setup form -- intentionally English.
+https://sync.example.com
+
+# Audit query placeholder text "entity=inventory_items" inside placeholder
+# (the item-audit-tab placeholder until phase-08 ships the audit join).
+entity=inventory_items
+
+# Dev-only debug labels in the settings admin page.
+Promise
+not seeded
+
+# House (the synthetic doctor row used in accounting).
+(house)

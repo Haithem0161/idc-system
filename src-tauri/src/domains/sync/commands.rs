@@ -53,10 +53,24 @@ pub async fn sync_list_conflicts(
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> AppResult<Vec<serde_json::Value>> {
-    // Phase 1 ships a placeholder list. Real conflict storage lives on the
-    // server and is fetched on demand by the Phase-8 resolver UI.
-    let _ = (state, limit, offset);
-    Ok(vec![])
+    // Phase-08 §7.11: list parked conflicts for the tenant. The server is
+    // canonical so we call it directly and surface its envelopes; offline
+    // returns an empty list (the resolver page renders the empty state).
+    let _ = (limit, offset);
+    let conflicts = state.sync_engine().list_conflicts().await?;
+    Ok(conflicts
+        .into_iter()
+        .map(|c| {
+            serde_json::json!({
+                "opId": c.op_id,
+                "entity": c.entity,
+                "entityId": c.entity_id,
+                "serverPayload": c.server_payload,
+                "localPayload": c.local_payload,
+                "reason": c.reason,
+            })
+        })
+        .collect())
 }
 
 #[derive(Debug, serde::Deserialize)]

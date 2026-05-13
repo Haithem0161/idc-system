@@ -103,7 +103,7 @@ export default function CheckTypeDetailPage () {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <Link to="/admin/check-types" className="inline-flex items-center gap-1 text-[12px] font-medium text-ink-3 hover:text-ink">
-        <ArrowLeft className="h-3 w-3" strokeWidth={1.8} />
+        <ArrowLeft className="h-3 w-3 rtl:rotate-180" strokeWidth={1.8} />
         <span>{t("admin.check_types.back", { defaultValue: "Back to check types" })}</span>
       </Link>
 

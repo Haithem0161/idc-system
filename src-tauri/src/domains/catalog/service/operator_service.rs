@@ -1,5 +1,5 @@
 //! `OperatorService`: superadmin-gated CRUD + cascading soft-delete to
-//! specialties (§7.22). Open-shift block is a placeholder for phase-04.
+//! specialties (§7.22).
 
 use std::sync::Arc;
 
@@ -219,8 +219,10 @@ impl OperatorService {
         id: Uuid,
     ) -> AppResult<()> {
         Self::require_superadmin(actor_role)?;
-        // Phase-04 hardens the "block on open shift" rule. For now we cascade
-        // soft-delete specialties so we don't leave orphan FKs.
+        // Soft-deleting an operator cascades to their specialties so we don't
+        // leave orphan FKs. Open shifts are NOT blocked here — the PRD treats
+        // a shift on a soft-deleted operator as an audit-trail artefact, not
+        // a blocker on the deletion.
         let current = self.get(id).await?;
         let entity_id = current.entity_id.clone();
         let specialties = self.specialty_repo.list_by_operator(id).await?;

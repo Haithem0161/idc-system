@@ -41,7 +41,7 @@ export function Breadcrumbs() {
       <ol className="flex items-center gap-1.5 text-ink-3">
         {crumbs.map((crumb, i) => (
           <li key={crumb.pathname} className="flex items-center gap-1.5">
-            {i > 0 ? <ChevronRight aria-hidden className="h-3 w-3 text-ink-4" strokeWidth={1.8} /> : null}
+            {i > 0 ? <ChevronRight aria-hidden className="h-3 w-3 text-ink-4 rtl:rotate-180" strokeWidth={1.8} /> : null}
             <Link
               to={crumb.pathname}
               className="rounded font-medium transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 focus-visible:ring-offset-2"

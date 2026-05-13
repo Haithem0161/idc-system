@@ -30,6 +30,7 @@
 | 06 | Inventory Operations | All | Operational layer on `inventory_adjustments`; Inventory list/detail/adjust pages; receive/writeoff/count_correction commands; quantity recompute. | M | 05 | not_started |
 | 07 | Accounting & Reports | All | Accounting dashboard + 4 reports (Visits / Doctors / Operators / Daily Close); CSV export; server `/reports/visits` and `/reports/daily-close/:date` endpoints. | L | 06 | not_started |
 | 08 | Audit, Conflict Resolver & Polish | All | `/audit` page; `/sync/conflicts` resolver UI; `GET /audit/query` server endpoint; audit vacuum job; i18n/RTL final sweep; soak + performance verification. | M | 07 | not_started |
+| 09 | Pre-Ship Hardening (Sync Server Persistence + Cleanup) | All | Wire `PrismaSyncStore` and `PrismaUserStore` against the existing 19-model schema (Phases 1-8 ran on in-memory Maps); add `Dockerfile.dev` + `docker-compose.yaml` + `init-custom-sql.sql`; enforce RS256 (no `dev-only-secret` fallback in production); real `/healthz` Postgres + Redis probes; audit-log row on manual conflict resolution; fix `.env.template` schema mismatch (`JWT_PUBLIC_KEY_PATH` -> `JWT_PUBLIC_KEY`, add `BOOTSTRAP_*` / `METRICS_TOKEN` / `DEFAULT_ENTITY_ID`); replace raw `Error` throws with `DomainError` in auth refresh path; frontend `console.log` and MVP-placeholder cleanup; `unreachable!()` -> `AppError::Internal` in inventory service; stale "phase-04" comment removal in operator service. | L | 08 | not_started |
 
 ## Dependency Graph
 
@@ -42,6 +43,11 @@
 +---------+   +---------+   +---------+   +---------+
 | Phase 8 |<--| Phase 7 |<--| Phase 6 |<--| Phase 5 |
 +---------+   +---------+   +---------+   +---------+
+     |
+     v
++---------+
+| Phase 9 |   pre-ship hardening (server persistence + cleanup)
++---------+
 ```
 
 Each phase contains parallel tracks for the three surfaces (Frontend / Tauri-Rust / Sync Server). Within a phase the tracks run concurrently after the schema migration files land; cross-track integration is verified in the phase's §6 Verification step.

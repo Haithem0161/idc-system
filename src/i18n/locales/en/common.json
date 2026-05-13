@@ -12,7 +12,10 @@
     "edit": "Edit",
     "back": "Back",
     "next": "Next",
-    "submit": "Submit"
+    "submit": "Submit",
+    "refresh": "Refresh",
+    "pending_sync": "Pending sync",
+    "synced": "Synced"
   },
   "nav": {
     "aria_label": "Primary",
@@ -53,7 +56,22 @@
   },
   "a11y": {
     "skip_to_content": "Skip to content",
-    "breadcrumbs": "Breadcrumbs"
+    "breadcrumbs": "Breadcrumbs",
+    "icons": {
+      "close": "Close",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "search": "Search",
+      "filter": "Filter",
+      "sort_asc": "Sort ascending",
+      "sort_desc": "Sort descending",
+      "print": "Print",
+      "void": "Void",
+      "edit": "Edit",
+      "delete": "Delete",
+      "retry": "Retry",
+      "refresh": "Refresh"
+    }
   },
   "language": {
     "toggle_aria": "Toggle language",
@@ -68,7 +86,11 @@
       "offline": "Offline",
       "error": "Sync error"
     },
-    "pending_aria": "Pending operations"
+    "pending_aria": "Pending operations",
+    "pill": {
+      "tooltip_view_conflicts": "View parked conflicts",
+      "aria_view_conflicts": "Open conflict resolver"
+    }
   },
   "status": {
     "build": "Build",

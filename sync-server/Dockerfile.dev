@@ -1,0 +1,20 @@
+FROM node:22-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache postgresql-client \
+    && corepack enable \
+    && corepack prepare pnpm@latest --activate
+
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm prisma generate
+RUN pnpm build:ts
+
+EXPOSE 3161
+
+# Phase-09 §5 (Docker / sync-server). Schema sync on every container start so
+# no manual `docker exec` is needed after `prisma/schema.prisma` edits.
+CMD ["sh", "-c", "pnpm prisma db push --accept-data-loss && psql \"$DATABASE_URL\" -f prisma/init-custom-sql.sql && pnpm exec fastify start -a 0.0.0.0 -p 3161 -l info dist/app/app.js"]

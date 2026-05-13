@@ -1,17 +1,19 @@
+import type { SyncEntityStore } from '../../../sync/domain/sync-store'
 import type {
-  MemorySyncStore,
   VisitSyncRecord,
   OperatorShiftSyncRecord,
 } from '../../../sync/infrastructure/memory/store'
 
 /**
- * Reports query service backed by the shared `MemorySyncStore`. Phase-7
- * v1 exposes `/reports/visits` and `/reports/daily-close/:date`. Doctor /
- * operator earnings + dashboard KPIs serve from the client today (§7.16);
- * Horizon-1 will add server-side endpoints for them.
+ * Reports query service.
+ *
+ * Phase-7 v1 exposes `/reports/visits` and `/reports/daily-close/:date`.
+ * Phase-09 follow-up: the service now reads via `SyncEntityStore`, so
+ * production runs against Prisma and tests run against the memory store —
+ * a single in-memory rollup path on top of either backend.
  */
 export class ReportsService {
-  constructor (private readonly store: MemorySyncStore) {}
+  constructor (private readonly store: SyncEntityStore) {}
 
   /**
    * Visits report -- §3 Server + §7.24. Filters by tenant + status set +
@@ -19,7 +21,8 @@ export class ReportsService {
    * report. Supports row or grouped responses depending on `groupBy`.
    */
   async visits (params: VisitsReportParams): Promise<VisitsReportResponse> {
-    const matches = this.matchedVisits(params)
+    const visits = await this.store.listAllVisits(params.tenantId)
+    const matches = filterVisits(visits, params)
     const totals = sumTotals(matches)
     if (!params.groupBy || params.groupBy === 'none') {
       const rows = matches
@@ -44,18 +47,21 @@ export class ReportsService {
     const [from, to] = utcWindowForLocalDay(date, tzOffsetMinutes)
     const fromIso = from.toISOString()
     const toIso = to.toISOString()
-    const matched = [...this.store.visits.values()].filter((v) =>
-      v.entity_id === tenantId
-      && (v.deleted_at ?? null) == null
-      && v.status === 'locked'
+
+    const [visits, adjustments, shifts] = await Promise.all([
+      this.store.listAllVisits(tenantId),
+      this.store.listAllInventoryAdjustments(tenantId),
+      this.store.listAllOperatorShifts(tenantId),
+    ])
+
+    const matched = visits.filter((v) =>
+      v.status === 'locked'
       && v.locked_at != null
       && v.locked_at >= fromIso
       && v.locked_at < toIso
     )
-    const voidedMatched = [...this.store.visits.values()].filter((v) =>
-      v.entity_id === tenantId
-      && (v.deleted_at ?? null) == null
-      && v.status === 'voided'
+    const voidedMatched = visits.filter((v) =>
+      v.status === 'voided'
       && v.locked_at != null
       && v.locked_at >= fromIso
       && v.locked_at < toIso
@@ -67,9 +73,7 @@ export class ReportsService {
 
     // Inventory consumption: SUM(-delta) for consume_visit rows in window.
     let inv = 0
-    for (const adj of this.store.inventoryAdjustments.values()) {
-      if (adj.entity_id !== tenantId) continue
-      if ((adj.deleted_at ?? null) != null) continue
+    for (const adj of adjustments) {
       if (adj.reason !== 'consume_visit') continue
       if (adj.created_at < fromIso || adj.created_at >= toIso) continue
       inv += -adj.delta
@@ -94,13 +98,7 @@ export class ReportsService {
     const per_operator = aggregateBy(matched, (v) => v.operator_id ?? '', (rows) => {
       const first = rows[0]
       // Hours from operator_shifts overlapping the window.
-      const millis = sumShiftMillis(
-        this.store.operatorShifts,
-        tenantId,
-        first.operator_id ?? '',
-        from,
-        to
-      )
+      const millis = sumShiftMillis(shifts, first.operator_id ?? '', from, to)
       return {
         operator_id: first.operator_id ?? '',
         name: first.operator_name_snapshot ?? '',
@@ -142,37 +140,35 @@ export class ReportsService {
       generated_at: new Date().toISOString(),
     }
   }
+}
 
-  private matchedVisits (params: VisitsReportParams): VisitSyncRecord[] {
-    const includeStatuses = params.statuses && params.statuses.length > 0
-      ? new Set(params.statuses)
-      : (params.includeVoided ? new Set(['locked', 'voided']) : new Set(['locked']))
-    return [...this.store.visits.values()].filter((v) => {
-      if (v.entity_id !== params.tenantId) return false
-      if ((v.deleted_at ?? null) != null) return false
-      if (!includeStatuses.has(v.status)) return false
-      if (v.locked_at == null) return false
-      if (v.locked_at < params.from || v.locked_at >= params.to) return false
-      if (params.checkTypeIds && params.checkTypeIds.length > 0 &&
-          !params.checkTypeIds.includes(v.check_type_id)) return false
-      if (params.subtypeIds && params.subtypeIds.length > 0 &&
-          (v.check_subtype_id == null || !params.subtypeIds.includes(v.check_subtype_id))) return false
-      if (params.doctorIds && params.doctorIds.length > 0) {
-        const allow = v.doctor_id != null && params.doctorIds.includes(v.doctor_id)
-        const houseHit = params.includeHouse === true && v.doctor_id == null
-        if (!allow && !houseHit) return false
-      } else if (params.includeHouse === false && v.doctor_id == null) {
-        return false
-      }
-      if (params.operatorIds && params.operatorIds.length > 0 &&
-          (v.operator_id == null || !params.operatorIds.includes(v.operator_id))) return false
-      if (params.dye === 'y' && !v.dye) return false
-      if (params.dye === 'n' && v.dye) return false
-      if (params.report === 'y' && !v.report) return false
-      if (params.report === 'n' && v.report) return false
-      return true
-    })
-  }
+function filterVisits (visits: VisitSyncRecord[], params: VisitsReportParams): VisitSyncRecord[] {
+  const includeStatuses = params.statuses && params.statuses.length > 0
+    ? new Set(params.statuses)
+    : (params.includeVoided ? new Set(['locked', 'voided']) : new Set(['locked']))
+  return visits.filter((v) => {
+    if (!includeStatuses.has(v.status)) return false
+    if (v.locked_at == null) return false
+    if (v.locked_at < params.from || v.locked_at >= params.to) return false
+    if (params.checkTypeIds && params.checkTypeIds.length > 0 &&
+        !params.checkTypeIds.includes(v.check_type_id)) return false
+    if (params.subtypeIds && params.subtypeIds.length > 0 &&
+        (v.check_subtype_id == null || !params.subtypeIds.includes(v.check_subtype_id))) return false
+    if (params.doctorIds && params.doctorIds.length > 0) {
+      const allow = v.doctor_id != null && params.doctorIds.includes(v.doctor_id)
+      const houseHit = params.includeHouse === true && v.doctor_id == null
+      if (!allow && !houseHit) return false
+    } else if (params.includeHouse === false && v.doctor_id == null) {
+      return false
+    }
+    if (params.operatorIds && params.operatorIds.length > 0 &&
+        (v.operator_id == null || !params.operatorIds.includes(v.operator_id))) return false
+    if (params.dye === 'y' && !v.dye) return false
+    if (params.dye === 'n' && v.dye) return false
+    if (params.report === 'y' && !v.report) return false
+    if (params.report === 'n' && v.report) return false
+    return true
+  })
 }
 
 export interface VisitsReportParams {
@@ -414,17 +410,14 @@ function formatOffset (mins: number): string {
 }
 
 function sumShiftMillis (
-  shifts: Map<string, OperatorShiftSyncRecord>,
-  tenantId: string,
+  shifts: OperatorShiftSyncRecord[],
   operatorId: string,
   from: Date,
   to: Date
 ): number {
   let total = 0
-  for (const s of shifts.values()) {
-    if (s.entity_id !== tenantId) continue
+  for (const s of shifts) {
     if (s.operator_id !== operatorId) continue
-    if ((s.deleted_at ?? null) != null) continue
     const checkIn = new Date(s.check_in_at).getTime()
     const checkOut = s.check_out_at != null ? new Date(s.check_out_at).getTime() : to.getTime()
     if (checkOut <= from.getTime()) continue

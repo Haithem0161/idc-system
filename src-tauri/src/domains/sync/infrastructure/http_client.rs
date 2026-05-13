@@ -181,12 +181,14 @@ impl SyncHttpClient {
         &self,
         token: &str,
         op_id: &str,
+        resolve_op_id: &str,
         choice: &str,
         merged: Option<serde_json::Value>,
     ) -> AppResult<()> {
         #[derive(Serialize)]
         struct Body<'a> {
             choice: &'a str,
+            resolve_op_id: &'a str,
             #[serde(skip_serializing_if = "Option::is_none")]
             merged: Option<serde_json::Value>,
         }
@@ -197,7 +199,44 @@ impl SyncHttpClient {
             .bearer_auth(token)
             .header("X-Device-Id", &self.device_id)
             .header("X-App-Version", &self.app_version)
-            .json(&Body { choice, merged })
+            .json(&Body {
+                choice,
+                resolve_op_id,
+                merged,
+            })
+            .send()
+            .await
+            .map_err(AppError::from)?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::SessionExpired);
+        }
+        if status == reqwest::StatusCode::CONFLICT {
+            // Phase-08 §7.22: 409 ALREADY_RESOLVED with prior body.
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::Conflict(format!("ALREADY_RESOLVED: {body}")));
+        }
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::SyncUnavailable(format!(
+                "resolve {status}: {body}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn list_conflicts(&self, token: &str) -> AppResult<Vec<ServerConflict>> {
+        #[derive(Deserialize)]
+        struct Body {
+            conflicts: Vec<ServerConflict>,
+        }
+        let url = format!("{}/sync/conflicts", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .bearer_auth(token)
+            .header("X-Device-Id", &self.device_id)
+            .header("X-App-Version", &self.app_version)
             .send()
             .await
             .map_err(AppError::from)?;
@@ -208,11 +247,86 @@ impl SyncHttpClient {
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             return Err(AppError::SyncUnavailable(format!(
-                "resolve {status}: {body}"
+                "list_conflicts {status}: {body}"
             )));
         }
-        Ok(())
+        let body: Body = resp.json().await.map_err(AppError::from)?;
+        Ok(body.conflicts)
     }
+
+    pub async fn audit_query(
+        &self,
+        token: &str,
+        params: &AuditQueryParams,
+    ) -> AppResult<AuditQueryResponse> {
+        let mut url = reqwest::Url::parse(&format!("{}/audit/query", self.base_url))
+            .map_err(|e| AppError::Validation(e.to_string()))?;
+        {
+            let mut q = url.query_pairs_mut();
+            q.append_pair("from", &params.from);
+            q.append_pair("to", &params.to);
+            if let Some(actor) = &params.actor {
+                q.append_pair("actor", actor);
+            }
+            if let Some(action) = &params.action {
+                q.append_pair("action", action);
+            }
+            if let Some(entity) = &params.entity {
+                q.append_pair("entity", entity);
+            }
+            if let Some(prefix) = &params.entity_id_prefix {
+                q.append_pair("entity_id_prefix", prefix);
+            }
+            if let Some(text) = &params.text {
+                q.append_pair("text", text);
+            }
+            if let Some(cursor) = &params.cursor {
+                q.append_pair("cursor", cursor);
+            }
+            if let Some(limit) = params.limit {
+                q.append_pair("limit", &limit.to_string());
+            }
+        }
+        let resp = self
+            .client
+            .get(url)
+            .bearer_auth(token)
+            .header("X-Device-Id", &self.device_id)
+            .header("X-App-Version", &self.app_version)
+            .send()
+            .await
+            .map_err(AppError::from)?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::SessionExpired);
+        }
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::SyncUnavailable(format!(
+                "audit_query {status}: {body}"
+            )));
+        }
+        resp.json().await.map_err(AppError::from)
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct AuditQueryParams {
+    pub from: String,
+    pub to: String,
+    pub actor: Option<String>,
+    pub action: Option<String>,
+    pub entity: Option<String>,
+    pub entity_id_prefix: Option<String>,
+    pub text: Option<String>,
+    pub cursor: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuditQueryResponse {
+    pub rows: Vec<serde_json::Value>,
+    pub next_cursor: Option<String>,
 }
 
 /// Encode raw bytes to base64 for JSON transport.
