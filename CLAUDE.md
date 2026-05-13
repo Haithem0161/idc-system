@@ -151,6 +151,7 @@ Architecture details, patterns, and conventions live in `.claude/rules/`:
 - [`auth.md`](.claude/rules/auth.md) -- Offline-first JWT auth, token storage, refresh.
 - [`docker.md`](.claude/rules/docker.md) -- Docker rules for the sync-server stack.
 - [`dev-workflow.md`](.claude/rules/dev-workflow.md) -- The 10-step development loop.
+- [`testing.md`](.claude/rules/testing.md) -- Test plan structure, 5-layer pyramid, 8 edge categories, coverage gates, perf SLOs, snapshot rules, DoD.
 
 ## Subagent Rules
 
