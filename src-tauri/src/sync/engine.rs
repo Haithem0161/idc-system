@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::SqlitePool;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::time::{interval, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
@@ -137,10 +137,11 @@ pub struct SyncEngine {
 
 impl SyncEngine {
     /// Start the engine on a Tokio task. Returns a handle for command issuing
-    /// and a `CancellationToken` for graceful shutdown.
-    pub fn spawn(
+    /// and a `CancellationToken` for graceful shutdown. Generic over the
+    /// Tauri runtime so tests can drive it with `tauri::test::MockRuntime`.
+    pub fn spawn<R: Runtime>(
         config: SyncEngineConfig,
-        app: AppHandle,
+        app: AppHandle<R>,
         cancel: CancellationToken,
     ) -> SyncEngineHandle {
         let (tx, rx) = mpsc::channel::<Cmd>(64);
@@ -182,7 +183,12 @@ impl SyncEngine {
         handle
     }
 
-    async fn run(self, mut rx: mpsc::Receiver<Cmd>, app: AppHandle, cancel: CancellationToken) {
+    async fn run<R: Runtime>(
+        self,
+        mut rx: mpsc::Receiver<Cmd>,
+        app: AppHandle<R>,
+        cancel: CancellationToken,
+    ) {
         let mut push_tick = interval(PUSH_INTERVAL);
         push_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut pull_tick = interval(PULL_INTERVAL);
@@ -212,7 +218,7 @@ impl SyncEngine {
         info!("sync engine: stopped");
     }
 
-    async fn handle_cmd(&self, app: &AppHandle, cmd: Cmd) {
+    async fn handle_cmd<R: Runtime>(&self, app: &AppHandle<R>, cmd: Cmd) {
         match cmd {
             Cmd::TriggerPush => self.do_push(app).await,
             Cmd::TriggerPull => self.do_pull(app).await,
@@ -247,14 +253,14 @@ impl SyncEngine {
         self.http.lock().await.clone()
     }
 
-    async fn set_status(&self, app: &AppHandle, status: SyncStatus) {
+    async fn set_status<R: Runtime>(&self, app: &AppHandle<R>, status: SyncStatus) {
         *self.status.write().await = status;
         if let Err(e) = app.emit(STATUS_EVENT, status) {
             debug!(error = %e, "emit status failed");
         }
     }
 
-    async fn do_push(&self, app: &AppHandle) {
+    async fn do_push<R: Runtime>(&self, app: &AppHandle<R>) {
         let Some(http) = self.current_http().await else {
             self.set_status(app, SyncStatus::Offline).await;
             return;
@@ -296,7 +302,7 @@ impl SyncEngine {
         }
     }
 
-    async fn do_pull(&self, app: &AppHandle) {
+    async fn do_pull<R: Runtime>(&self, app: &AppHandle<R>) {
         let Some(http) = self.current_http().await else {
             self.set_status(app, SyncStatus::Offline).await;
             return;

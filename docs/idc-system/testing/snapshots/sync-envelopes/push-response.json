@@ -1,0 +1,15 @@
+{
+  "accepted": [
+    { "op_id": "01HZWAB000000000000000001", "status": "applied" }
+  ],
+  "conflicts": [
+    {
+      "op_id": "01HZWAB000000000000000003",
+      "entity": "audit_log",
+      "entity_id": "01HZWAB000000000000000004",
+      "server_payload": { "version": 2 },
+      "local_payload": { "version": 1 },
+      "reason": "AUDIT_IMMUTABLE"
+    }
+  ]
+}

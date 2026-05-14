@@ -56,4 +56,6 @@ jsonwebtoken = "9.3.1"
 sha2 = "0.10.9"
 
 [dev-dependencies]
+tauri = { version = "2.10.0", features = ["test"] }
 tempfile = "3.27.0"
+wiremock = "0.6.5"

@@ -40,3 +40,6 @@ sync-server/.sqlx/
 .env
 .env.local
 *.env.local
+
+coverage
+docs/idc-system/testing/fixtures/*

@@ -113,6 +113,44 @@ impl AppState {
         }
     }
 
+    /// Phase-01 §2.2 test-only constructor: builds a minimal AppState that
+    /// satisfies the sync IPC commands (db_pool + sync_engine + device_id +
+    /// app_version + sync_server_url) while leaving every later-phase
+    /// service as `None`. Production code MUST go through `new(cfg)`.
+    pub fn for_sync_tests(
+        db_pool: SqlitePool,
+        sync_engine: SyncEngineHandle,
+        device_id: String,
+        app_version: String,
+        sync_server_url: Option<String>,
+    ) -> Self {
+        Self {
+            db_pool: Some(db_pool),
+            sync_engine: Some(sync_engine),
+            auth_service: None,
+            user_service: None,
+            settings_service: None,
+            catalog_services: None,
+            shift_service: None,
+            patient_service: None,
+            visit_service: None,
+            inventory_adjustment_service: None,
+            reports_service: None,
+            audit_query_service: None,
+            audit_vacuum_job: None,
+            diagnostics_service: None,
+            user_repo: None,
+            user_context: RwLock::new(None),
+            settings_cache: RwLock::new(HashMap::new()),
+            locked: RwLock::new(false),
+            device_id,
+            app_version,
+            token: RwLock::new(None),
+            expires_at: RwLock::new(None),
+            sync_server_url: RwLock::new(sync_server_url),
+        }
+    }
+
     pub fn for_embedded() -> Self {
         Self {
             db_pool: None,

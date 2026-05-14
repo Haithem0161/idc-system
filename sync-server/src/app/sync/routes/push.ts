@@ -2,36 +2,7 @@ import { Type } from '@sinclair/typebox'
 import type { FastifyPluginAsync } from 'fastify'
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 
-const PushOpSchema = Type.Object({
-  op_id: Type.String({ minLength: 1 }),
-  entity: Type.String({ minLength: 1 }),
-  entity_id: Type.String({ minLength: 1 }),
-  op: Type.Literal('upsert'),
-  payload_b64: Type.String({ minLength: 1 }),
-})
-
-const PushBodySchema = Type.Object({
-  ops: Type.Array(PushOpSchema, { minItems: 1, maxItems: 200 }),
-})
-
-const PushResponseSchema = Type.Object({
-  accepted: Type.Array(
-    Type.Object({
-      op_id: Type.String(),
-      status: Type.Union([Type.Literal('applied'), Type.Literal('duplicate')]),
-    })
-  ),
-  conflicts: Type.Array(
-    Type.Object({
-      op_id: Type.String(),
-      entity: Type.String(),
-      entity_id: Type.String(),
-      server_payload: Type.Unknown(),
-      local_payload: Type.Unknown(),
-      reason: Type.String(),
-    })
-  ),
-})
+import { PushBodySchema, PushResponseSchema } from '../presentation/schemas/push.js'
 
 const ErrorRef = Type.Ref('ErrorResponse')
 

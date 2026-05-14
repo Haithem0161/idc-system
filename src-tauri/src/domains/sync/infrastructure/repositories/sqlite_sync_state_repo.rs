@@ -44,6 +44,19 @@ impl SyncStateRepo for SqliteSyncStateRepo {
         Ok(())
     }
 
+    async fn put_pull_cursor_in_tx(
+        &self,
+        tx: &mut crate::db::Tx<'_>,
+        cursor: &str,
+    ) -> AppResult<()> {
+        sqlx::query("UPDATE sync_state SET pull_cursor = ?, last_pulled_at = ? WHERE id = 1")
+            .bind(cursor)
+            .bind(Utc::now().to_rfc3339())
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
+    }
+
     async fn mark_pushed(&self) -> AppResult<()> {
         sqlx::query("UPDATE sync_state SET last_pushed_at = ? WHERE id = 1")
             .bind(Utc::now().to_rfc3339())

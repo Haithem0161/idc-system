@@ -71,7 +71,14 @@ pub async fn run_step(
 
     let mut tx = pool.begin().await.map_err(AppError::from)?;
     let applied = apply_changes(&mut tx, &resp.changes).await?;
-    state_repo.put_pull_cursor(&resp.next_cursor).await?;
+    // DEF-002 fix: cursor write must share the apply tx's connection,
+    // otherwise a real-world file SQLite deadlocks (tx holds the writer,
+    // a second connection blocks waiting for the lock). The single-tx
+    // path also satisfies phase-01 §4 pull-step 3's atomicity claim
+    // (apply + persist cursor in one SQLite tx).
+    state_repo
+        .put_pull_cursor_in_tx(&mut tx, &resp.next_cursor)
+        .await?;
     tx.commit().await.map_err(AppError::from)?;
 
     write_metric(

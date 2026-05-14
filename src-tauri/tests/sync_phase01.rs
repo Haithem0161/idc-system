@@ -188,3 +188,214 @@ async fn audit_writer_orders_audit_before_business_outbox() {
     assert!(batch.iter().any(|b| b.entity == "audit_log"));
     assert!(batch.iter().any(|b| b.entity == "user"));
 }
+
+// --- Phase-01 §2 additions (2026-05-13) ---------------------------------
+// These tests target invariants the test plan calls out under
+// §2.1 (Rust integration). Wiremock-backed engine scenarios are deferred --
+// the engine requires a Tauri AppHandle so the HTTP transport is tested
+// indirectly via SyncHttpClient in a follow-up session.
+
+struct FailingWrite;
+
+#[async_trait]
+impl BusinessWrite for FailingWrite {
+    async fn before(
+        &mut self,
+        _tx: &mut app_lib::db::Tx<'_>,
+    ) -> app_lib::error::AppResult<serde_json::Value> {
+        Ok(serde_json::json!({}))
+    }
+
+    async fn write(
+        &mut self,
+        _tx: &mut app_lib::db::Tx<'_>,
+    ) -> app_lib::error::AppResult<(serde_json::Value, Vec<OutboxOp>)> {
+        Err(app_lib::error::AppError::Internal(
+            "business write failed".into(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn audit_writer_rolls_back_audit_and_outbox_when_business_write_fails() {
+    // Phase-01 §2.1 invariant: when the business closure returns an error,
+    // the surrounding transaction rolls back -- no audit row, no outbox row.
+    let pool = fresh_pool().await;
+    let outbox_repo: Arc<dyn OutboxRepo> = Arc::new(SqliteOutboxRepo::new(pool.clone()));
+    let audit_repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
+    let writer = AuditWriter::new(audit_repo.clone(), outbox_repo.clone(), "dev-1");
+
+    let result = writer
+        .with_audit(
+            &pool,
+            Uuid::now_v7(),
+            AuditAction::Create,
+            "user",
+            "u1",
+            "tenant-x",
+            None,
+            FailingWrite,
+        )
+        .await;
+    assert!(result.is_err(), "with_audit should propagate the error");
+
+    let audits = audit_repo.list_by_tenant("tenant-x", 10, 0).await.unwrap();
+    assert!(
+        audits.is_empty(),
+        "no audit row should survive a failed business write"
+    );
+    let batch = outbox_repo.next_batch(10).await.unwrap();
+    assert!(
+        batch.is_empty(),
+        "no outbox row should survive a failed business write"
+    );
+}
+
+#[tokio::test]
+async fn audit_writer_persists_delta_with_only_changed_fields() {
+    // Phase-01 §2.1: compute_delta omits identical fields. Round-trip
+    // through the writer to verify the persisted audit row carries only the
+    // diff, not the full snapshots.
+    let pool = fresh_pool().await;
+    let outbox_repo: Arc<dyn OutboxRepo> = Arc::new(SqliteOutboxRepo::new(pool.clone()));
+    let audit_repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
+    let writer = AuditWriter::new(audit_repo.clone(), outbox_repo.clone(), "dev-1");
+
+    struct DiffWrite;
+    #[async_trait]
+    impl BusinessWrite for DiffWrite {
+        async fn before(
+            &mut self,
+            _tx: &mut app_lib::db::Tx<'_>,
+        ) -> app_lib::error::AppResult<serde_json::Value> {
+            Ok(serde_json::json!({ "a": 1, "b": 2, "c": 3 }))
+        }
+
+        async fn write(
+            &mut self,
+            _tx: &mut app_lib::db::Tx<'_>,
+        ) -> app_lib::error::AppResult<(serde_json::Value, Vec<OutboxOp>)> {
+            Ok((serde_json::json!({ "a": 1, "b": 99, "c": 3 }), vec![]))
+        }
+    }
+
+    writer
+        .with_audit(
+            &pool,
+            Uuid::now_v7(),
+            AuditAction::Update,
+            "user",
+            "u1",
+            "tenant-x",
+            None,
+            DiffWrite,
+        )
+        .await
+        .unwrap();
+
+    let audits = audit_repo.list_by_tenant("tenant-x", 10, 0).await.unwrap();
+    assert_eq!(audits.len(), 1);
+    let delta = audits[0].delta.as_object().expect("delta is an object");
+    assert!(!delta.contains_key("a"), "unchanged 'a' should be omitted");
+    assert!(!delta.contains_key("c"), "unchanged 'c' should be omitted");
+    assert_eq!(delta["b"]["from"], serde_json::json!(2));
+    assert_eq!(delta["b"]["to"], serde_json::json!(99));
+}
+
+#[tokio::test]
+async fn outbox_park_excludes_row_from_pending_count() {
+    // Phase-01 §2.1: pending_count must mirror the partial index -- parked
+    // rows do not count toward the queue depth surfaced in the SyncPill.
+    let pool = fresh_pool().await;
+    let repo = SqliteOutboxRepo::new(pool.clone());
+
+    let mut tx = pool.begin().await.unwrap();
+    let op_a = OutboxOp::new("audit_log", "row-a", b"a".to_vec());
+    let op_b = OutboxOp::new("audit_log", "row-b", b"b".to_vec());
+    repo.enqueue(&mut tx, &op_a).await.unwrap();
+    repo.enqueue(&mut tx, &op_b).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(repo.pending_count().await.unwrap(), 2);
+
+    repo.park(op_a.op_id).await.unwrap();
+    assert_eq!(
+        repo.pending_count().await.unwrap(),
+        1,
+        "parked row excluded from pending_count"
+    );
+
+    let batch = repo.next_batch(10).await.unwrap();
+    assert_eq!(batch.len(), 1);
+    assert_eq!(batch[0].entity_id, "row-b");
+}
+
+#[tokio::test]
+async fn outbox_failure_resurfaces_row_after_backoff_elapses() {
+    // Phase-01 §2.1 mirror of the existing skip test: once the backoff
+    // window passes, next_batch must return the row again.
+    let pool = fresh_pool().await;
+    let repo = SqliteOutboxRepo::new(pool.clone());
+
+    let mut tx = pool.begin().await.unwrap();
+    let op = OutboxOp::new("audit_log", "row-1", b"x".to_vec());
+    repo.enqueue(&mut tx, &op).await.unwrap();
+    tx.commit().await.unwrap();
+
+    // Backoff of 0 seconds resolves to "ready now or microseconds from now"
+    // -- by the time next_batch runs, the comparison <= NOW(...) succeeds.
+    repo.mark_failure(op.op_id, "transient", 0).await.unwrap();
+    let batch = repo.next_batch(10).await.unwrap();
+    assert_eq!(batch.len(), 1, "row must be eligible after backoff elapses");
+    assert_eq!(batch[0].attempts, 1, "attempts must increment on failure");
+    assert_eq!(batch[0].last_error.as_deref(), Some("transient"));
+}
+
+#[tokio::test]
+async fn audit_writer_emits_audit_outbox_row_with_audit_log_entity_name() {
+    // Phase-01 §7.7 (additive-only audit_log invariant): the audit row's
+    // own outbox push targets the `audit_log` entity, and the persisted
+    // outbox payload deserializes back into an AuditEntry that matches the
+    // appended row by id. This pins the wire format the engine ships.
+    let pool = fresh_pool().await;
+    let outbox_repo: Arc<dyn OutboxRepo> = Arc::new(SqliteOutboxRepo::new(pool.clone()));
+    let audit_repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
+    let writer = AuditWriter::new(audit_repo.clone(), outbox_repo.clone(), "dev-1");
+
+    let stub = StubWrite {
+        after: serde_json::json!({ "name": "Carol" }),
+        outbox: vec![],
+    };
+
+    writer
+        .with_audit(
+            &pool,
+            Uuid::now_v7(),
+            AuditAction::Create,
+            "user",
+            "u1",
+            "tenant-x",
+            None,
+            stub,
+        )
+        .await
+        .unwrap();
+
+    let batch = outbox_repo.next_batch(10).await.unwrap();
+    assert_eq!(batch.len(), 1, "only the audit_log outbox row is enqueued");
+    assert_eq!(batch[0].entity, "audit_log");
+    assert_eq!(batch[0].op, OutboxAction::Upsert);
+
+    let audits = audit_repo.list_by_tenant("tenant-x", 10, 0).await.unwrap();
+    assert_eq!(audits.len(), 1);
+    assert_eq!(
+        batch[0].entity_id,
+        audits[0].id.to_string(),
+        "outbox row.entity_id must reference the audit row id"
+    );
+
+    let decoded: AuditEntry =
+        rmp_serde::from_slice(&batch[0].payload).expect("payload decodes as AuditEntry");
+    assert_eq!(decoded.id, audits[0].id);
+    assert_eq!(decoded.entity, "user");
+    assert_eq!(decoded.entity_id, "u1");
+}

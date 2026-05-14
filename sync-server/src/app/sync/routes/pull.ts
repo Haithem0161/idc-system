@@ -2,23 +2,7 @@ import { Type } from '@sinclair/typebox'
 import type { FastifyPluginAsync } from 'fastify'
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 
-const PullQuerySchema = Type.Object({
-  since: Type.Optional(Type.String()),
-  limit: Type.Optional(Type.Number({ minimum: 1, maximum: 500 })),
-})
-
-const PullResponseSchema = Type.Object({
-  changes: Type.Array(
-    Type.Object({
-      entity: Type.String(),
-      entity_id: Type.String(),
-      payload: Type.Record(Type.String(), Type.Unknown()),
-      updated_at: Type.String(),
-      version: Type.Number(),
-    })
-  ),
-  next_cursor: Type.String(),
-})
+import { PullQuerySchema, PullResponseSchema } from '../presentation/schemas/pull.js'
 
 const ErrorRef = Type.Ref('ErrorResponse')
 

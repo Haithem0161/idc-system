@@ -14,6 +14,17 @@ pub trait SyncStateRepo: Send + Sync {
     /// in the engine, not the repo).
     async fn put_pull_cursor(&self, cursor: &str) -> AppResult<()>;
 
+    /// Phase-01 §4 pull-step 3 + DEF-002 fix: persist the pull cursor on
+    /// the SAME connection as the caller's apply transaction. Required by
+    /// the puller, which holds a write tx and would deadlock against a
+    /// second-connection write on a real-world file SQLite. The standalone
+    /// `put_pull_cursor` remains for non-transactional callers.
+    async fn put_pull_cursor_in_tx(
+        &self,
+        tx: &mut crate::db::Tx<'_>,
+        cursor: &str,
+    ) -> AppResult<()>;
+
     /// Stamp the last pushed-at moment.
     async fn mark_pushed(&self) -> AppResult<()>;
 

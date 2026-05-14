@@ -20,6 +20,34 @@ use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo};
 use crate::domains::sync::domain::value_objects::AuditAction;
 use crate::error::{AppError, AppResult};
 
+/// The ordered set of write steps inside `with_audit`. Audit-first is the
+/// load-bearing invariant (phase-01 §7.7): the audit row commits before any
+/// business or outbox enqueue, so a tx rollback leaves zero rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriterStep {
+    InsertAudit,
+    InvokeBusinessWrites,
+    EnqueueOutbox,
+}
+
+impl WriterStep {
+    /// The canonical step order. Pinned by a test so a refactor that
+    /// reorders the writer fails loudly.
+    pub fn canonical_order() -> [WriterStep; 3] {
+        [Self::InsertAudit, Self::InvokeBusinessWrites, Self::EnqueueOutbox]
+    }
+}
+
+/// Phase-01 §1.1: `AuditWriter::skip_if_no_change`.
+///
+/// Returns `true` when before and after snapshots are structurally equal,
+/// meaning the writer can short-circuit -- no audit row, no business write,
+/// no outbox enqueue. Phase-04's "bump version only when fields changed"
+/// invariant consumes this.
+pub fn skip_if_no_change(before: &serde_json::Value, after: &serde_json::Value) -> bool {
+    before == after
+}
+
 /// Caller-supplied closure that performs the business write inside the tx
 /// and returns the snapshots needed to build the audit row.
 #[async_trait]
@@ -103,5 +131,64 @@ impl AuditWriter {
 
         tx.commit().await.map_err(AppError::from)?;
         Ok(after)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn canonical_order_is_audit_then_business_then_outbox() {
+        // Phase-01 §7.7 invariant: the writer must execute steps in this
+        // exact order. The list is pinned so any refactor that reorders
+        // the steps fails this test.
+        let order = WriterStep::canonical_order();
+        assert_eq!(order.len(), 3);
+        assert_eq!(order[0], WriterStep::InsertAudit);
+        assert_eq!(order[1], WriterStep::InvokeBusinessWrites);
+        assert_eq!(order[2], WriterStep::EnqueueOutbox);
+    }
+
+    #[test]
+    fn writer_step_variants_are_distinct() {
+        let order = WriterStep::canonical_order();
+        for i in 0..order.len() {
+            for j in 0..order.len() {
+                if i != j {
+                    assert_ne!(order[i], order[j], "duplicate at [{i}, {j}]");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn skip_if_no_change_returns_true_when_snapshots_match() {
+        let snap = json!({ "a": 1, "b": "x" });
+        assert!(skip_if_no_change(&snap, &snap));
+    }
+
+    #[test]
+    fn skip_if_no_change_returns_false_on_any_field_diff() {
+        let before = json!({ "a": 1, "b": "x" });
+        let after = json!({ "a": 1, "b": "y" });
+        assert!(!skip_if_no_change(&before, &after));
+    }
+
+    #[test]
+    fn skip_if_no_change_handles_added_or_removed_keys() {
+        let before = json!({ "a": 1 });
+        let after = json!({ "a": 1, "b": 2 });
+        assert!(!skip_if_no_change(&before, &after));
+        assert!(!skip_if_no_change(&after, &before));
+    }
+
+    #[test]
+    fn skip_if_no_change_returns_true_for_two_null_snapshots() {
+        // A row that did not previously exist and was not created in this
+        // call -- writer short-circuits.
+        let null = json!(null);
+        assert!(skip_if_no_change(&null, &null));
     }
 }

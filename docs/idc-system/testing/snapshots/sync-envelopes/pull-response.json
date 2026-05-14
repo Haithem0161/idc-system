@@ -1,0 +1,14 @@
+{
+  "changes": [
+    {
+      "entity": "audit_log",
+      "entity_id": "01HZWAB000000000000000005",
+      "payload": {
+        "delta": { "status": { "from": null, "to": "created" } }
+      },
+      "updated_at": "2026-05-13T10:00:00Z",
+      "version": 1
+    }
+  ],
+  "next_cursor": "2026-05-13T10:00:00Z|01HZWAB000000000000000005"
+}

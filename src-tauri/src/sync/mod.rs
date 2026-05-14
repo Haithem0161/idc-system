@@ -11,4 +11,4 @@ pub mod outbox;
 pub mod puller;
 pub mod pusher;
 
-pub use engine::{SyncEngine, SyncEngineHandle};
+pub use engine::{SyncEngine, SyncEngineConfig, SyncEngineHandle};
