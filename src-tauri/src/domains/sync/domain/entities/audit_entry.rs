@@ -56,7 +56,11 @@ impl AuditEntry {
             ));
         }
         if matches!(input.action, AuditAction::Update)
-            && input.delta.as_object().map(|m| m.is_empty()).unwrap_or(true)
+            && input
+                .delta
+                .as_object()
+                .map(|m| m.is_empty())
+                .unwrap_or(true)
         {
             return Err(AppError::Validation(
                 "audit: update delta must contain at least one changed field".into(),
@@ -227,8 +231,7 @@ mod tests {
         let mut input = sample_input();
         input.action = AuditAction::SoftDelete;
         input.delta = json!({});
-        let audit =
-            AuditEntry::try_new(input).expect("soft_delete with empty delta is valid");
+        let audit = AuditEntry::try_new(input).expect("soft_delete with empty delta is valid");
         assert_eq!(audit.action, AuditAction::SoftDelete);
     }
 }

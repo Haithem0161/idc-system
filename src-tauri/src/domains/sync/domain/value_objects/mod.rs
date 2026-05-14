@@ -118,7 +118,11 @@ pub struct IllegalTransition {
 
 impl std::fmt::Display for IllegalTransition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "illegal sync status transition: {} -> {}", self.from, self.to)
+        write!(
+            f,
+            "illegal sync status transition: {} -> {}",
+            self.from, self.to
+        )
     }
 }
 
@@ -364,9 +368,6 @@ mod tests {
             .expect_err("Offline -> Pushing must be rejected");
         assert_eq!(err.from, SyncStatus::Offline);
         assert_eq!(err.to, SyncStatus::Pushing);
-        assert!(
-            err.to_string().contains("offline -> pushing"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("offline -> pushing"), "got: {err}");
     }
 }

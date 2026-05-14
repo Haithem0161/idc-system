@@ -27,8 +27,8 @@ use std::time::Duration;
 use app_lib::db::migrations;
 use app_lib::domains::sync::commands::{
     config_get_sync_server_url_impl, config_set_sync_server_url_impl, device_info_impl,
-    sync_list_conflicts_impl, sync_outbox_count_impl, sync_resolve_conflict_impl,
-    sync_status_impl, sync_trigger_pull_impl, sync_trigger_push_impl, ResolveConflictArgs,
+    sync_list_conflicts_impl, sync_outbox_count_impl, sync_resolve_conflict_impl, sync_status_impl,
+    sync_trigger_pull_impl, sync_trigger_push_impl, ResolveConflictArgs,
 };
 use app_lib::domains::sync::domain::entities::OutboxOp;
 use app_lib::domains::sync::domain::repositories::{AuditRepo, OutboxRepo, SyncStateRepo};
@@ -154,8 +154,12 @@ async fn mariam_superadmin_phase01_day_script() {
     // Even with the (unreachable) server now configured, the trigger
     // commands return Ok immediately; the engine surfaces network state
     // through sync:status events, not via the trigger return value.
-    sync_trigger_push_impl(&state).await.expect("trigger push ok");
-    sync_trigger_pull_impl(&state).await.expect("trigger pull ok");
+    sync_trigger_push_impl(&state)
+        .await
+        .expect("trigger push ok");
+    sync_trigger_pull_impl(&state)
+        .await
+        .expect("trigger pull ok");
 
     // --- Step 9: enqueue a phase-2-style audit row directly -----------
     let mut tx = pool.begin().await.unwrap();

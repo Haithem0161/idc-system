@@ -329,3 +329,79 @@ impl BusinessWrite for UpdateUserWrite {
         Ok((after, vec![outbox]))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn require_superadmin_accepts_superadmin_role() {
+        assert!(UserService::require_superadmin(UserRole::Superadmin).is_ok());
+    }
+
+    #[test]
+    fn require_superadmin_rejects_receptionist() {
+        let err = UserService::require_superadmin(UserRole::Receptionist).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn require_superadmin_rejects_accountant() {
+        let err = UserService::require_superadmin(UserRole::Accountant).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn to_push_payload_omits_password_hash_when_flag_false() {
+        let user = User::try_new(
+            "a@b.io",
+            "n",
+            UserRole::Receptionist,
+            "$argon2id$v=19$LOCAL_HASH".into(),
+            "tenant-1".into(),
+            None,
+        )
+        .unwrap();
+        let payload = to_push_payload(&user, false);
+        assert!(payload.password_hash.is_none());
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(!json.contains("LOCAL_HASH"));
+    }
+
+    #[test]
+    fn to_push_payload_includes_password_hash_when_flag_true() {
+        let user = User::try_new(
+            "a@b.io",
+            "n",
+            UserRole::Receptionist,
+            "$argon2id$v=19$LOCAL_HASH".into(),
+            "tenant-1".into(),
+            None,
+        )
+        .unwrap();
+        let payload = to_push_payload(&user, true);
+        assert_eq!(
+            payload.password_hash.as_deref(),
+            Some("$argon2id$v=19$LOCAL_HASH")
+        );
+    }
+
+    #[test]
+    fn to_push_payload_preserves_version_email_role_and_active_state() {
+        let user = User::try_new(
+            "A@B.IO",
+            "Mariam",
+            UserRole::Superadmin,
+            "$h".into(),
+            "tenant-1".into(),
+            Some("dev-1".into()),
+        )
+        .unwrap();
+        let payload = to_push_payload(&user, false);
+        assert_eq!(payload.email, "a@b.io");
+        assert_eq!(payload.role, "superadmin");
+        assert!(payload.is_active);
+        assert_eq!(payload.version, 1);
+        assert_eq!(payload.entity_id, "tenant-1");
+    }
+}

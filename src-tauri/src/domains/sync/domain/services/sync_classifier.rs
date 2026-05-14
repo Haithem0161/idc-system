@@ -63,10 +63,7 @@ pub fn classify_push_response(
 
 /// Phase-01 §7.17 narrow helper: returns `Some(op_id)` when the conflict
 /// envelope names this outbox row, otherwise `None`.
-pub fn should_park_outbox_row(
-    server_conflicts: &[ServerConflict],
-    op_id: Uuid,
-) -> Option<Uuid> {
+pub fn should_park_outbox_row(server_conflicts: &[ServerConflict], op_id: Uuid) -> Option<Uuid> {
     server_conflicts
         .iter()
         .any(|c| c.op_id == op_id.to_string())
@@ -252,8 +249,14 @@ mod tests {
     fn handle_unsupported_op_rejects_delete_in_v1() {
         // Phase-01 §7.15: `delete` reserved for Horizon-2 PII purge; never
         // valid on the v1 wire.
-        assert_eq!(handle_unsupported_op("delete"), Some(PushAction::UnsupportedOp));
-        assert_eq!(handle_unsupported_op("noop"), Some(PushAction::UnsupportedOp));
+        assert_eq!(
+            handle_unsupported_op("delete"),
+            Some(PushAction::UnsupportedOp)
+        );
+        assert_eq!(
+            handle_unsupported_op("noop"),
+            Some(PushAction::UnsupportedOp)
+        );
     }
 
     #[test]

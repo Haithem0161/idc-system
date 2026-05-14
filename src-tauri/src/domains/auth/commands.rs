@@ -57,13 +57,9 @@ pub struct LoginArgs {
     pub entity_id_hint: Option<String>,
 }
 
-#[tauri::command]
-#[instrument(skip(state, app, args))]
-pub async fn auth_login(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    args: LoginArgs,
-) -> AppResult<LoginResult> {
+// --- testable `_impl` helpers -------------------------------------------
+
+pub async fn auth_login_impl(state: &AppState, args: LoginArgs) -> AppResult<LoginResult> {
     let svc = state
         .auth_service()
         .ok_or_else(|| AppError::Configuration("auth service unavailable".into()))?;
@@ -93,8 +89,6 @@ pub async fn auth_login(
         state.set_current_token(token, exp.timestamp()).await;
     }
 
-    let _ = app.emit("auth:changed", &result.mode);
-
     Ok(LoginResult {
         mode: result.mode,
         user: UserResponse {
@@ -112,25 +106,17 @@ pub async fn auth_login(
     })
 }
 
-#[tauri::command]
-#[instrument(skip(state, app))]
-pub async fn auth_logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+pub async fn auth_logout_impl(state: &AppState) -> AppResult<()> {
     state.clear_auth().await;
-    let _ = app.emit("auth:changed", "logout");
     Ok(())
 }
 
-#[tauri::command]
-#[instrument(skip(state))]
-pub async fn auth_current_user(state: State<'_, AppState>) -> AppResult<Option<UserContext>> {
+pub async fn auth_current_user_impl(state: &AppState) -> AppResult<Option<UserContext>> {
     Ok(state.get_current_user().await)
 }
 
-#[tauri::command]
-#[instrument(skip(state, app))]
-pub async fn auth_lock(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+pub async fn auth_lock_impl(state: &AppState) -> AppResult<()> {
     state.set_locked(true).await;
-    let _ = app.emit("auth:lock", ());
     Ok(())
 }
 
@@ -139,13 +125,7 @@ pub struct UnlockArgs {
     pub password: String,
 }
 
-#[tauri::command]
-#[instrument(skip(state, app, args))]
-pub async fn auth_unlock(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    args: UnlockArgs,
-) -> AppResult<()> {
+pub async fn auth_unlock_impl(state: &AppState, args: UnlockArgs) -> AppResult<()> {
     let ctx = state
         .get_current_user()
         .await
@@ -156,6 +136,57 @@ pub async fn auth_unlock(
         .ok_or_else(|| AppError::Configuration("auth service unavailable".into()))?;
     svc.verify_user_password(user_id, &args.password).await?;
     state.set_locked(false).await;
+    Ok(())
+}
+
+pub async fn auth_is_locked_impl(state: &AppState) -> AppResult<bool> {
+    Ok(state.is_locked().await)
+}
+
+// --- Tauri command wrappers --------------------------------------------
+
+#[tauri::command]
+#[instrument(skip(state, app, args))]
+pub async fn auth_login(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    args: LoginArgs,
+) -> AppResult<LoginResult> {
+    let result = auth_login_impl(&state, args).await?;
+    let _ = app.emit("auth:changed", &result.mode);
+    Ok(result)
+}
+
+#[tauri::command]
+#[instrument(skip(state, app))]
+pub async fn auth_logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    auth_logout_impl(&state).await?;
+    let _ = app.emit("auth:changed", "logout");
+    Ok(())
+}
+
+#[tauri::command]
+#[instrument(skip(state))]
+pub async fn auth_current_user(state: State<'_, AppState>) -> AppResult<Option<UserContext>> {
+    auth_current_user_impl(&state).await
+}
+
+#[tauri::command]
+#[instrument(skip(state, app))]
+pub async fn auth_lock(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    auth_lock_impl(&state).await?;
+    let _ = app.emit("auth:lock", ());
+    Ok(())
+}
+
+#[tauri::command]
+#[instrument(skip(state, app, args))]
+pub async fn auth_unlock(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    args: UnlockArgs,
+) -> AppResult<()> {
+    auth_unlock_impl(&state, args).await?;
     let _ = app.emit("auth:unlock", ());
     Ok(())
 }
@@ -163,7 +194,7 @@ pub async fn auth_unlock(
 #[tauri::command]
 #[instrument(skip(state))]
 pub async fn auth_is_locked(state: State<'_, AppState>) -> AppResult<bool> {
-    Ok(state.is_locked().await)
+    auth_is_locked_impl(&state).await
 }
 
 // ---- Users CRUD ---------------------------------------------------------
@@ -174,10 +205,8 @@ pub struct UsersListArgs {
     pub include_inactive: bool,
 }
 
-#[tauri::command]
-#[instrument(skip(state))]
-pub async fn users_list(
-    state: State<'_, AppState>,
+pub async fn users_list_impl(
+    state: &AppState,
     args: UsersListArgs,
 ) -> AppResult<Vec<UserResponse>> {
     let repo = state
@@ -192,14 +221,21 @@ pub async fn users_list(
     Ok(users.into_iter().map(UserResponse::from).collect())
 }
 
+#[tauri::command]
+#[instrument(skip(state))]
+pub async fn users_list(
+    state: State<'_, AppState>,
+    args: UsersListArgs,
+) -> AppResult<Vec<UserResponse>> {
+    users_list_impl(&state, args).await
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UserIdArgs {
     pub id: String,
 }
 
-#[tauri::command]
-#[instrument(skip(state))]
-pub async fn users_get(state: State<'_, AppState>, args: UserIdArgs) -> AppResult<UserResponse> {
+pub async fn users_get_impl(state: &AppState, args: UserIdArgs) -> AppResult<UserResponse> {
     let id = Uuid::parse_str(&args.id)?;
     let repo = state
         .user_repo()
@@ -211,6 +247,12 @@ pub async fn users_get(state: State<'_, AppState>, args: UserIdArgs) -> AppResul
     Ok(user.into())
 }
 
+#[tauri::command]
+#[instrument(skip(state))]
+pub async fn users_get(state: State<'_, AppState>, args: UserIdArgs) -> AppResult<UserResponse> {
+    users_get_impl(&state, args).await
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UserCreateArgs {
     pub email: String,
@@ -219,7 +261,7 @@ pub struct UserCreateArgs {
     pub password: String,
 }
 
-async fn current_actor(state: &AppState) -> AppResult<(Uuid, UserRole, String)> {
+pub async fn current_actor(state: &AppState) -> AppResult<(Uuid, UserRole, String)> {
     let ctx = state
         .get_current_user()
         .await
@@ -230,13 +272,8 @@ async fn current_actor(state: &AppState) -> AppResult<(Uuid, UserRole, String)> 
     Ok((id, role, ctx.entity_id))
 }
 
-#[tauri::command]
-#[instrument(skip(state, args))]
-pub async fn users_create(
-    state: State<'_, AppState>,
-    args: UserCreateArgs,
-) -> AppResult<UserResponse> {
-    let (actor_id, role, entity_id) = current_actor(&state).await?;
+pub async fn users_create_impl(state: &AppState, args: UserCreateArgs) -> AppResult<UserResponse> {
+    let (actor_id, role, entity_id) = current_actor(state).await?;
     let svc = state
         .user_service()
         .ok_or_else(|| AppError::Configuration("user service unavailable".into()))?;
@@ -256,6 +293,15 @@ pub async fn users_create(
     Ok(user.into())
 }
 
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn users_create(
+    state: State<'_, AppState>,
+    args: UserCreateArgs,
+) -> AppResult<UserResponse> {
+    users_create_impl(&state, args).await
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UserUpdateArgs {
     pub id: String,
@@ -267,13 +313,8 @@ pub struct UserUpdateArgs {
     pub role: Option<UserRole>,
 }
 
-#[tauri::command]
-#[instrument(skip(state, args))]
-pub async fn users_update(
-    state: State<'_, AppState>,
-    args: UserUpdateArgs,
-) -> AppResult<UserResponse> {
-    let (actor_id, role, _) = current_actor(&state).await?;
+pub async fn users_update_impl(state: &AppState, args: UserUpdateArgs) -> AppResult<UserResponse> {
+    let (actor_id, role, _) = current_actor(state).await?;
     let target_id = Uuid::parse_str(&args.id)?;
     let svc = state
         .user_service()
@@ -295,13 +336,26 @@ pub async fn users_update(
 
 #[tauri::command]
 #[instrument(skip(state, args))]
-pub async fn users_soft_delete(state: State<'_, AppState>, args: UserIdArgs) -> AppResult<()> {
-    let (actor_id, role, _) = current_actor(&state).await?;
+pub async fn users_update(
+    state: State<'_, AppState>,
+    args: UserUpdateArgs,
+) -> AppResult<UserResponse> {
+    users_update_impl(&state, args).await
+}
+
+pub async fn users_soft_delete_impl(state: &AppState, args: UserIdArgs) -> AppResult<()> {
+    let (actor_id, role, _) = current_actor(state).await?;
     let target_id = Uuid::parse_str(&args.id)?;
     let svc = state
         .user_service()
         .ok_or_else(|| AppError::Configuration("user service unavailable".into()))?;
     svc.soft_delete(actor_id, role, target_id).await
+}
+
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn users_soft_delete(state: State<'_, AppState>, args: UserIdArgs) -> AppResult<()> {
+    users_soft_delete_impl(&state, args).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -310,19 +364,26 @@ pub struct UserResetPasswordArgs {
     pub new_password: String,
 }
 
-#[tauri::command]
-#[instrument(skip(state, args))]
-pub async fn users_reset_password(
-    state: State<'_, AppState>,
+pub async fn users_reset_password_impl(
+    state: &AppState,
     args: UserResetPasswordArgs,
 ) -> AppResult<()> {
-    let (actor_id, role, _) = current_actor(&state).await?;
+    let (actor_id, role, _) = current_actor(state).await?;
     let target_id = Uuid::parse_str(&args.id)?;
     let svc = state
         .user_service()
         .ok_or_else(|| AppError::Configuration("user service unavailable".into()))?;
     svc.reset_password(actor_id, role, target_id, &args.new_password)
         .await
+}
+
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn users_reset_password(
+    state: State<'_, AppState>,
+    args: UserResetPasswordArgs,
+) -> AppResult<()> {
+    users_reset_password_impl(&state, args).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -334,10 +395,8 @@ pub struct FirstAdminArgs {
     pub entity_id: Option<String>,
 }
 
-#[tauri::command]
-#[instrument(skip(state, args))]
-pub async fn users_create_first_admin(
-    state: State<'_, AppState>,
+pub async fn users_create_first_admin_impl(
+    state: &AppState,
     args: FirstAdminArgs,
 ) -> AppResult<UserResponse> {
     let svc = state
@@ -357,4 +416,13 @@ pub async fn users_create_first_admin(
     };
     state.set_current_user(ctx).await;
     Ok(user.into())
+}
+
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn users_create_first_admin(
+    state: State<'_, AppState>,
+    args: FirstAdminArgs,
+) -> AppResult<UserResponse> {
+    users_create_first_admin_impl(&state, args).await
 }

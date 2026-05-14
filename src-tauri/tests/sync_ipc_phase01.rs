@@ -16,8 +16,8 @@ use std::time::Duration;
 use app_lib::db::migrations;
 use app_lib::domains::sync::commands::{
     config_get_sync_server_url_impl, config_set_sync_server_url_impl, device_info_impl,
-    sync_outbox_count_impl, sync_resolve_conflict_impl, sync_status_impl,
-    sync_trigger_pull_impl, sync_trigger_push_impl, ResolveConflictArgs,
+    sync_outbox_count_impl, sync_resolve_conflict_impl, sync_status_impl, sync_trigger_pull_impl,
+    sync_trigger_push_impl, ResolveConflictArgs,
 };
 use app_lib::domains::sync::domain::entities::OutboxOp;
 use app_lib::domains::sync::domain::repositories::{AuditRepo, OutboxRepo, SyncStateRepo};

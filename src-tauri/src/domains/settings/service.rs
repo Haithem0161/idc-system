@@ -218,3 +218,92 @@ impl<'a> From<&'a Setting> for SettingPushPayload<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dye_cost_accepts_non_negative_int() {
+        assert!(validate_value_for_key("dye_cost_iqd", &SettingValue::Int(0)).is_ok());
+        assert!(validate_value_for_key("dye_cost_iqd", &SettingValue::Int(10_000)).is_ok());
+    }
+
+    #[test]
+    fn dye_cost_rejects_negative_and_wrong_type() {
+        assert!(validate_value_for_key("dye_cost_iqd", &SettingValue::Int(-1)).is_err());
+        assert!(validate_value_for_key("dye_cost_iqd", &SettingValue::Text("10".into())).is_err());
+        assert!(validate_value_for_key("dye_cost_iqd", &SettingValue::Bool(true)).is_err());
+    }
+
+    #[test]
+    fn report_cost_uses_same_non_negative_int_rule_as_dye_cost() {
+        assert!(validate_value_for_key("report_cost_iqd", &SettingValue::Int(0)).is_ok());
+        assert!(validate_value_for_key("report_cost_iqd", &SettingValue::Int(-1)).is_err());
+    }
+
+    #[test]
+    fn internal_doctor_pct_accepts_0_to_100_inclusive() {
+        for n in [0, 1, 30, 50, 99, 100] {
+            assert!(
+                validate_value_for_key("internal_doctor_pct", &SettingValue::Int(n)).is_ok(),
+                "{n} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn internal_doctor_pct_rejects_negative_and_over_100() {
+        assert!(validate_value_for_key("internal_doctor_pct", &SettingValue::Int(-1)).is_err());
+        assert!(validate_value_for_key("internal_doctor_pct", &SettingValue::Int(101)).is_err());
+        assert!(validate_value_for_key("internal_doctor_pct", &SettingValue::Int(150)).is_err());
+    }
+
+    #[test]
+    fn idle_lock_minutes_must_be_positive() {
+        assert!(validate_value_for_key("idle_lock_minutes", &SettingValue::Int(1)).is_ok());
+        assert!(validate_value_for_key("idle_lock_minutes", &SettingValue::Int(10)).is_ok());
+        assert!(validate_value_for_key("idle_lock_minutes", &SettingValue::Int(0)).is_err());
+        assert!(validate_value_for_key("idle_lock_minutes", &SettingValue::Int(-5)).is_err());
+    }
+
+    #[test]
+    fn arabic_numerals_must_be_bool() {
+        assert!(validate_value_for_key("arabic_numerals", &SettingValue::Bool(true)).is_ok());
+        assert!(validate_value_for_key("arabic_numerals", &SettingValue::Bool(false)).is_ok());
+        assert!(validate_value_for_key("arabic_numerals", &SettingValue::Int(1)).is_err());
+        assert!(
+            validate_value_for_key("arabic_numerals", &SettingValue::Text("true".into())).is_err()
+        );
+    }
+
+    #[test]
+    fn thermal_width_accepts_only_32_or_48() {
+        assert!(validate_value_for_key("thermal_width", &SettingValue::Int(32)).is_ok());
+        assert!(validate_value_for_key("thermal_width", &SettingValue::Int(48)).is_ok());
+        assert!(validate_value_for_key("thermal_width", &SettingValue::Int(64)).is_err());
+        assert!(validate_value_for_key("thermal_width", &SettingValue::Int(0)).is_err());
+    }
+
+    #[test]
+    fn text_keys_must_be_text_variant() {
+        for key in [
+            "thermal_printer_name",
+            "clinic_display_name_ar",
+            "clinic_display_name_en",
+            "currency_symbol",
+        ] {
+            assert!(validate_value_for_key(key, &SettingValue::Text(String::new())).is_ok());
+            assert!(validate_value_for_key(key, &SettingValue::Text("anything".into())).is_ok());
+            assert!(validate_value_for_key(key, &SettingValue::Int(0)).is_err());
+            assert!(validate_value_for_key(key, &SettingValue::Bool(false)).is_err());
+        }
+    }
+
+    #[test]
+    fn unknown_key_falls_through_to_ok() {
+        // Unknown keys are permitted by the service layer; entity layer would
+        // be the place to enforce closed-key sets at v1.
+        assert!(validate_value_for_key("ghost_key", &SettingValue::Int(0)).is_ok());
+    }
+}

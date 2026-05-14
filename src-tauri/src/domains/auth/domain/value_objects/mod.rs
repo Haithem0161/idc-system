@@ -46,3 +46,64 @@ pub enum LoginMode {
     Online,
     Offline,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_role_serializes_as_lowercase_string() {
+        assert_eq!(
+            serde_json::to_string(&UserRole::Superadmin).unwrap(),
+            "\"superadmin\""
+        );
+        assert_eq!(
+            serde_json::to_string(&UserRole::Receptionist).unwrap(),
+            "\"receptionist\""
+        );
+        assert_eq!(
+            serde_json::to_string(&UserRole::Accountant).unwrap(),
+            "\"accountant\""
+        );
+    }
+
+    #[test]
+    fn user_role_deserializes_from_lowercase_string() {
+        let r: UserRole = serde_json::from_str("\"accountant\"").unwrap();
+        assert_eq!(r, UserRole::Accountant);
+    }
+
+    #[test]
+    fn user_role_rejects_unknown_value() {
+        assert!(serde_json::from_str::<UserRole>("\"shareholder\"").is_err());
+    }
+
+    #[test]
+    fn user_role_as_str_round_trips_through_parse() {
+        for r in [
+            UserRole::Superadmin,
+            UserRole::Receptionist,
+            UserRole::Accountant,
+        ] {
+            assert_eq!(UserRole::parse(r.as_str()).unwrap(), r);
+        }
+        assert!(UserRole::parse("god-mode").is_none());
+    }
+
+    #[test]
+    fn user_role_display_uses_as_str() {
+        assert_eq!(format!("{}", UserRole::Superadmin), "superadmin");
+    }
+
+    #[test]
+    fn login_mode_serializes_as_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&LoginMode::Online).unwrap(),
+            "\"online\""
+        );
+        assert_eq!(
+            serde_json::to_string(&LoginMode::Offline).unwrap(),
+            "\"offline\""
+        );
+    }
+}

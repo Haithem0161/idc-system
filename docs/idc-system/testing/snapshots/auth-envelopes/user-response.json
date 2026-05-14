@@ -1,0 +1,12 @@
+{
+  "id": "0190a000-0000-7000-8000-000000000001",
+  "email": "asma@idc.io",
+  "name": "Asma",
+  "role": "accountant",
+  "is_active": true,
+  "last_login_at": null,
+  "created_at": "2026-05-14T10:00:00.000Z",
+  "updated_at": "2026-05-14T10:00:00.000Z",
+  "entity_id": "tenant-idc",
+  "version": 1
+}

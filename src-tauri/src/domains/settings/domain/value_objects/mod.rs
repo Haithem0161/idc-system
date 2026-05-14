@@ -63,3 +63,95 @@ pub const REQUIRED_KEYS: &[&str] = &[
 pub fn is_required_key(key: &str) -> bool {
     REQUIRED_KEYS.contains(&key)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn value_type_returns_correct_tag_per_variant() {
+        assert_eq!(SettingValue::Int(0).value_type(), "int");
+        assert_eq!(SettingValue::Decimal("0".into()).value_type(), "decimal");
+        assert_eq!(SettingValue::Text(String::new()).value_type(), "text");
+        assert_eq!(SettingValue::Bool(false).value_type(), "bool");
+    }
+
+    #[test]
+    fn as_storage_serializes_each_variant_to_string() {
+        assert_eq!(SettingValue::Int(42).as_storage(), "42");
+        assert_eq!(SettingValue::Decimal("3.14".into()).as_storage(), "3.14");
+        assert_eq!(SettingValue::Text("hi".into()).as_storage(), "hi");
+        assert_eq!(SettingValue::Bool(true).as_storage(), "true");
+        assert_eq!(SettingValue::Bool(false).as_storage(), "false");
+    }
+
+    #[test]
+    fn parse_int_round_trip() {
+        let v = SettingValue::parse("int", "42").unwrap();
+        assert_eq!(v, SettingValue::Int(42));
+        assert!(SettingValue::parse("int", "not-a-number").is_none());
+    }
+
+    #[test]
+    fn parse_decimal_keeps_string_form() {
+        let v = SettingValue::parse("decimal", "12500.75").unwrap();
+        assert_eq!(v, SettingValue::Decimal("12500.75".into()));
+    }
+
+    #[test]
+    fn parse_text_accepts_empty_string() {
+        let v = SettingValue::parse("text", "").unwrap();
+        assert_eq!(v, SettingValue::Text(String::new()));
+    }
+
+    #[test]
+    fn parse_bool_accepts_true_false_one_zero_and_rejects_other() {
+        assert_eq!(
+            SettingValue::parse("bool", "true").unwrap(),
+            SettingValue::Bool(true)
+        );
+        assert_eq!(
+            SettingValue::parse("bool", "false").unwrap(),
+            SettingValue::Bool(false)
+        );
+        assert_eq!(
+            SettingValue::parse("bool", "1").unwrap(),
+            SettingValue::Bool(true)
+        );
+        assert_eq!(
+            SettingValue::parse("bool", "0").unwrap(),
+            SettingValue::Bool(false)
+        );
+        assert!(SettingValue::parse("bool", "yes").is_none());
+    }
+
+    #[test]
+    fn parse_unknown_value_type_returns_none() {
+        assert!(SettingValue::parse("json", "{}").is_none());
+    }
+
+    #[test]
+    fn required_keys_list_has_exactly_the_ten_v1_keys() {
+        assert_eq!(REQUIRED_KEYS.len(), 10);
+        for k in [
+            "dye_cost_iqd",
+            "report_cost_iqd",
+            "internal_doctor_pct",
+            "idle_lock_minutes",
+            "arabic_numerals",
+            "clinic_display_name_ar",
+            "clinic_display_name_en",
+            "currency_symbol",
+            "thermal_width",
+            "thermal_printer_name",
+        ] {
+            assert!(is_required_key(k), "{k} must be a required key");
+        }
+    }
+
+    #[test]
+    fn is_required_key_rejects_unknown_key() {
+        assert!(!is_required_key("horizon_pet_mode"));
+        assert!(!is_required_key(""));
+    }
+}

@@ -1,0 +1,976 @@
+//! Phase-02 §2.2 IPC handler tests.
+//!
+//! Each `#[tauri::command]` in `domains/auth/commands.rs` + `domains/settings/commands.rs`
+//! delegates to a plain `_impl(&AppState, args)` async fn. We exercise those
+//! helpers directly with an AppState built via `AppState::for_phase02_tests`,
+//! which wires the auth + users + settings services without standing up the
+//! full app graph.
+//!
+//! Coverage: happy path + at least one error path per command, plus the IPC
+//! return-shape assertions the §3.2 plan calls out (UserResponse never carries
+//! `password_hash`, LoginResult shape, role serialization, etc.).
+
+use std::str::FromStr;
+use std::sync::Arc;
+
+use app_lib::db::migrations;
+use app_lib::domains::auth::commands::{
+    auth_current_user_impl, auth_is_locked_impl, auth_lock_impl, auth_login_impl, auth_logout_impl,
+    auth_unlock_impl, current_actor, users_create_first_admin_impl, users_create_impl,
+    users_get_impl, users_list_impl, users_reset_password_impl, users_soft_delete_impl,
+    users_update_impl, FirstAdminArgs, LoginArgs, UnlockArgs, UserCreateArgs, UserIdArgs,
+    UserResetPasswordArgs, UserUpdateArgs, UsersListArgs,
+};
+use app_lib::domains::auth::domain::value_objects::{LoginMode, UserRole};
+use app_lib::domains::auth::infrastructure::SqliteUserRepo;
+use app_lib::domains::auth::AuthService;
+use app_lib::domains::auth::UserService;
+use app_lib::domains::settings::commands::{
+    settings_get_impl, settings_list_impl, settings_update_impl, SettingKeyArgs, SettingUpdateArgs,
+};
+use app_lib::domains::settings::domain::value_objects::SettingValue;
+use app_lib::domains::settings::infrastructure::SqliteSettingRepo;
+use app_lib::domains::settings::service::SettingsService;
+use app_lib::domains::sync::infrastructure::{
+    SqliteAuditRepo, SqliteOutboxRepo, SqliteSyncStateRepo,
+};
+use app_lib::error::AppError;
+use app_lib::state::{AppState, UserContext};
+use app_lib::sync::{SyncEngine, SyncEngineConfig, SyncEngineHandle};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::SqlitePool;
+use tauri::test::mock_app;
+use tokio_util::sync::CancellationToken;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+async fn fresh_pool() -> SqlitePool {
+    let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+        .unwrap()
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(opts)
+        .await
+        .unwrap();
+    migrations::run(&pool).await.unwrap();
+    pool
+}
+
+struct Rig {
+    state: AppState,
+    pool: SqlitePool,
+    user_repo: Arc<SqliteUserRepo>,
+    _app: tauri::App<tauri::test::MockRuntime>,
+    _cancel: CancellationToken,
+}
+
+async fn rig(server_url: Option<&str>) -> Rig {
+    let pool = fresh_pool().await;
+    let user_repo = Arc::new(SqliteUserRepo::new(pool.clone()));
+    let setting_repo = Arc::new(SqliteSettingRepo::new(pool.clone()));
+    let outbox_repo = Arc::new(SqliteOutboxRepo::new(pool.clone()));
+    let audit_repo = Arc::new(SqliteAuditRepo::new(pool.clone()));
+    let state_repo = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+
+    let auth_service = Arc::new(AuthService::new(
+        pool.clone(),
+        user_repo.clone(),
+        audit_repo.clone(),
+        outbox_repo.clone(),
+        "dev-A".into(),
+    ));
+    let user_service = Arc::new(UserService::new(
+        pool.clone(),
+        user_repo.clone(),
+        audit_repo.clone(),
+        outbox_repo.clone(),
+        "dev-A".into(),
+    ));
+    let settings_service = Arc::new(SettingsService::new(
+        pool.clone(),
+        setting_repo,
+        audit_repo.clone(),
+        outbox_repo.clone(),
+        "dev-A".into(),
+    ));
+
+    let mock = mock_app();
+    let handle = mock.handle().clone();
+    let cancel = CancellationToken::new();
+    let engine: SyncEngineHandle = SyncEngine::spawn(
+        SyncEngineConfig {
+            pool: pool.clone(),
+            outbox_repo: outbox_repo.clone(),
+            audit_repo: audit_repo.clone(),
+            state_repo,
+            device_id: "dev-A".into(),
+            app_version: "0.1.0".into(),
+            initial_server_url: server_url.map(|s| s.to_string()),
+            initial_token: None,
+            entity_id_tenant: "tenant-1".into(),
+        },
+        handle,
+        cancel.clone(),
+    );
+
+    let state = AppState::for_phase02_tests(
+        pool.clone(),
+        engine,
+        auth_service,
+        user_service,
+        settings_service,
+        user_repo.clone(),
+        "dev-A".into(),
+        "0.1.0".into(),
+        server_url.map(|s| s.to_string()),
+    );
+
+    Rig {
+        state,
+        pool,
+        user_repo,
+        _app: mock,
+        _cancel: cancel,
+    }
+}
+
+async fn bootstrap_superadmin(rig: &Rig) -> String {
+    let user = users_create_first_admin_impl(
+        &rig.state,
+        FirstAdminArgs {
+            email: "admin@idc.io".into(),
+            name: "Mariam".into(),
+            password: "admin-pass".into(),
+            entity_id: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap();
+    user.id
+}
+
+// --- auth_login ----------------------------------------------------------
+
+#[tokio::test]
+async fn auth_login_offline_returns_login_result_with_user_response_and_sets_state() {
+    let rig = rig(None).await;
+    let admin_id = bootstrap_superadmin(&rig).await;
+    // Bootstrap auto-logs-in; sign out to test login fresh.
+    auth_logout_impl(&rig.state).await.unwrap();
+
+    let result = auth_login_impl(
+        &rig.state,
+        LoginArgs {
+            email: "admin@idc.io".into(),
+            password: "admin-pass".into(),
+            entity_id_hint: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.mode, LoginMode::Offline);
+    assert_eq!(result.user.id, admin_id);
+    assert_eq!(result.user.role, UserRole::Superadmin);
+    assert_eq!(result.user.email, "admin@idc.io");
+    let ctx = rig.state.get_current_user().await.unwrap();
+    assert_eq!(ctx.user_id, admin_id);
+    assert_eq!(ctx.role, "superadmin");
+}
+
+#[tokio::test]
+async fn auth_login_serialized_response_never_contains_password_hash() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    auth_logout_impl(&rig.state).await.unwrap();
+    let result = auth_login_impl(
+        &rig.state,
+        LoginArgs {
+            email: "admin@idc.io".into(),
+            password: "admin-pass".into(),
+            entity_id_hint: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap();
+    let json = serde_json::to_string(&result).unwrap();
+    assert!(
+        !json.contains("password_hash") && !json.contains("$argon2id$"),
+        "IPC envelope must not contain password_hash: {json}"
+    );
+}
+
+#[tokio::test]
+async fn auth_login_wrong_password_returns_not_authenticated() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    auth_logout_impl(&rig.state).await.unwrap();
+    let err = auth_login_impl(
+        &rig.state,
+        LoginArgs {
+            email: "admin@idc.io".into(),
+            password: "WRONG".into(),
+            entity_id_hint: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+    // The error path must NOT populate the user context.
+    assert!(rig.state.get_current_user().await.is_none());
+}
+
+#[tokio::test]
+async fn auth_login_defaults_entity_id_hint_to_unscoped_when_missing() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    auth_logout_impl(&rig.state).await.unwrap();
+
+    // Same bootstrap created the user under "tenant-1". With no hint, the
+    // implementation defaults to "unscoped" -- which fails offline since the
+    // local row lives under "tenant-1". This pins the default behaviour.
+    let err = auth_login_impl(
+        &rig.state,
+        LoginArgs {
+            email: "admin@idc.io".into(),
+            password: "admin-pass".into(),
+            entity_id_hint: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+}
+
+// --- auth_logout ---------------------------------------------------------
+
+#[tokio::test]
+async fn auth_logout_clears_user_context_and_token() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    assert!(rig.state.get_current_user().await.is_some());
+
+    auth_logout_impl(&rig.state).await.unwrap();
+    assert!(rig.state.get_current_user().await.is_none());
+    assert!(rig.state.get_current_token().await.is_none());
+}
+
+#[tokio::test]
+async fn auth_logout_is_idempotent_on_a_signed_out_state() {
+    let rig = rig(None).await;
+    // No bootstrap; signed out by default.
+    auth_logout_impl(&rig.state).await.unwrap();
+    auth_logout_impl(&rig.state).await.unwrap();
+    assert!(rig.state.get_current_user().await.is_none());
+}
+
+// --- auth_current_user ---------------------------------------------------
+
+#[tokio::test]
+async fn auth_current_user_returns_none_when_signed_out() {
+    let rig = rig(None).await;
+    let result = auth_current_user_impl(&rig.state).await.unwrap();
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn auth_current_user_returns_context_when_signed_in() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let result = auth_current_user_impl(&rig.state).await.unwrap();
+    let ctx = result.unwrap();
+    assert_eq!(ctx.email, "admin@idc.io");
+    assert_eq!(ctx.role, "superadmin");
+    assert_eq!(ctx.entity_id, "tenant-1");
+}
+
+// --- auth_lock / auth_unlock / auth_is_locked ---------------------------
+
+#[tokio::test]
+async fn auth_lock_sets_is_locked_true() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    assert!(!auth_is_locked_impl(&rig.state).await.unwrap());
+    auth_lock_impl(&rig.state).await.unwrap();
+    assert!(auth_is_locked_impl(&rig.state).await.unwrap());
+}
+
+#[tokio::test]
+async fn auth_unlock_with_correct_password_clears_locked_flag_and_preserves_session() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    auth_lock_impl(&rig.state).await.unwrap();
+
+    auth_unlock_impl(
+        &rig.state,
+        UnlockArgs {
+            password: "admin-pass".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!auth_is_locked_impl(&rig.state).await.unwrap());
+    // Session must survive the unlock.
+    assert!(rig.state.get_current_user().await.is_some());
+}
+
+#[tokio::test]
+async fn auth_unlock_with_wrong_password_returns_not_authenticated_and_keeps_locked() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    auth_lock_impl(&rig.state).await.unwrap();
+
+    let err = auth_unlock_impl(
+        &rig.state,
+        UnlockArgs {
+            password: "WRONG-PASS".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+    // Lock state must NOT clear on failure.
+    assert!(auth_is_locked_impl(&rig.state).await.unwrap());
+}
+
+#[tokio::test]
+async fn auth_unlock_when_signed_out_returns_not_authenticated() {
+    let rig = rig(None).await;
+    // No bootstrap -> no signed-in user.
+    let err = auth_unlock_impl(
+        &rig.state,
+        UnlockArgs {
+            password: "anything".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+}
+
+#[tokio::test]
+async fn auth_is_locked_default_is_false() {
+    let rig = rig(None).await;
+    assert!(!auth_is_locked_impl(&rig.state).await.unwrap());
+}
+
+// --- users_list ----------------------------------------------------------
+
+#[tokio::test]
+async fn users_list_returns_array_with_admin_only_after_bootstrap() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let users = users_list_impl(
+        &rig.state,
+        UsersListArgs {
+            include_inactive: false,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(users.len(), 1);
+    assert_eq!(users[0].email, "admin@idc.io");
+}
+
+#[tokio::test]
+async fn users_list_response_never_contains_password_hash() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let users = users_list_impl(
+        &rig.state,
+        UsersListArgs {
+            include_inactive: false,
+        },
+    )
+    .await
+    .unwrap();
+    let json = serde_json::to_string(&users).unwrap();
+    assert!(!json.contains("password_hash"));
+    assert!(!json.contains("$argon2id$"));
+}
+
+// --- users_get -----------------------------------------------------------
+
+#[tokio::test]
+async fn users_get_returns_user_response_by_id() {
+    let rig = rig(None).await;
+    let admin_id = bootstrap_superadmin(&rig).await;
+    let user = users_get_impl(
+        &rig.state,
+        UserIdArgs {
+            id: admin_id.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(user.id, admin_id);
+    assert_eq!(user.email, "admin@idc.io");
+}
+
+#[tokio::test]
+async fn users_get_returns_not_found_for_unknown_id() {
+    let rig = rig(None).await;
+    let unknown = uuid::Uuid::now_v7().to_string();
+    let err = users_get_impl(&rig.state, UserIdArgs { id: unknown })
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn users_get_rejects_invalid_uuid() {
+    let rig = rig(None).await;
+    let err = users_get_impl(
+        &rig.state,
+        UserIdArgs {
+            id: "not-a-uuid".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    // The Uuid::parse_str -> AppError::Validation("uuid: ...") path.
+    assert!(matches!(err, AppError::Validation(_)));
+}
+
+// --- users_create --------------------------------------------------------
+
+#[tokio::test]
+async fn users_create_returns_user_response_and_persists_under_actor_tenant() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let new_user = users_create_impl(
+        &rig.state,
+        UserCreateArgs {
+            email: "new@idc.io".into(),
+            name: "New User".into(),
+            role: UserRole::Receptionist,
+            password: "newpass-1234".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(new_user.email, "new@idc.io");
+    assert_eq!(new_user.role, UserRole::Receptionist);
+    assert_eq!(new_user.entity_id, "tenant-1");
+
+    // Persisted.
+    let users = users_list_impl(
+        &rig.state,
+        UsersListArgs {
+            include_inactive: false,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(users.len(), 2);
+}
+
+#[tokio::test]
+async fn users_create_rejects_when_signed_out_with_not_authenticated() {
+    let rig = rig(None).await;
+    let err = users_create_impl(
+        &rig.state,
+        UserCreateArgs {
+            email: "x@idc.io".into(),
+            name: "X".into(),
+            role: UserRole::Receptionist,
+            password: "newpass-1234".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+}
+
+#[tokio::test]
+async fn users_create_rejects_receptionist_caller_with_validation_error() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    // Force role to receptionist.
+    rig.state
+        .set_current_user(UserContext {
+            user_id: uuid::Uuid::now_v7().to_string(),
+            entity_id: "tenant-1".into(),
+            email: "rx@idc.io".into(),
+            name: Some("RX".into()),
+            role: "receptionist".into(),
+        })
+        .await;
+    let err = users_create_impl(
+        &rig.state,
+        UserCreateArgs {
+            email: "x@idc.io".into(),
+            name: "X".into(),
+            role: UserRole::Receptionist,
+            password: "newpass-1234".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+}
+
+// --- users_update --------------------------------------------------------
+
+#[tokio::test]
+async fn users_update_returns_updated_user_response_with_bumped_version() {
+    let rig = rig(None).await;
+    let admin_id = bootstrap_superadmin(&rig).await;
+    let created = users_create_impl(
+        &rig.state,
+        UserCreateArgs {
+            email: "u@idc.io".into(),
+            name: "U".into(),
+            role: UserRole::Receptionist,
+            password: "newpass-1234".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let updated = users_update_impl(
+        &rig.state,
+        UserUpdateArgs {
+            id: created.id.clone(),
+            email: None,
+            name: Some("Renamed".into()),
+            role: Some(UserRole::Accountant),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.id, created.id);
+    assert_eq!(updated.name, "Renamed");
+    assert_eq!(updated.role, UserRole::Accountant);
+    assert!(updated.version > created.version);
+    // Admin unchanged.
+    let admin = users_get_impl(&rig.state, UserIdArgs { id: admin_id })
+        .await
+        .unwrap();
+    assert_eq!(admin.name, "Mariam");
+}
+
+#[tokio::test]
+async fn users_update_returns_not_found_for_unknown_id() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let err = users_update_impl(
+        &rig.state,
+        UserUpdateArgs {
+            id: uuid::Uuid::now_v7().to_string(),
+            email: None,
+            name: Some("X".into()),
+            role: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)));
+}
+
+// --- users_soft_delete ---------------------------------------------------
+
+#[tokio::test]
+async fn users_soft_delete_returns_unit_and_makes_user_invisible_to_get() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let created = users_create_impl(
+        &rig.state,
+        UserCreateArgs {
+            email: "del@idc.io".into(),
+            name: "Del".into(),
+            role: UserRole::Receptionist,
+            password: "newpass-1234".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    users_soft_delete_impl(
+        &rig.state,
+        UserIdArgs {
+            id: created.id.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    let err = users_get_impl(
+        &rig.state,
+        UserIdArgs {
+            id: created.id.clone(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn users_soft_delete_rejects_unauthenticated_caller() {
+    let rig = rig(None).await;
+    let err = users_soft_delete_impl(
+        &rig.state,
+        UserIdArgs {
+            id: uuid::Uuid::now_v7().to_string(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+}
+
+// --- users_reset_password ------------------------------------------------
+
+#[tokio::test]
+async fn users_reset_password_returns_unit_and_rotates_local_hash() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let created = users_create_impl(
+        &rig.state,
+        UserCreateArgs {
+            email: "u@idc.io".into(),
+            name: "U".into(),
+            role: UserRole::Receptionist,
+            password: "old-pass-1234".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    users_reset_password_impl(
+        &rig.state,
+        UserResetPasswordArgs {
+            id: created.id.clone(),
+            new_password: "new-pass-1234".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Sign out the admin so we can probe the offline-login surface as the
+    // user whose password rotated.
+    auth_logout_impl(&rig.state).await.unwrap();
+
+    let err = auth_login_impl(
+        &rig.state,
+        LoginArgs {
+            email: "u@idc.io".into(),
+            password: "old-pass-1234".into(),
+            entity_id_hint: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+
+    let ok = auth_login_impl(
+        &rig.state,
+        LoginArgs {
+            email: "u@idc.io".into(),
+            password: "new-pass-1234".into(),
+            entity_id_hint: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(ok.user.email, "u@idc.io");
+}
+
+#[tokio::test]
+async fn users_reset_password_rejects_when_signed_out() {
+    let rig = rig(None).await;
+    let err = users_reset_password_impl(
+        &rig.state,
+        UserResetPasswordArgs {
+            id: uuid::Uuid::now_v7().to_string(),
+            new_password: "n".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+}
+
+// --- users_create_first_admin -------------------------------------------
+
+#[tokio::test]
+async fn users_create_first_admin_returns_user_response_and_auto_logs_in() {
+    let rig = rig(None).await;
+    let user = users_create_first_admin_impl(
+        &rig.state,
+        FirstAdminArgs {
+            email: "root@idc.io".into(),
+            name: "Root".into(),
+            password: "rootpass1".into(),
+            entity_id: Some("tenant-X".into()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(user.role, UserRole::Superadmin);
+    assert_eq!(user.entity_id, "tenant-X");
+    let ctx = rig.state.get_current_user().await.unwrap();
+    assert_eq!(ctx.user_id, user.id);
+    assert_eq!(ctx.role, "superadmin");
+}
+
+#[tokio::test]
+async fn users_create_first_admin_returns_conflict_when_any_user_exists() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let err = users_create_first_admin_impl(
+        &rig.state,
+        FirstAdminArgs {
+            email: "other@idc.io".into(),
+            name: "Other".into(),
+            password: "otherpw1".into(),
+            entity_id: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::Conflict(_)));
+}
+
+#[tokio::test]
+async fn users_create_first_admin_defaults_entity_id_to_unscoped_when_missing() {
+    let rig = rig(None).await;
+    let user = users_create_first_admin_impl(
+        &rig.state,
+        FirstAdminArgs {
+            email: "root@idc.io".into(),
+            name: "Root".into(),
+            password: "rootpass1".into(),
+            entity_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(user.entity_id, "unscoped");
+}
+
+// --- settings_list / settings_get / settings_update ---------------------
+
+#[tokio::test]
+async fn settings_list_returns_seeded_v1_keys_for_unscoped_tenant_before_login() {
+    let rig = rig(None).await;
+    // Migration seeds 10 required keys under entity_id='unscoped'.
+    let rows = settings_list_impl(&rig.state).await.unwrap();
+    assert_eq!(rows.len(), 10);
+    let keys: Vec<_> = rows.iter().map(|s| s.key.as_str()).collect();
+    for k in [
+        "dye_cost_iqd",
+        "report_cost_iqd",
+        "internal_doctor_pct",
+        "idle_lock_minutes",
+        "arabic_numerals",
+        "currency_symbol",
+        "thermal_width",
+        "thermal_printer_name",
+        "clinic_display_name_ar",
+        "clinic_display_name_en",
+    ] {
+        assert!(keys.contains(&k), "missing seed key: {k}");
+    }
+}
+
+#[tokio::test]
+async fn settings_get_returns_seeded_value_for_known_key() {
+    let rig = rig(None).await;
+    let row = settings_get_impl(
+        &rig.state,
+        SettingKeyArgs {
+            key: "dye_cost_iqd".into(),
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(row.key, "dye_cost_iqd");
+    assert_eq!(row.value, SettingValue::Int(10_000));
+}
+
+#[tokio::test]
+async fn settings_get_returns_none_for_unknown_key() {
+    let rig = rig(None).await;
+    let row = settings_get_impl(
+        &rig.state,
+        SettingKeyArgs {
+            key: "ghost_key".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(row.is_none());
+}
+
+#[tokio::test]
+async fn settings_update_happy_path_for_superadmin_persists_caches_and_bumps_version() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let updated = settings_update_impl(
+        &rig.state,
+        SettingUpdateArgs {
+            key: "dye_cost_iqd".into(),
+            value: SettingValue::Int(12_000),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.value, SettingValue::Int(12_000));
+    assert!(updated.version >= 1);
+
+    // settings_cache populated.
+    let cached = rig.state.get_setting("dye_cost_iqd").await.unwrap();
+    // The cache stores SettingValue serialized as JSON. We just confirm it's
+    // present and round-trips back to a SettingValue.
+    let back: SettingValue = serde_json::from_value(cached).unwrap();
+    assert_eq!(back, SettingValue::Int(12_000));
+}
+
+#[tokio::test]
+async fn settings_update_rejects_unauthenticated_caller() {
+    let rig = rig(None).await;
+    let err = settings_update_impl(
+        &rig.state,
+        SettingUpdateArgs {
+            key: "dye_cost_iqd".into(),
+            value: SettingValue::Int(99_999),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+}
+
+#[tokio::test]
+async fn settings_update_rejects_receptionist_caller_with_validation_error() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    rig.state
+        .set_current_user(UserContext {
+            user_id: uuid::Uuid::now_v7().to_string(),
+            entity_id: "tenant-1".into(),
+            email: "rx@idc.io".into(),
+            name: Some("RX".into()),
+            role: "receptionist".into(),
+        })
+        .await;
+    let err = settings_update_impl(
+        &rig.state,
+        SettingUpdateArgs {
+            key: "dye_cost_iqd".into(),
+            value: SettingValue::Int(99_999),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+}
+
+#[tokio::test]
+async fn settings_update_rejects_invalid_value_for_thermal_width() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let err = settings_update_impl(
+        &rig.state,
+        SettingUpdateArgs {
+            key: "thermal_width".into(),
+            value: SettingValue::Int(64),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+}
+
+// --- current_actor helper ------------------------------------------------
+
+#[tokio::test]
+async fn current_actor_returns_uuid_role_and_entity_id_from_state_context() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let (id, role, entity_id) = current_actor(&rig.state).await.unwrap();
+    assert_eq!(role, UserRole::Superadmin);
+    assert_eq!(entity_id, "tenant-1");
+    assert!(uuid::Uuid::nil() != id);
+}
+
+#[tokio::test]
+async fn current_actor_returns_not_authenticated_when_no_context() {
+    let rig = rig(None).await;
+    let err = current_actor(&rig.state).await.unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+}
+
+#[tokio::test]
+async fn current_actor_rejects_unknown_role_string_with_validation_error() {
+    let rig = rig(None).await;
+    rig.state
+        .set_current_user(UserContext {
+            user_id: uuid::Uuid::now_v7().to_string(),
+            entity_id: "tenant-1".into(),
+            email: "x@idc.io".into(),
+            name: Some("X".into()),
+            role: "shareholder".into(),
+        })
+        .await;
+    let err = current_actor(&rig.state).await.unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+}
+
+// --- online-mode auth_login round-trip with wiremock --------------------
+
+#[tokio::test]
+async fn auth_login_online_with_wiremock_populates_token_and_caches_local_row() {
+    let server = MockServer::start().await;
+    let rig = rig(Some(&server.uri())).await;
+
+    // Seed offline cache so we can later prove it remains intact too.
+    let phc = app_lib::domains::auth::domain::services::hash_password("admin-pass").unwrap();
+    let user_id = uuid::Uuid::now_v7();
+    Mock::given(method("POST"))
+        .and(path("/auth/login"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "accessToken": "access.jwt.token",
+            "refreshToken": "refresh.token",
+            "expiresAt": chrono::Utc::now().to_rfc3339(),
+            "user": {
+                "id": user_id.to_string(),
+                "email": "admin@idc.io",
+                "name": "Mariam",
+                "role": "superadmin",
+                "entityId": "tenant-1",
+                "passwordHash": phc,
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let result = auth_login_impl(
+        &rig.state,
+        LoginArgs {
+            email: "admin@idc.io".into(),
+            password: "admin-pass".into(),
+            entity_id_hint: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.mode, LoginMode::Online);
+    assert_eq!(result.user.role, UserRole::Superadmin);
+    // Token written to state.
+    assert_eq!(
+        rig.state.get_current_token().await.as_deref(),
+        Some("access.jwt.token")
+    );
+    // Local cache populated.
+    use app_lib::domains::auth::domain::repositories::UserRepo;
+    let cached = rig
+        .user_repo
+        .get_by_email("admin@idc.io", "tenant-1")
+        .await
+        .unwrap();
+    assert!(cached.is_some());
+    let _ = rig.pool; // keep field alive in this test
+}

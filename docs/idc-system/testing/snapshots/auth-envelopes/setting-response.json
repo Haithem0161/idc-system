@@ -1,0 +1,11 @@
+{
+  "id": "01000000-0000-7000-8000-000000000001",
+  "key": "dye_cost_iqd",
+  "value": {
+    "valueType": "int",
+    "value": 10000
+  },
+  "updated_at": "2026-05-14T10:00:00.000Z",
+  "version": 1,
+  "entity_id": "unscoped"
+}

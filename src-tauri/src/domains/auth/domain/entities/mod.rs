@@ -129,3 +129,226 @@ pub fn normalize_email(input: &str) -> AppResult<String> {
     }
     Ok(trimmed)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixed_hash() -> String {
+        "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0$placeholder".to_string()
+    }
+
+    #[test]
+    fn try_new_normalizes_email_and_trims_name() {
+        let u = User::try_new(
+            "  TEST@Example.COM  ",
+            "  Mariam  ",
+            UserRole::Superadmin,
+            fixed_hash(),
+            "tenant-1".into(),
+            Some("dev-A".into()),
+        )
+        .unwrap();
+        assert_eq!(u.email, "test@example.com");
+        assert_eq!(u.name, "Mariam");
+        assert_eq!(u.role, UserRole::Superadmin);
+        assert!(u.is_active);
+        assert!(u.deleted_at.is_none());
+        assert_eq!(u.version, 1);
+        assert!(u.dirty);
+        assert_eq!(u.entity_id, "tenant-1");
+        assert_eq!(u.origin_device_id.as_deref(), Some("dev-A"));
+    }
+
+    #[test]
+    fn try_new_rejects_email_without_at_sign() {
+        let err = User::try_new(
+            "not-an-email",
+            "n",
+            UserRole::Receptionist,
+            fixed_hash(),
+            "t".into(),
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn try_new_rejects_empty_email() {
+        let err = User::try_new(
+            "   ",
+            "n",
+            UserRole::Receptionist,
+            fixed_hash(),
+            "t".into(),
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn try_new_rejects_name_empty_after_trim() {
+        let err = User::try_new(
+            "u@x.io",
+            "    ",
+            UserRole::Accountant,
+            fixed_hash(),
+            "t".into(),
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Validation(msg) if msg.contains("name")));
+    }
+
+    #[test]
+    fn try_new_accepts_each_of_three_roles() {
+        for role in [
+            UserRole::Superadmin,
+            UserRole::Receptionist,
+            UserRole::Accountant,
+        ] {
+            let u = User::try_new("a@b.io", "n", role, fixed_hash(), "t".into(), None).unwrap();
+            assert_eq!(u.role, role);
+        }
+    }
+
+    #[test]
+    fn with_updated_fields_bumps_version_marks_dirty_and_updates_updated_at() {
+        let u = User::try_new(
+            "a@b.io",
+            "n",
+            UserRole::Receptionist,
+            fixed_hash(),
+            "t".into(),
+            None,
+        )
+        .unwrap();
+        let original_updated_at = u.updated_at;
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let u2 = u
+            .with_updated_fields(Some("New Name".into()), None, Some(UserRole::Accountant))
+            .unwrap();
+        assert_eq!(u2.version, 2);
+        assert!(u2.dirty);
+        assert_eq!(u2.name, "New Name");
+        assert_eq!(u2.role, UserRole::Accountant);
+        assert!(u2.updated_at > original_updated_at);
+    }
+
+    #[test]
+    fn with_updated_fields_lowercases_new_email() {
+        let u = User::try_new(
+            "old@x.io",
+            "n",
+            UserRole::Receptionist,
+            fixed_hash(),
+            "t".into(),
+            None,
+        )
+        .unwrap();
+        let u2 = u
+            .with_updated_fields(None, Some("NEW@X.io".into()), None)
+            .unwrap();
+        assert_eq!(u2.email, "new@x.io");
+    }
+
+    #[test]
+    fn with_updated_fields_rejects_empty_name_after_trim() {
+        let u = User::try_new(
+            "a@b.io",
+            "n",
+            UserRole::Receptionist,
+            fixed_hash(),
+            "t".into(),
+            None,
+        )
+        .unwrap();
+        let err = u
+            .with_updated_fields(Some("   ".into()), None, None)
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn soft_deleted_sets_deleted_at_and_is_active_false_atomically() {
+        let u = User::try_new(
+            "a@b.io",
+            "n",
+            UserRole::Receptionist,
+            fixed_hash(),
+            "t".into(),
+            None,
+        )
+        .unwrap();
+        let v0 = u.version;
+        let d = u.soft_deleted();
+        assert!(d.deleted_at.is_some());
+        assert!(!d.is_active);
+        assert_eq!(d.version, v0 + 1);
+        assert!(d.dirty);
+    }
+
+    #[test]
+    fn with_new_password_hash_rotates_hash_and_bumps_version() {
+        let u = User::try_new(
+            "a@b.io",
+            "n",
+            UserRole::Receptionist,
+            fixed_hash(),
+            "t".into(),
+            None,
+        )
+        .unwrap();
+        let v0 = u.version;
+        let h0 = u.password_hash.clone();
+        let u2 = u.with_new_password_hash("$argon2id$NEW".into());
+        assert_ne!(u2.password_hash, h0);
+        assert_eq!(u2.version, v0 + 1);
+        assert!(u2.dirty);
+    }
+
+    #[test]
+    fn mark_logged_in_sets_last_login_at_without_bumping_version() {
+        let u = User::try_new(
+            "a@b.io",
+            "n",
+            UserRole::Receptionist,
+            fixed_hash(),
+            "t".into(),
+            None,
+        )
+        .unwrap();
+        let v0 = u.version;
+        let u2 = u.mark_logged_in();
+        assert!(u2.last_login_at.is_some());
+        assert_eq!(u2.version, v0);
+    }
+
+    #[test]
+    fn serialized_user_skips_password_hash_at_ipc_boundary() {
+        let u = User::try_new(
+            "a@b.io",
+            "n",
+            UserRole::Superadmin,
+            "$argon2id$SENSITIVE".into(),
+            "t".into(),
+            None,
+        )
+        .unwrap();
+        let v = serde_json::to_value(&u).unwrap();
+        assert!(v.get("password_hash").is_none());
+        assert!(!serde_json::to_string(&u)
+            .unwrap()
+            .contains("$argon2id$SENSITIVE"));
+    }
+
+    #[test]
+    fn normalize_email_rejects_empty_and_missing_at() {
+        assert!(normalize_email("").is_err());
+        assert!(normalize_email("   ").is_err());
+        assert!(normalize_email("noat").is_err());
+        assert_eq!(normalize_email("  A@B.IO  ").unwrap(), "a@b.io");
+    }
+}

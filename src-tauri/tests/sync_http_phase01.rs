@@ -52,7 +52,10 @@ async fn push_returns_accepted_and_conflicts_on_200() {
 
     let result = client(&server)
         .await
-        .push("test-token", &[push_op("op-A", "row-A"), push_op("op-B", "row-B")])
+        .push(
+            "test-token",
+            &[push_op("op-A", "row-A"), push_op("op-B", "row-B")],
+        )
         .await
         .expect("2xx push must succeed");
     assert_eq!(result.accepted.len(), 1);
@@ -174,7 +177,11 @@ async fn pull_without_cursor_omits_since_query_param() {
         .mount(&server)
         .await;
 
-    let result = client(&server).await.pull("test-token", None).await.expect("ok");
+    let result = client(&server)
+        .await
+        .pull("test-token", None)
+        .await
+        .expect("ok");
     assert!(result.changes.is_empty());
     assert_eq!(result.next_cursor, "");
 }
@@ -290,10 +297,7 @@ async fn resolve_conflict_surfaces_already_resolved_on_409() {
         .await
         .expect_err("409 must surface Conflict");
     assert_eq!(err.code(), "CONFLICT_PARKED");
-    assert!(
-        err.to_string().contains("ALREADY_RESOLVED"),
-        "got: {err}"
-    );
+    assert!(err.to_string().contains("ALREADY_RESOLVED"), "got: {err}");
 }
 
 #[tokio::test]
@@ -375,7 +379,10 @@ async fn every_request_sends_x_device_id_and_x_app_version_headers() {
         .push("test-token", &[push_op("op-A", "row-A")])
         .await
         .expect("push receives headers");
-    let pull = c.pull("test-token", None).await.expect("pull receives headers");
+    let pull = c
+        .pull("test-token", None)
+        .await
+        .expect("pull receives headers");
     assert!(push.accepted.is_empty());
     assert!(pull.changes.is_empty());
 }

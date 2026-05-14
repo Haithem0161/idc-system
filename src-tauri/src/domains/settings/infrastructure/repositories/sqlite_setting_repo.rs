@@ -29,7 +29,7 @@ impl SettingRepo for SqliteSettingRepo {
                 id, key, value, value_type, created_at, updated_at, deleted_at, \
                 version, dirty, last_synced_at, origin_device_id, entity_id\
              ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) \
-             ON CONFLICT(entity_id, key) DO UPDATE SET \
+             ON CONFLICT(entity_id, key) WHERE deleted_at IS NULL DO UPDATE SET \
                value = excluded.value, \
                value_type = excluded.value_type, \
                updated_at = excluded.updated_at, \

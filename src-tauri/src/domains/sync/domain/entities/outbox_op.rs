@@ -229,8 +229,7 @@ mod tests {
 
     #[test]
     fn try_new_rejects_empty_entity_id() {
-        let err =
-            OutboxOp::try_new("visits", "", vec![]).expect_err("empty entity_id rejected");
+        let err = OutboxOp::try_new("visits", "", vec![]).expect_err("empty entity_id rejected");
         assert!(matches!(err, crate::error::AppError::Validation(_)));
     }
 

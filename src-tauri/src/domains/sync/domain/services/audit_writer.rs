@@ -34,7 +34,11 @@ impl WriterStep {
     /// The canonical step order. Pinned by a test so a refactor that
     /// reorders the writer fails loudly.
     pub fn canonical_order() -> [WriterStep; 3] {
-        [Self::InsertAudit, Self::InvokeBusinessWrites, Self::EnqueueOutbox]
+        [
+            Self::InsertAudit,
+            Self::InvokeBusinessWrites,
+            Self::EnqueueOutbox,
+        ]
     }
 }
 

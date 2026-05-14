@@ -40,13 +40,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS settings_key
   ON settings(entity_id, key) WHERE deleted_at IS NULL;
 
 INSERT OR IGNORE INTO settings (id, key, value, value_type, created_at, updated_at, version, dirty, entity_id) VALUES
-  ('01000000-0000-7000-8000-000000000001','dye_cost_iqd','10000','int',datetime('now'),datetime('now'),1,0,'unscoped'),
-  ('01000000-0000-7000-8000-000000000002','report_cost_iqd','10000','int',datetime('now'),datetime('now'),1,0,'unscoped'),
-  ('01000000-0000-7000-8000-000000000003','internal_doctor_pct','30','int',datetime('now'),datetime('now'),1,0,'unscoped'),
-  ('01000000-0000-7000-8000-000000000004','idle_lock_minutes','10','int',datetime('now'),datetime('now'),1,0,'unscoped'),
-  ('01000000-0000-7000-8000-000000000005','arabic_numerals','false','bool',datetime('now'),datetime('now'),1,0,'unscoped'),
-  ('01000000-0000-7000-8000-000000000006','clinic_display_name_ar','','text',datetime('now'),datetime('now'),1,0,'unscoped'),
-  ('01000000-0000-7000-8000-000000000007','clinic_display_name_en','','text',datetime('now'),datetime('now'),1,0,'unscoped'),
-  ('01000000-0000-7000-8000-000000000008','currency_symbol','د.ع','text',datetime('now'),datetime('now'),1,0,'unscoped'),
-  ('01000000-0000-7000-8000-000000000009','thermal_width','32','int',datetime('now'),datetime('now'),1,0,'unscoped'),
-  ('01000000-0000-7000-8000-00000000000a','thermal_printer_name','','text',datetime('now'),datetime('now'),1,0,'unscoped');
+  ('01000000-0000-7000-8000-000000000001','dye_cost_iqd','10000','int',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),1,0,'unscoped'),
+  ('01000000-0000-7000-8000-000000000002','report_cost_iqd','10000','int',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),1,0,'unscoped'),
+  ('01000000-0000-7000-8000-000000000003','internal_doctor_pct','30','int',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),1,0,'unscoped'),
+  ('01000000-0000-7000-8000-000000000004','idle_lock_minutes','10','int',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),1,0,'unscoped'),
+  ('01000000-0000-7000-8000-000000000005','arabic_numerals','false','bool',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),1,0,'unscoped'),
+  ('01000000-0000-7000-8000-000000000006','clinic_display_name_ar','','text',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),1,0,'unscoped'),
+  ('01000000-0000-7000-8000-000000000007','clinic_display_name_en','','text',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),1,0,'unscoped'),
+  ('01000000-0000-7000-8000-000000000008','currency_symbol','د.ع','text',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),1,0,'unscoped'),
+  ('01000000-0000-7000-8000-000000000009','thermal_width','32','int',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),1,0,'unscoped'),
+  ('01000000-0000-7000-8000-00000000000a','thermal_printer_name','','text',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),1,0,'unscoped');

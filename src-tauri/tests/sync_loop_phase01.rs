@@ -16,9 +16,7 @@ use std::sync::Arc;
 
 use app_lib::db::migrations;
 use app_lib::domains::sync::domain::entities::OutboxOp;
-use app_lib::domains::sync::domain::repositories::{
-    AuditRepo, OutboxRepo, SyncStateRepo,
-};
+use app_lib::domains::sync::domain::repositories::{AuditRepo, OutboxRepo, SyncStateRepo};
 use app_lib::domains::sync::infrastructure::{
     SqliteAuditRepo, SqliteOutboxRepo, SqliteSyncStateRepo, SyncHttpClient,
 };
@@ -55,8 +53,7 @@ async fn fresh_pool() -> SqlitePool {
 }
 
 async fn http_for(server: &MockServer) -> SyncHttpClient {
-    SyncHttpClient::new(server.uri(), "test-device".into(), "0.1.0".into())
-        .expect("client builds")
+    SyncHttpClient::new(server.uri(), "test-device".into(), "0.1.0".into()).expect("client builds")
 }
 
 // --- Pusher --------------------------------------------------------------
@@ -70,9 +67,16 @@ async fn pusher_returns_zero_on_empty_outbox_without_calling_server() {
     let server = MockServer::start().await;
     // No mocks mounted: any request would 404. Empty batch must not call.
 
-    let outcome = pusher::run_step(&pool, outbox, state, &http_for(&server).await, Some("t"), "tenant-x")
-        .await
-        .expect("ok");
+    let outcome = pusher::run_step(
+        &pool,
+        outbox,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("ok");
     assert_eq!(outcome.pushed, 0);
     assert!(outcome.conflicts.is_empty());
     assert!(!outcome.session_expired);
@@ -91,9 +95,16 @@ async fn pusher_returns_zero_when_token_is_none_without_calling_server() {
     tx.commit().await.unwrap();
 
     let server = MockServer::start().await;
-    let outcome = pusher::run_step(&pool, outbox, state, &http_for(&server).await, None, "tenant-x")
-        .await
-        .expect("ok");
+    let outcome = pusher::run_step(
+        &pool,
+        outbox,
+        state,
+        &http_for(&server).await,
+        None,
+        "tenant-x",
+    )
+    .await
+    .expect("ok");
     assert_eq!(outcome.pushed, 0);
 }
 
@@ -118,9 +129,16 @@ async fn pusher_acks_pushed_ops_and_returns_count_on_2xx() {
         .mount(&server)
         .await;
 
-    let outcome = pusher::run_step(&pool, outbox.clone(), state, &http_for(&server).await, Some("t"), "tenant-x")
-        .await
-        .expect("ok");
+    let outcome = pusher::run_step(
+        &pool,
+        outbox.clone(),
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("ok");
     assert_eq!(outcome.pushed, 1);
     assert!(outcome.conflicts.is_empty());
     // Acked row deleted from outbox.
@@ -155,9 +173,16 @@ async fn pusher_parks_conflicted_rows_and_returns_them() {
         .mount(&server)
         .await;
 
-    let outcome = pusher::run_step(&pool, outbox.clone(), state, &http_for(&server).await, Some("t"), "tenant-x")
-        .await
-        .expect("ok");
+    let outcome = pusher::run_step(
+        &pool,
+        outbox.clone(),
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("ok");
     assert_eq!(outcome.conflicts.len(), 1);
     // Parked row excluded from pending count.
     assert_eq!(outbox.pending_count().await.unwrap(), 0);
@@ -181,9 +206,16 @@ async fn pusher_returns_session_expired_true_on_401() {
         .mount(&server)
         .await;
 
-    let outcome = pusher::run_step(&pool, outbox.clone(), state, &http_for(&server).await, Some("expired"), "tenant-x")
-        .await
-        .expect("session_expired must be a successful outcome, not an error");
+    let outcome = pusher::run_step(
+        &pool,
+        outbox.clone(),
+        state,
+        &http_for(&server).await,
+        Some("expired"),
+        "tenant-x",
+    )
+    .await
+    .expect("session_expired must be a successful outcome, not an error");
     assert!(outcome.session_expired);
     assert_eq!(outcome.pushed, 0);
     // Outbox row preserved for retry after re-auth.
@@ -208,8 +240,15 @@ async fn pusher_backs_off_on_5xx_and_returns_err() {
         .mount(&server)
         .await;
 
-    let result = pusher::run_step(&pool, outbox.clone(), state, &http_for(&server).await, Some("t"), "tenant-x")
-        .await;
+    let result = pusher::run_step(
+        &pool,
+        outbox.clone(),
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await;
     let err = match result {
         Err(e) => e,
         Ok(_) => panic!("5xx must surface as Err"),
@@ -250,9 +289,15 @@ async fn puller_returns_zero_on_empty_response_without_advancing_cursor() {
         .mount(&server)
         .await;
 
-    let outcome = puller::run_step(&pool, state.clone(), &http_for(&server).await, Some("t"), "tenant-x")
-        .await
-        .expect("ok");
+    let outcome = puller::run_step(
+        &pool,
+        state.clone(),
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("ok");
     assert_eq!(outcome.applied, 0);
 
     let cursor = state.get().await.unwrap().pull_cursor;
@@ -271,9 +316,15 @@ async fn puller_returns_session_expired_true_on_401() {
         .mount(&server)
         .await;
 
-    let outcome = puller::run_step(&pool, state, &http_for(&server).await, Some("expired"), "tenant-x")
-        .await
-        .expect("session_expired is a successful outcome");
+    let outcome = puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("expired"),
+        "tenant-x",
+    )
+    .await
+    .expect("session_expired is a successful outcome");
     assert!(outcome.session_expired);
     assert_eq!(outcome.applied, 0);
 }
@@ -290,8 +341,14 @@ async fn puller_surfaces_5xx_as_err_without_advancing_cursor() {
         .mount(&server)
         .await;
 
-    let result = puller::run_step(&pool, state.clone(), &http_for(&server).await, Some("t"), "tenant-x")
-        .await;
+    let result = puller::run_step(
+        &pool,
+        state.clone(),
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await;
     let err = match result {
         Err(e) => e,
         Ok(_) => panic!("5xx must surface as Err"),
@@ -374,9 +431,15 @@ async fn puller_persists_pulled_audit_log_row_into_local_table_under_shared_cach
         .mount(&server)
         .await;
 
-    let outcome = puller::run_step(&pool, state.clone(), &http_for(&server).await, Some("t"), "tenant-x")
-        .await
-        .expect("ok (deadlock would surface as a timeout, not Err)");
+    let outcome = puller::run_step(
+        &pool,
+        state.clone(),
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("ok (deadlock would surface as a timeout, not Err)");
     assert_eq!(outcome.applied, 1);
 
     let rows = audit.list_by_tenant("tenant-x", 10, 0).await.unwrap();
@@ -417,10 +480,19 @@ async fn puller_skips_audit_change_with_empty_id_defensively() {
         .mount(&server)
         .await;
 
-    let outcome = puller::run_step(&pool, state, &http_for(&server).await, Some("t"), "tenant-x")
-        .await
-        .expect("ok");
-    assert_eq!(outcome.applied, 1, "applied counter increments per change processed");
+    let outcome = puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("ok");
+    assert_eq!(
+        outcome.applied, 1,
+        "applied counter increments per change processed"
+    );
 
     // No audit row materialised because the id was empty.
     let rows = audit.list_by_tenant("tenant-x", 10, 0).await.unwrap();
@@ -453,8 +525,14 @@ async fn puller_advances_cursor_on_successful_apply() {
         .mount(&server)
         .await;
 
-    let outcome = puller::run_step(&pool, state.clone(), &http_for(&server).await, Some("t"), "tenant-x")
-        .await;
+    let outcome = puller::run_step(
+        &pool,
+        state.clone(),
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await;
 
     // The apply step's exact behaviour for audit_log rows depends on
     // phase-01's puller implementation (server is canonical so audit rows
