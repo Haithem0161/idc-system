@@ -194,6 +194,49 @@ impl AppState {
         }
     }
 
+    /// Phase-03 §2.2 test-only constructor: wires the catalog services on top
+    /// of the phase-02 surface so catalog IPC commands can be exercised
+    /// without standing up the full app graph.
+    #[allow(clippy::too_many_arguments)]
+    pub fn for_phase03_tests(
+        db_pool: SqlitePool,
+        sync_engine: SyncEngineHandle,
+        auth_service: Arc<AuthService>,
+        user_service: Arc<UserService>,
+        settings_service: Arc<SettingsService>,
+        catalog_services: CatalogServices,
+        user_repo: Arc<dyn UserRepo>,
+        device_id: String,
+        app_version: String,
+        sync_server_url: Option<String>,
+    ) -> Self {
+        Self {
+            db_pool: Some(db_pool),
+            sync_engine: Some(sync_engine),
+            auth_service: Some(auth_service),
+            user_service: Some(user_service),
+            settings_service: Some(settings_service),
+            catalog_services: Some(catalog_services),
+            shift_service: None,
+            patient_service: None,
+            visit_service: None,
+            inventory_adjustment_service: None,
+            reports_service: None,
+            audit_query_service: None,
+            audit_vacuum_job: None,
+            diagnostics_service: None,
+            user_repo: Some(user_repo),
+            user_context: RwLock::new(None),
+            settings_cache: RwLock::new(HashMap::new()),
+            locked: RwLock::new(false),
+            device_id,
+            app_version,
+            token: RwLock::new(None),
+            expires_at: RwLock::new(None),
+            sync_server_url: RwLock::new(sync_server_url),
+        }
+    }
+
     pub fn for_embedded() -> Self {
         Self {
             db_pool: None,

@@ -133,4 +133,101 @@ mod tests {
         assert!(validate_cut(CutKind::Fixed, 1_000_000).is_ok());
         assert!(validate_cut(CutKind::Fixed, -1).is_err());
     }
+
+    fn input(cut_kind: CutKind, cut_value: i64) -> DoctorPricingNewInput {
+        DoctorPricingNewInput {
+            doctor_id: Uuid::now_v7(),
+            check_type_id: Uuid::now_v7(),
+            check_subtype_id: None,
+            price_override_iqd: None,
+            cut_kind,
+            cut_value,
+            entity_id: "t".into(),
+            origin_device_id: None,
+        }
+    }
+
+    #[test]
+    fn try_new_pct_in_range_succeeds() {
+        let p = DoctorCheckPricing::try_new(input(CutKind::Pct, 25)).unwrap();
+        assert_eq!(p.cut_value, 25);
+        assert_eq!(p.cut_kind, CutKind::Pct);
+    }
+
+    #[test]
+    fn try_new_pct_above_100_rejected() {
+        assert!(DoctorCheckPricing::try_new(input(CutKind::Pct, 101)).is_err());
+        assert!(DoctorCheckPricing::try_new(input(CutKind::Pct, 1000)).is_err());
+    }
+
+    #[test]
+    fn try_new_fixed_negative_rejected() {
+        assert!(DoctorCheckPricing::try_new(input(CutKind::Fixed, -1)).is_err());
+    }
+
+    #[test]
+    fn try_new_rejects_negative_price_override() {
+        let mut i = input(CutKind::Pct, 25);
+        i.price_override_iqd = Some(-1);
+        assert!(DoctorCheckPricing::try_new(i).is_err());
+    }
+
+    #[test]
+    fn try_new_accepts_zero_price_override() {
+        let mut i = input(CutKind::Pct, 25);
+        i.price_override_iqd = Some(0);
+        assert!(DoctorCheckPricing::try_new(i).is_ok());
+    }
+
+    #[test]
+    fn try_new_seeds_sync_columns() {
+        let p = DoctorCheckPricing::try_new(input(CutKind::Pct, 25)).unwrap();
+        assert_eq!(p.version, 1);
+        assert!(p.dirty);
+        assert!(p.deleted_at.is_none());
+        assert_eq!(p.id.get_version_num(), 7);
+    }
+
+    #[test]
+    fn updated_with_changes_cut_and_bumps_version() {
+        let p = DoctorCheckPricing::try_new(input(CutKind::Pct, 25)).unwrap();
+        let v0 = p.version;
+        let after = p.updated_with(None, CutKind::Fixed, 5_000).unwrap();
+        assert_eq!(after.cut_kind, CutKind::Fixed);
+        assert_eq!(after.cut_value, 5_000);
+        assert_eq!(after.version, v0 + 1);
+        assert!(after.dirty);
+    }
+
+    #[test]
+    fn updated_with_revalidates_pct_range() {
+        let p = DoctorCheckPricing::try_new(input(CutKind::Pct, 25)).unwrap();
+        assert!(p.updated_with(None, CutKind::Pct, 200).is_err());
+    }
+
+    #[test]
+    fn updated_with_revalidates_negative_override() {
+        let p = DoctorCheckPricing::try_new(input(CutKind::Pct, 25)).unwrap();
+        assert!(p.updated_with(Some(-1), CutKind::Pct, 25).is_err());
+    }
+
+    #[test]
+    fn soft_deleted_marks_tombstone_and_bumps_version() {
+        let p = DoctorCheckPricing::try_new(input(CutKind::Pct, 25)).unwrap();
+        let v0 = p.version;
+        let after = p.soft_deleted();
+        assert!(after.deleted_at.is_some());
+        assert_eq!(after.version, v0 + 1);
+        assert!(after.dirty);
+    }
+
+    #[test]
+    fn cut_kind_round_trips_as_lowercase_string() {
+        assert_eq!(CutKind::Pct.as_str(), "pct");
+        assert_eq!(CutKind::Fixed.as_str(), "fixed");
+        assert_eq!(CutKind::parse("pct"), Some(CutKind::Pct));
+        assert_eq!(CutKind::parse("fixed"), Some(CutKind::Fixed));
+        assert_eq!(CutKind::parse("Pct"), None);
+        assert_eq!(CutKind::parse("percent"), None);
+    }
 }

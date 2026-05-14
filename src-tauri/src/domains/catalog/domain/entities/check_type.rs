@@ -235,4 +235,137 @@ mod tests {
         assert!(!after.has_subtypes);
         assert_eq!(after.base_price_iqd, Some(2000));
     }
+
+    // --- phase-03 §1.1 expanded coverage ---
+
+    #[test]
+    fn try_new_preserves_dye_and_report_flags() {
+        let mut i = input("X", false, Some(0));
+        i.dye_supported = true;
+        i.report_supported = true;
+        let ct = CheckType::try_new(i).unwrap();
+        assert!(ct.dye_supported);
+        assert!(ct.report_supported);
+    }
+
+    #[test]
+    fn try_new_trims_name_ar_and_name_en() {
+        let i = CheckTypeNewInput {
+            name_ar: "  MRI  ".into(),
+            name_en: Some("  Brain  ".into()),
+            has_subtypes: false,
+            base_price_iqd: Some(1000),
+            dye_supported: false,
+            report_supported: false,
+            sort_order: 0,
+            entity_id: "e".into(),
+            origin_device_id: None,
+        };
+        let ct = CheckType::try_new(i).unwrap();
+        assert_eq!(ct.name_ar, "MRI");
+        assert_eq!(ct.name_en.as_deref(), Some("Brain"));
+    }
+
+    #[test]
+    fn try_new_drops_empty_name_en_after_trim() {
+        let i = CheckTypeNewInput {
+            name_ar: "MRI".into(),
+            name_en: Some("   ".into()),
+            has_subtypes: false,
+            base_price_iqd: Some(1000),
+            dye_supported: false,
+            report_supported: false,
+            sort_order: 0,
+            entity_id: "e".into(),
+            origin_device_id: None,
+        };
+        let ct = CheckType::try_new(i).unwrap();
+        assert!(ct.name_en.is_none());
+    }
+
+    #[test]
+    fn try_new_seeds_sync_columns() {
+        let ct = CheckType::try_new(input("X", false, Some(0))).unwrap();
+        assert_eq!(ct.version, 1);
+        assert!(ct.dirty);
+        assert!(ct.last_synced_at.is_none());
+        assert!(ct.deleted_at.is_none());
+        assert!(ct.is_active);
+    }
+
+    #[test]
+    fn try_new_assigns_uuid_v7_id() {
+        let a = CheckType::try_new(input("X", false, Some(0))).unwrap();
+        let b = CheckType::try_new(input("X", false, Some(0))).unwrap();
+        assert_ne!(a.id, b.id);
+        assert_eq!(a.id.get_version_num(), 7);
+        assert_eq!(b.id.get_version_num(), 7);
+    }
+
+    #[test]
+    fn with_updated_fields_bumps_version_and_marks_dirty() {
+        let ct = CheckType::try_new(input("X", false, Some(1000))).unwrap();
+        let v0 = ct.version;
+        let updated = ct
+            .with_updated_fields(CheckTypeUpdate {
+                name_ar: Some("Y".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(updated.name_ar, "Y");
+        assert_eq!(updated.version, v0 + 1);
+        assert!(updated.dirty);
+    }
+
+    #[test]
+    fn with_updated_fields_enforces_xor_on_base_price_change() {
+        let ct = CheckType::try_new(input("X", true, None)).unwrap();
+        let res = ct.with_updated_fields(CheckTypeUpdate {
+            base_price_iqd: Some(Some(2_000)),
+            ..Default::default()
+        });
+        assert!(res.is_err(), "subtyped + base_price set must reject");
+    }
+
+    #[test]
+    fn with_updated_fields_rejects_empty_name_ar_patch() {
+        let ct = CheckType::try_new(input("X", false, Some(0))).unwrap();
+        let res = ct.with_updated_fields(CheckTypeUpdate {
+            name_ar: Some("   ".into()),
+            ..Default::default()
+        });
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn soft_deleted_sets_deleted_at_and_inactive() {
+        let ct = CheckType::try_new(input("X", false, Some(0))).unwrap();
+        let v0 = ct.version;
+        let deleted = ct.soft_deleted();
+        assert!(deleted.deleted_at.is_some());
+        assert!(!deleted.is_active);
+        assert!(deleted.dirty);
+        assert_eq!(deleted.version, v0 + 1);
+    }
+
+    #[test]
+    fn validate_xor_rejects_subtypes_with_price() {
+        assert!(validate_xor(true, Some(0)).is_err());
+        assert!(validate_xor(true, Some(1000)).is_err());
+    }
+
+    #[test]
+    fn validate_xor_rejects_flat_without_price() {
+        assert!(validate_xor(false, None).is_err());
+    }
+
+    #[test]
+    fn validate_xor_accepts_subtypes_with_no_price() {
+        assert!(validate_xor(true, None).is_ok());
+    }
+
+    #[test]
+    fn validate_xor_accepts_flat_with_zero_price() {
+        assert!(validate_xor(false, Some(0)).is_ok());
+    }
 }

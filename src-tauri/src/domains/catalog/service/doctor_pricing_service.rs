@@ -36,16 +36,16 @@ pub struct DoctorPricingUpsertInput {
 }
 
 #[derive(Clone)]
-pub struct DoctorPricingService {
+pub struct DoctorPricingService<R: tauri::Runtime = tauri::Wry> {
     pool: sqlx::SqlitePool,
     check_type_repo: Arc<dyn CheckTypeRepo>,
     repo: Arc<dyn DoctorPricingRepo>,
     writer: AuditWriter,
     device_id: String,
-    app: AppHandle,
+    app: AppHandle<R>,
 }
 
-impl DoctorPricingService {
+impl<R: tauri::Runtime> DoctorPricingService<R> {
     pub fn new(
         pool: sqlx::SqlitePool,
         check_type_repo: Arc<dyn CheckTypeRepo>,
@@ -53,7 +53,7 @@ impl DoctorPricingService {
         audit_repo: Arc<dyn AuditRepo>,
         outbox_repo: Arc<dyn OutboxRepo>,
         device_id: String,
-        app: AppHandle,
+        app: AppHandle<R>,
     ) -> Self {
         Self {
             pool,

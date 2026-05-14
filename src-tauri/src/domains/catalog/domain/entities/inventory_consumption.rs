@@ -84,3 +84,73 @@ impl InventoryConsumptionMap {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(qty: i64, on_dye_only: bool) -> ConsumptionMapNewInput {
+        ConsumptionMapNewInput {
+            check_type_id: Uuid::now_v7(),
+            check_subtype_id: None,
+            item_id: Uuid::now_v7(),
+            quantity_per_check: qty,
+            on_dye_only,
+            entity_id: "t".into(),
+            origin_device_id: None,
+        }
+    }
+
+    #[test]
+    fn try_new_rejects_zero_or_negative_quantity() {
+        assert!(InventoryConsumptionMap::try_new(input(0, false)).is_err());
+        assert!(InventoryConsumptionMap::try_new(input(-5, false)).is_err());
+        assert!(InventoryConsumptionMap::try_new(input(1, false)).is_ok());
+    }
+
+    #[test]
+    fn try_new_carries_on_dye_only_flag_and_optional_subtype() {
+        let mut i = input(5, true);
+        i.check_subtype_id = Some(Uuid::now_v7());
+        let c = InventoryConsumptionMap::try_new(i).unwrap();
+        assert!(c.on_dye_only);
+        assert!(c.check_subtype_id.is_some());
+    }
+
+    #[test]
+    fn try_new_seeds_sync_columns() {
+        let c = InventoryConsumptionMap::try_new(input(5, false)).unwrap();
+        assert_eq!(c.version, 1);
+        assert!(c.dirty);
+        assert!(c.deleted_at.is_none());
+        assert_eq!(c.id.get_version_num(), 7);
+    }
+
+    #[test]
+    fn updated_with_rejects_non_positive_quantity() {
+        let c = InventoryConsumptionMap::try_new(input(5, false)).unwrap();
+        assert!(c.clone().updated_with(0, false).is_err());
+        assert!(c.updated_with(-1, false).is_err());
+    }
+
+    #[test]
+    fn updated_with_bumps_version_and_dirty() {
+        let c = InventoryConsumptionMap::try_new(input(5, false)).unwrap();
+        let v0 = c.version;
+        let after = c.updated_with(7, true).unwrap();
+        assert_eq!(after.quantity_per_check, 7);
+        assert!(after.on_dye_only);
+        assert_eq!(after.version, v0 + 1);
+        assert!(after.dirty);
+    }
+
+    #[test]
+    fn soft_deleted_marks_tombstone() {
+        let c = InventoryConsumptionMap::try_new(input(5, false)).unwrap();
+        let v0 = c.version;
+        let after = c.soft_deleted();
+        assert!(after.deleted_at.is_some());
+        assert_eq!(after.version, v0 + 1);
+        assert!(after.dirty);
+    }
+}

@@ -56,3 +56,39 @@ impl OperatorSpecialty {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_new_seeds_sync_columns_and_uuid_v7() {
+        let s = OperatorSpecialty::try_new(OperatorSpecialtyNewInput {
+            operator_id: Uuid::now_v7(),
+            check_type_id: Uuid::now_v7(),
+            entity_id: "t".into(),
+            origin_device_id: None,
+        })
+        .unwrap();
+        assert_eq!(s.version, 1);
+        assert!(s.dirty);
+        assert!(s.deleted_at.is_none());
+        assert_eq!(s.id.get_version_num(), 7);
+    }
+
+    #[test]
+    fn soft_deleted_marks_tombstone_and_bumps_version() {
+        let s = OperatorSpecialty::try_new(OperatorSpecialtyNewInput {
+            operator_id: Uuid::now_v7(),
+            check_type_id: Uuid::now_v7(),
+            entity_id: "t".into(),
+            origin_device_id: None,
+        })
+        .unwrap();
+        let v0 = s.version;
+        let after = s.soft_deleted();
+        assert!(after.deleted_at.is_some());
+        assert_eq!(after.version, v0 + 1);
+        assert!(after.dirty);
+    }
+}

@@ -50,22 +50,22 @@ pub struct CheckTypeUpdateInput {
 }
 
 #[derive(Clone)]
-pub struct CheckTypeService {
+pub struct CheckTypeService<R: tauri::Runtime = tauri::Wry> {
     pool: sqlx::SqlitePool,
     repo: Arc<dyn CheckTypeRepo>,
     writer: AuditWriter,
     device_id: String,
-    app: AppHandle,
+    app: AppHandle<R>,
 }
 
-impl CheckTypeService {
+impl<R: tauri::Runtime> CheckTypeService<R> {
     pub fn new(
         pool: sqlx::SqlitePool,
         repo: Arc<dyn CheckTypeRepo>,
         audit_repo: Arc<dyn AuditRepo>,
         outbox_repo: Arc<dyn OutboxRepo>,
         device_id: String,
-        app: AppHandle,
+        app: AppHandle<R>,
     ) -> Self {
         Self {
             pool,

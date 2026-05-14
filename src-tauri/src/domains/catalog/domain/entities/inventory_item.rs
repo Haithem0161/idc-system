@@ -128,3 +128,100 @@ impl InventoryItem {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(name: &str, unit: &str, threshold: i64) -> InventoryItemNewInput {
+        InventoryItemNewInput {
+            name_ar: name.into(),
+            name_en: None,
+            unit: unit.into(),
+            low_stock_threshold: threshold,
+            entity_id: "t".into(),
+            origin_device_id: None,
+        }
+    }
+
+    #[test]
+    fn try_new_requires_name_ar() {
+        assert!(InventoryItem::try_new(input("", "ml", 0)).is_err());
+        assert!(InventoryItem::try_new(input("   ", "ml", 0)).is_err());
+    }
+
+    #[test]
+    fn try_new_requires_non_empty_unit_after_trim() {
+        assert!(InventoryItem::try_new(input("Gel", "", 0)).is_err());
+        assert!(InventoryItem::try_new(input("Gel", "   ", 0)).is_err());
+        assert!(InventoryItem::try_new(input("Gel", "\t\t", 0)).is_err());
+        assert!(InventoryItem::try_new(input("Gel", "\n", 0)).is_err());
+    }
+
+    #[test]
+    fn try_new_trims_unit_before_persist() {
+        let i = InventoryItem::try_new(input("Gel", "  ml  ", 0)).unwrap();
+        assert_eq!(i.unit, "ml");
+    }
+
+    #[test]
+    fn try_new_rejects_negative_low_stock_threshold() {
+        assert!(InventoryItem::try_new(input("Gel", "ml", -1)).is_err());
+        assert!(InventoryItem::try_new(input("Gel", "ml", 0)).is_ok());
+    }
+
+    #[test]
+    fn try_new_seeds_quantity_on_hand_to_zero() {
+        let i = InventoryItem::try_new(input("Gel", "ml", 100)).unwrap();
+        assert_eq!(i.quantity_on_hand, 0);
+    }
+
+    #[test]
+    fn try_new_seeds_sync_columns_and_active() {
+        let i = InventoryItem::try_new(input("Gel", "ml", 0)).unwrap();
+        assert_eq!(i.version, 1);
+        assert!(i.dirty);
+        assert!(i.is_active);
+        assert!(i.deleted_at.is_none());
+        assert_eq!(i.id.get_version_num(), 7);
+    }
+
+    #[test]
+    fn with_updated_fields_revalidates_unit_and_threshold() {
+        let i = InventoryItem::try_new(input("Gel", "ml", 100)).unwrap();
+        let res = i.clone().with_updated_fields(InventoryItemUpdate {
+            unit: Some("   ".into()),
+            ..Default::default()
+        });
+        assert!(res.is_err());
+        let res = i.with_updated_fields(InventoryItemUpdate {
+            low_stock_threshold: Some(-1),
+            ..Default::default()
+        });
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn with_updated_fields_bumps_version_and_dirty() {
+        let i = InventoryItem::try_new(input("Gel", "ml", 0)).unwrap();
+        let v0 = i.version;
+        let after = i
+            .with_updated_fields(InventoryItemUpdate {
+                name_ar: Some("Gel-2".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(after.name_ar, "Gel-2");
+        assert_eq!(after.version, v0 + 1);
+        assert!(after.dirty);
+    }
+
+    #[test]
+    fn soft_deleted_marks_inactive_and_tombstone() {
+        let i = InventoryItem::try_new(input("Gel", "ml", 0)).unwrap();
+        let after = i.soft_deleted();
+        assert!(after.deleted_at.is_some());
+        assert!(!after.is_active);
+        assert!(after.dirty);
+    }
+}
