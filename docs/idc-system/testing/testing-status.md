@@ -199,7 +199,38 @@ Pass 5 is the closing pass. All 9 phases report zero remaining gaps. The cycle i
 - [x] Snapshot files committed -- 3 phase-02 auth-envelope structural pins under [`snapshots/auth-envelopes/`](snapshots/auth-envelopes/): `login-result.json` (LoginResult shape, mode + nested UserResponse with NO password_hash), `user-response.json` (canonical UserResponse, no password_hash at any depth), `setting-response.json` (canonical SettingResponse with adjacently-tagged SettingValue discriminated union). README documents the regeneration policy. Phase-02-owned snapshots are structural (placeholder UUIDs + timestamps) rather than byte-exact because the IPC envelopes carry freshly-minted values per request.
 - [x] Lint / typecheck / build pass: `cargo clippy --all-targets -- -D warnings` clean, `cargo fmt --check` clean, `pnpm build` clean (793 kB minified JS, no errors), `pnpm vitest run` 140/140. `pnpm lint` carries one pre-existing phase-01 i18n violation in `src/features/sync/queries.test.ts:38` ("ReturnType" — generic name flagged as jsx-text false positive); this is NOT introduced by phase-02 work and was already merged at phase-01 close. Sync-server tests partially blocked by pre-existing Node v24 ts-node `.js` resolver issue (filed as infrastructure, not phase-02 defect).
 
-**Phase 02 status**: ALL 9 DoD boxes checked. Phase row flipped `complete` 2026-05-14. Final tally: 89 unit (47 Rust + 42 TS) + 164 integration (121 Rust + 36 TS hook + 7 sync-server route additions) + 8 contract + 0 E2E (deferred) + 1 persona = **262 tests, all green** across the 4 active pyramid layers; **4 release-gated** (Argon2id-bound perf rows). Three P1 defects logged and resolved (DEF-003 settings repo ON CONFLICT partial-index target, DEF-004 migration RFC3339 timestamps, plus the IPC `_impl` refactor enabling §2.2 testability). Three P3 deferred-feature records (DEF-005/006/007) carrying ~20 build-gap rows for tracking. Zero P0/P1 open.
+**Phase 02 status**: ALL 9 DoD boxes checked. Phase row flipped `complete` 2026-05-14. Final tally: 89 unit (47 Rust + 42 TS) + 164 integration (121 Rust + 36 TS hook + 7 sync-server route additions) + 8 contract + 0 E2E (deferred) + 1 persona = **262 tests, all green** across the 4 active pyramid layers; **4 release-gated** (Argon2id-bound perf rows). Two P1 defects logged and resolved (DEF-003 settings repo ON CONFLICT partial-index target, DEF-004 migration RFC3339 timestamps). Three P3 deferred-feature records (DEF-005/006/007) carrying ~20 build-gap rows for tracking. Zero P0/P1 open.
+
+## Phase 02 Test File Inventory (this phase's artifacts)
+
+| File | Tests | Layer |
+|-|-|-|
+| `src-tauri/src/domains/auth/domain/entities/mod.rs::tests` | 11 inline | Unit |
+| `src-tauri/src/domains/auth/domain/value_objects/mod.rs::tests` | 6 inline | Unit |
+| `src-tauri/src/domains/auth/user_service.rs::tests` | 5 inline | Unit |
+| `src-tauri/src/domains/settings/domain/entities/mod.rs::tests` | 3 inline | Unit |
+| `src-tauri/src/domains/settings/domain/value_objects/mod.rs::tests` | 9 inline | Unit |
+| `src-tauri/src/domains/settings/service.rs::tests` | 9 inline | Unit |
+| `src/lib/schemas/auth.test.ts` | 21 | Unit (TS) |
+| `src/lib/schemas/setting.test.ts` | 9 | Unit (TS) |
+| `src/lib/format/money.test.ts` | 12 | Unit (TS) |
+| `src-tauri/tests/auth_phase02.rs` | 16 | Integration |
+| `src-tauri/tests/users_phase02.rs` | 17 | Integration |
+| `src-tauri/tests/settings_phase02.rs` | 15 | Integration |
+| `src-tauri/tests/auth_ipc_phase02.rs` | 41 | Integration (IPC) |
+| `src-tauri/tests/edges_phase02.rs` | 20 | Integration (8 edge categories) |
+| `src-tauri/tests/perf_phase02.rs` | 11 (4 release-gated) | Integration (perf SLO) |
+| `src-tauri/tests/gaps_phase02.rs` | 7 | Integration (gap rows) |
+| `src-tauri/tests/persona_phase02.rs` | 1 (18-step) | Persona (DoD-canonical) |
+| `src/features/auth/queries.test.ts` | 36 (18 × ltr/rtl) | Component / hook |
+| `src/lib/schemas/ipc-contract-phase02.test.ts` | 8 | Contract |
+| `sync-server/test/routes/auth.test.ts` (phase-02 additions) | 12 (TS-clean; runtime blocked by pre-existing Node v24 ts-node `.js` loader issue, NOT a phase-02 regression) | Sync-server route |
+| `docs/idc-system/testing/snapshots/auth-envelopes/{login-result,user-response,setting-response}.json` + `README.md` | 3 structural pins | Snapshot |
+| `migrations/002_users_settings.sql` (DEF-004 fix: 20 timestamp expressions migrated from `datetime('now')` to `strftime('%Y-%m-%dT%H:%M:%fZ','now')`) | -- | Schema fix |
+| `src-tauri/src/domains/settings/infrastructure/repositories/sqlite_setting_repo.rs` (DEF-003 fix: added `WHERE deleted_at IS NULL` to ON CONFLICT clause) | -- | Schema fix |
+| `src-tauri/src/domains/auth/commands.rs` (refactor: extracted 13 `_impl` helpers for IPC testability) | -- | Test infrastructure |
+| `src-tauri/src/domains/settings/commands.rs` (refactor: extracted 3 `_impl` helpers) | -- | Test infrastructure |
+| `src-tauri/src/state.rs` (added `AppState::for_phase02_tests` constructor mirroring `for_sync_tests`) | -- | Test infrastructure |
 
 ## Phase 01 Test File Inventory (this phase's artifacts)
 
