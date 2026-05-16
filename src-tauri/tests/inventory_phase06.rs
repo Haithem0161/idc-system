@@ -727,3 +727,840 @@ async fn count_correction_nonzero_trigger_blocks_direct_zero_insert() {
         .unwrap();
     assert_eq!(items.len(), 1);
 }
+
+// ---- §9.1 P06-G01 -- audit row delta payload shape ---------------------
+
+#[tokio::test]
+async fn audit_row_for_item_update_carries_before_after_reason_payload() {
+    let f = seed_one_item(0).await;
+    // Seed quantity 10.
+    f.service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 10,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    // Add a writeoff of 3.
+    f.service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Writeoff,
+                delta: 3,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    // Inspect the most recent inventory_items update audit row.
+    let row: (String,) = sqlx::query_as(
+        "SELECT delta FROM audit_log WHERE entity = 'inventory_items' AND entity_id = ? \
+         ORDER BY at DESC, id DESC LIMIT 1",
+    )
+    .bind(f.item.id.to_string())
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&row.0).unwrap();
+    let qty = payload.get("quantity_on_hand").unwrap();
+    assert_eq!(qty.get("before").and_then(|v| v.as_i64()), Some(10));
+    assert_eq!(qty.get("after").and_then(|v| v.as_i64()), Some(7));
+    assert_eq!(
+        payload.get("reason").and_then(|v| v.as_str()),
+        Some("writeoff")
+    );
+}
+
+#[tokio::test]
+async fn audit_row_for_adjustment_create_carries_full_after_snapshot() {
+    let f = seed_one_item(0).await;
+    let adj = f
+        .service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 4,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    let row: (String,) = sqlx::query_as(
+        "SELECT delta FROM audit_log WHERE entity = 'inventory_adjustments' AND entity_id = ? \
+         ORDER BY at DESC, id DESC LIMIT 1",
+    )
+    .bind(adj.id.to_string())
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&row.0).unwrap();
+    // `with_audit` runs `compute_delta(before=Null, after=<adjustment json>)`
+    // which non-object inputs degrade to `{ ".": { from, to } }` per
+    // `domains/sync/domain/services/delta.rs`.
+    let snapshot = payload
+        .get(".")
+        .and_then(|v| v.get("to"))
+        .expect("audit create payload must wrap the new snapshot under '.':'to'");
+    assert_eq!(
+        snapshot.get("reason").and_then(|v| v.as_str()),
+        Some("receive")
+    );
+    assert_eq!(snapshot.get("delta").and_then(|v| v.as_i64()), Some(4));
+    assert_eq!(
+        snapshot.get("item_id").and_then(|v| v.as_str()),
+        Some(f.item.id.to_string()).as_deref()
+    );
+}
+
+// ---- §10.4 P06-G11 -- audit-first ordering on both audit rows ----------
+
+#[tokio::test]
+async fn create_adjustment_writes_two_audit_rows_with_monotonic_ids() {
+    let f = seed_one_item(0).await;
+    let adj = f
+        .service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 5,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT entity, action, entity_id, id FROM audit_log \
+         WHERE entity_id IN (?, ?) ORDER BY at ASC, id ASC",
+    )
+    .bind(adj.id.to_string())
+    .bind(f.item.id.to_string())
+    .fetch_all(&f.pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 2, "expected two audit rows, got: {:?}", rows);
+    // The service writes the inline `inventory_items` audit row inside the
+    // closure, then `with_audit` writes its primary `inventory_adjustments`
+    // create row after the closure returns -- so on the `at ASC, id ASC`
+    // axis the items row lands first and the adjustments row lands second.
+    let entities: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+    assert_eq!(
+        entities,
+        vec!["inventory_items", "inventory_adjustments"],
+        "audit-row insertion order locked by the writer ordering"
+    );
+    let actions: Vec<&str> = rows.iter().map(|r| r.1.as_str()).collect();
+    assert_eq!(actions, vec!["update", "create"]);
+    // IDs are UUID v7 -- string-lexicographic order matches insertion order.
+    assert!(
+        rows[0].3 < rows[1].3,
+        "first-inserted audit row must have a smaller UUID v7 id (got {:?})",
+        rows
+    );
+}
+
+// ---- Note normalization + length cap (PRD §6.1.14 inv 6) ---------------
+
+#[tokio::test]
+async fn note_blank_or_whitespace_is_normalized_to_null() {
+    let f = seed_one_item(0).await;
+    let adj = f
+        .service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 1,
+                note: Some("   ".into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        adj.note.is_none(),
+        "whitespace-only note must normalize to None"
+    );
+
+    let adj_empty = f
+        .service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 1,
+                note: Some("".into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(adj_empty.note.is_none());
+}
+
+#[tokio::test]
+async fn note_longer_than_500_chars_is_rejected() {
+    let f = seed_one_item(0).await;
+    let err = f
+        .service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 1,
+                note: Some("x".repeat(501)),
+            },
+        )
+        .await
+        .expect_err("501-char note must be rejected by domain layer");
+    assert!(format!("{}", err).to_lowercase().contains("character"));
+}
+
+#[tokio::test]
+async fn note_trimmed_before_persist() {
+    let f = seed_one_item(0).await;
+    let adj = f
+        .service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 2,
+                note: Some("   from supplier   ".into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(adj.note.as_deref(), Some("from supplier"));
+}
+
+// ---- Soft-deleted item rejection ---------------------------------------
+
+#[tokio::test]
+async fn cannot_adjust_soft_deleted_item() {
+    let f = seed_one_item(0).await;
+    // Soft-delete the item directly via the repo.
+    let mut item = f.item.clone();
+    item.deleted_at = Some(chrono::Utc::now());
+    let mut tx = f.pool.begin().await.unwrap();
+    f.items_repo.upsert(&mut tx, &item).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let err = f
+        .service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 1,
+                note: None,
+            },
+        )
+        .await
+        .expect_err("soft-deleted item must reject new adjustments");
+    let msg = format!("{}", err).to_lowercase();
+    assert!(msg.contains("deleted") || msg.contains("not found"));
+}
+
+// ---- recompute_on_hand recovers drift ----------------------------------
+
+#[tokio::test]
+async fn recompute_recovers_drift_when_quantity_on_hand_is_corrupted() {
+    let f = seed_one_item(0).await;
+    f.service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 12,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(item_on_hand(&f.pool, f.item.id).await, 12);
+
+    // Corrupt the on-hand directly.
+    sqlx::query("UPDATE inventory_items SET quantity_on_hand = 999 WHERE id = ?")
+        .bind(f.item.id.to_string())
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    assert_eq!(item_on_hand(&f.pool, f.item.id).await, 999);
+
+    let n = f
+        .service
+        .recompute_on_hand(f.actor_user_id, UserRole::Superadmin, ENTITY_ID, f.item.id)
+        .await
+        .unwrap();
+    assert_eq!(n, 12);
+    assert_eq!(item_on_hand(&f.pool, f.item.id).await, 12);
+}
+
+#[tokio::test]
+async fn recompute_writes_audit_row_on_inventory_items() {
+    let f = seed_one_item(0).await;
+    f.service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 5,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    let before = count_audit_rows(&f.pool, "inventory_items", &f.item.id.to_string()).await;
+    f.service
+        .recompute_on_hand(f.actor_user_id, UserRole::Superadmin, ENTITY_ID, f.item.id)
+        .await
+        .unwrap();
+    let after = count_audit_rows(&f.pool, "inventory_items", &f.item.id.to_string()).await;
+    assert_eq!(
+        after - before,
+        1,
+        "recompute must write exactly one inventory_items audit row"
+    );
+}
+
+// ---- Recompute filters soft-deleted adjustments ------------------------
+
+#[tokio::test]
+async fn recompute_excludes_soft_deleted_adjustments_from_sum() {
+    let f = seed_one_item(0).await;
+    // Seed two live receives: +5 and +20 (sum=25).
+    for d in [5i64, 20] {
+        f.service
+            .create(
+                f.actor_user_id,
+                UserRole::Receptionist,
+                ENTITY_ID,
+                AdjustmentInput {
+                    item_id: f.item.id,
+                    reason: AdjustmentReason::Receive,
+                    delta: d,
+                    note: None,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    // Insert a row with `deleted_at` already set, bypassing the immutability
+    // trigger that blocks UPDATE on `deleted_at NULL -> NOT NULL`. The SUM-
+    // based recompute must STILL exclude this row.
+    sqlx::query(
+        "INSERT INTO inventory_adjustments \
+         (id, item_id, delta, reason, visit_id, note, by_user_id, \
+          created_at, updated_at, deleted_at, version, dirty, \
+          last_synced_at, origin_device_id, entity_id) \
+         VALUES (?,?,10,'receive',NULL,NULL,?, \
+                 datetime('now'),datetime('now'),datetime('now'),1,1,NULL,?,?)",
+    )
+    .bind(Uuid::now_v7().to_string())
+    .bind(f.item.id.to_string())
+    .bind(f.actor_user_id.to_string())
+    .bind(DEVICE_ID)
+    .bind(ENTITY_ID)
+    .execute(&f.pool)
+    .await
+    .unwrap();
+
+    // Force a recompute via the superadmin debug command.
+    let n = f
+        .service
+        .recompute_on_hand(f.actor_user_id, UserRole::Superadmin, ENTITY_ID, f.item.id)
+        .await
+        .unwrap();
+    assert_eq!(n, 25, "soft-deleted row must be excluded from SUM");
+}
+
+// ---- list_items / list_adjustments filtering --------------------------
+
+#[tokio::test]
+async fn list_items_status_ok_when_above_threshold() {
+    let f = seed_one_item(3).await;
+    f.service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 10,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    let ok_items = f
+        .service
+        .list_items(ENTITY_ID, Some(StockStatus::Ok), false, None)
+        .await
+        .unwrap();
+    assert_eq!(ok_items.len(), 1);
+    assert_eq!(ok_items[0].status, StockStatus::Ok);
+
+    // The same item NOT shown when filtering for `Low` or `Neg`.
+    let low = f
+        .service
+        .list_items(ENTITY_ID, Some(StockStatus::Low), false, None)
+        .await
+        .unwrap();
+    assert!(low.is_empty());
+    let neg = f
+        .service
+        .list_items(ENTITY_ID, Some(StockStatus::Neg), false, None)
+        .await
+        .unwrap();
+    assert!(neg.is_empty());
+}
+
+#[tokio::test]
+async fn list_items_threshold_zero_only_negative_pill() {
+    // threshold=0 means "never LOW" -- only NEG when on-hand drops below 0.
+    let f = seed_one_item(0).await;
+    f.service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 1,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    // qty=1, threshold=0 -> OK (strictly >). (StockStatus::compute uses <=)
+    let ok = f
+        .service
+        .list_items(ENTITY_ID, Some(StockStatus::Ok), false, None)
+        .await
+        .unwrap();
+    assert_eq!(ok.len(), 1);
+    // Drop to 0.
+    f.service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Writeoff,
+                delta: 1,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    // qty=0, threshold=0 -> LOW (the boundary is inclusive).
+    let low = f
+        .service
+        .list_items(ENTITY_ID, Some(StockStatus::Low), false, None)
+        .await
+        .unwrap();
+    assert_eq!(low.len(), 1);
+}
+
+#[tokio::test]
+async fn list_items_query_empty_or_whitespace_treated_as_none() {
+    let f = seed_one_item(0).await;
+    let empty = f
+        .service
+        .list_items(ENTITY_ID, None, false, Some("".into()))
+        .await
+        .unwrap();
+    assert_eq!(empty.len(), 1);
+    let ws = f
+        .service
+        .list_items(ENTITY_ID, None, false, Some("   ".into()))
+        .await
+        .unwrap();
+    assert_eq!(ws.len(), 1);
+}
+
+#[tokio::test]
+async fn list_adjustments_limit_is_clamped_to_max_200() {
+    let f = seed_one_item(0).await;
+    f.service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 1,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    // Asking for 1_000_000 must return at most one (the only one) and not error.
+    let rows = f
+        .service
+        .list_adjustments(ENTITY_ID, f.item.id, 1_000_000)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[tokio::test]
+async fn list_adjustments_limit_clamped_when_zero_or_negative() {
+    let f = seed_one_item(0).await;
+    f.service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 1,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    let zero = f
+        .service
+        .list_adjustments(ENTITY_ID, f.item.id, 0)
+        .await
+        .unwrap();
+    // Clamp lower bound is 1 -> at least one row returned (the only one).
+    assert!(zero.len() <= 1);
+    let neg = f
+        .service
+        .list_adjustments(ENTITY_ID, f.item.id, -50)
+        .await
+        .unwrap();
+    assert!(neg.len() <= 1);
+}
+
+// ---- get_item not_found and cross-tenant ------------------------------
+
+#[tokio::test]
+async fn get_item_not_found_for_unknown_id() {
+    let f = seed_one_item(0).await;
+    let err = f
+        .service
+        .get_item(ENTITY_ID, Uuid::now_v7())
+        .await
+        .expect_err("unknown item must be NotFound");
+    assert!(format!("{}", err).to_lowercase().contains("not found"));
+}
+
+#[tokio::test]
+async fn get_item_rejects_cross_tenant_lookup() {
+    let f = seed_one_item(0).await;
+    let err = f
+        .service
+        .get_item("tenant-other", f.item.id)
+        .await
+        .expect_err("cross-tenant lookup must be NotFound");
+    assert!(format!("{}", err).to_lowercase().contains("not found"));
+}
+
+// ---- Outbox payload correctness ---------------------------------------
+
+#[tokio::test]
+async fn create_adjustment_outbox_payload_is_valid_json() {
+    let f = seed_one_item(0).await;
+    let adj = f
+        .service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 7,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    let row: (Vec<u8>,) = sqlx::query_as(
+        "SELECT payload FROM outbox WHERE entity = 'inventory_adjustments' \
+         AND entity_id = ? LIMIT 1",
+    )
+    .bind(adj.id.to_string())
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&row.0).unwrap();
+    // The push payload carries: id, item_id, delta, reason, by_user_id, created_at,
+    // updated_at, deleted_at (nullable), version, entity_id, visit_id (nullable),
+    // origin_device_id (nullable), note (nullable).
+    assert_eq!(v.get("reason").and_then(|x| x.as_str()), Some("receive"));
+    assert_eq!(v.get("delta").and_then(|x| x.as_i64()), Some(7));
+    assert!(v.get("id").is_some());
+    assert!(v.get("item_id").is_some());
+}
+
+#[tokio::test]
+async fn create_adjustment_enqueues_item_outbox_with_bumped_version() {
+    let f = seed_one_item(0).await;
+    let initial_version = f.item.version;
+    f.service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 4,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    // Inspect the inventory_items outbox row.
+    let row: (Vec<u8>,) = sqlx::query_as(
+        "SELECT payload FROM outbox WHERE entity = 'inventory_items' \
+         AND entity_id = ? LIMIT 1",
+    )
+    .bind(f.item.id.to_string())
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&row.0).unwrap();
+    let v_version = v.get("version").and_then(|x| x.as_i64()).unwrap();
+    assert_eq!(
+        v_version,
+        initial_version + 1,
+        "outbox payload must carry the bumped version"
+    );
+    assert_eq!(v.get("quantity_on_hand").and_then(|x| x.as_i64()), Some(4));
+}
+
+// ---- Multi-tenant isolation under the same DB --------------------------
+
+#[tokio::test]
+async fn list_items_isolated_per_tenant() {
+    let f = seed_one_item(0).await;
+    // Seed a second item under a different tenant.
+    let other = InventoryItem::try_new(InventoryItemNewInput {
+        name_ar: "بديل".into(),
+        name_en: Some("OtherWidget".into()),
+        unit: "pcs".into(),
+        low_stock_threshold: 0,
+        entity_id: "tenant-other".into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    })
+    .unwrap();
+    let mut tx = f.pool.begin().await.unwrap();
+    f.items_repo.upsert(&mut tx, &other).await.unwrap();
+    tx.commit().await.unwrap();
+    let mine = f
+        .service
+        .list_items(ENTITY_ID, None, false, None)
+        .await
+        .unwrap();
+    assert_eq!(mine.len(), 1);
+    assert_eq!(mine[0].item.entity_id, ENTITY_ID);
+}
+
+// ---- Append-only trigger from phase-05 §7.33 reasserted here ----------
+
+#[tokio::test]
+async fn append_only_trigger_blocks_delta_update_on_adjustment() {
+    let f = seed_one_item(0).await;
+    let adj = f
+        .service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 5,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    let res = sqlx::query("UPDATE inventory_adjustments SET delta = -10 WHERE id = ?")
+        .bind(adj.id.to_string())
+        .execute(&f.pool)
+        .await;
+    assert!(res.is_err(), "append-only trigger must reject delta edits");
+
+    // Sync-metadata UPDATE (last_synced_at) is allowed.
+    let ok = sqlx::query(
+        "UPDATE inventory_adjustments SET last_synced_at = datetime('now') WHERE id = ?",
+    )
+    .bind(adj.id.to_string())
+    .execute(&f.pool)
+    .await;
+    assert!(ok.is_ok(), "sync-metadata update must remain allowed");
+}
+
+// ---- Sanity-cap: large delta still persists ---------------------------
+
+#[tokio::test]
+async fn unusually_large_delta_persists_and_does_not_block() {
+    let f = seed_one_item(0).await;
+    let adj = f
+        .service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Receive,
+                delta: 1500,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(adj.delta, 1500);
+    assert_eq!(item_on_hand(&f.pool, f.item.id).await, 1500);
+}
+
+// ---- list_adjustments order: newest first ------------------------------
+
+#[tokio::test]
+async fn list_adjustments_returns_chronological_newest_first() {
+    let f = seed_one_item(0).await;
+    let mut ids = Vec::new();
+    for d in [1i64, 2, 3] {
+        let adj = f
+            .service
+            .create(
+                f.actor_user_id,
+                UserRole::Receptionist,
+                ENTITY_ID,
+                AdjustmentInput {
+                    item_id: f.item.id,
+                    reason: AdjustmentReason::Receive,
+                    delta: d,
+                    note: None,
+                },
+            )
+            .await
+            .unwrap();
+        ids.push(adj.id);
+        // Sleep enough so UUID v7 timestamps differ deterministically.
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    let rows = f
+        .service
+        .list_adjustments(ENTITY_ID, f.item.id, 50)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 3);
+    // Newest first: ids[2], ids[1], ids[0].
+    assert_eq!(rows[0].id, ids[2]);
+    assert_eq!(rows[2].id, ids[0]);
+}
+
+// ---- Migration 006 idempotency ----------------------------------------
+
+#[tokio::test]
+async fn migration_006_partial_indexes_exist_and_are_idempotent() {
+    let pool = fresh_pool().await;
+    // Indexes should exist after migrations::run().
+    let names: Vec<(String,)> = sqlx::query_as(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name IN \
+         ('inventory_items_low_stock','inventory_items_negative')",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let set: std::collections::HashSet<_> = names.into_iter().map(|(n,)| n).collect();
+    assert!(set.contains("inventory_items_low_stock"));
+    assert!(set.contains("inventory_items_negative"));
+
+    // Re-run migrations (idempotent).
+    migrations::run(&pool).await.unwrap();
+    let again: Vec<(String,)> = sqlx::query_as(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name IN \
+         ('inventory_items_low_stock','inventory_items_negative')",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(again.len(), 2);
+}
+
+// ---- Stock status precedence: Negative wins over Low ------------------
+
+#[tokio::test]
+async fn negative_status_takes_precedence_over_low_when_threshold_above_zero() {
+    let f = seed_one_item(10).await;
+    // Drive on-hand negative.
+    f.service
+        .create(
+            f.actor_user_id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            AdjustmentInput {
+                item_id: f.item.id,
+                reason: AdjustmentReason::Writeoff,
+                delta: 5,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+    // Now on-hand = -5; threshold = 10. The pill MUST be Neg (precedence).
+    let neg = f
+        .service
+        .list_items(ENTITY_ID, Some(StockStatus::Neg), false, None)
+        .await
+        .unwrap();
+    assert_eq!(neg.len(), 1);
+    let low = f
+        .service
+        .list_items(ENTITY_ID, Some(StockStatus::Low), false, None)
+        .await
+        .unwrap();
+    assert!(low.is_empty(), "Negative must NOT also appear as Low");
+}

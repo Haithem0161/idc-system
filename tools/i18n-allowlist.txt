@@ -48,3 +48,8 @@ ReturnType
 أشعة
 ليلى
 هاشم
+
+# Arabic fixture identifiers used by phase-06 inventory tests.
+# Not user-facing -- assertion inputs only.
+صنف
+ليدوكائين
