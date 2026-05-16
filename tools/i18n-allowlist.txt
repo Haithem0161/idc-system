@@ -42,3 +42,9 @@ not seeded
 # (e.g. `ReturnType<typeof createElement>` inside `src/features/*/queries.test.ts`).
 # Not user-facing text -- false positive on the i18n lint's jsx-text rule.
 ReturnType
+
+# Arabic test fixtures used by phase-05 schema + persona tests.
+# Not user-facing -- assertion inputs only.
+أشعة
+ليلى
+هاشم

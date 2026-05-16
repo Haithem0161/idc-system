@@ -205,3 +205,189 @@ impl InventoryAdjustment {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base(reason: AdjustmentReason, delta: i64) -> AdjustmentNewInput {
+        AdjustmentNewInput {
+            item_id: Uuid::now_v7(),
+            delta,
+            reason,
+            visit_id: if matches!(reason, AdjustmentReason::ConsumeVisit) {
+                Some(Uuid::now_v7())
+            } else {
+                None
+            },
+            note: None,
+            by_user_id: Uuid::now_v7(),
+            entity_id: "t".into(),
+            origin_device_id: Some("dev".into()),
+        }
+    }
+
+    #[test]
+    fn adjustment_reason_round_trip_parses_to_canonical_string() {
+        for v in [
+            AdjustmentReason::Receive,
+            AdjustmentReason::Writeoff,
+            AdjustmentReason::CountCorrection,
+            AdjustmentReason::ConsumeVisit,
+        ] {
+            let s = v.as_str();
+            assert_eq!(AdjustmentReason::parse(s).unwrap(), v);
+        }
+        assert!(AdjustmentReason::parse("unknown").is_none());
+    }
+
+    #[test]
+    fn receive_requires_positive_delta() {
+        let mut input = base(AdjustmentReason::Receive, -1);
+        assert!(InventoryAdjustment::try_new(input.clone()).is_err());
+        input.delta = 0;
+        assert!(InventoryAdjustment::try_new(input.clone()).is_err());
+        input.delta = 7;
+        assert!(InventoryAdjustment::try_new(input).is_ok());
+    }
+
+    #[test]
+    fn writeoff_requires_negative_delta() {
+        let mut input = base(AdjustmentReason::Writeoff, 1);
+        assert!(InventoryAdjustment::try_new(input.clone()).is_err());
+        input.delta = 0;
+        assert!(InventoryAdjustment::try_new(input.clone()).is_err());
+        input.delta = -3;
+        assert!(InventoryAdjustment::try_new(input).is_ok());
+    }
+
+    #[test]
+    fn count_correction_requires_non_zero_delta() {
+        let mut input = base(AdjustmentReason::CountCorrection, 0);
+        assert!(InventoryAdjustment::try_new(input.clone()).is_err());
+        input.delta = -5;
+        assert!(InventoryAdjustment::try_new(input.clone()).is_ok());
+        input.delta = 5;
+        assert!(InventoryAdjustment::try_new(input).is_ok());
+    }
+
+    #[test]
+    fn consume_visit_requires_visit_id() {
+        let mut input = base(AdjustmentReason::ConsumeVisit, -2);
+        input.visit_id = None;
+        assert!(InventoryAdjustment::try_new(input).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_entity_id() {
+        let mut input = base(AdjustmentReason::Receive, 5);
+        input.entity_id = " ".into();
+        assert!(InventoryAdjustment::try_new(input).is_err());
+    }
+
+    #[test]
+    fn rejects_note_longer_than_500_characters() {
+        let mut input = base(AdjustmentReason::Receive, 5);
+        input.note = Some("a".repeat(501));
+        assert!(InventoryAdjustment::try_new(input).is_err());
+    }
+
+    #[test]
+    fn accepts_note_at_exactly_500_characters() {
+        let mut input = base(AdjustmentReason::Receive, 5);
+        input.note = Some("a".repeat(500));
+        assert!(InventoryAdjustment::try_new(input).is_ok());
+    }
+
+    #[test]
+    fn try_receive_negates_quantity_into_positive_delta() {
+        let adj = InventoryAdjustment::try_receive(
+            Uuid::now_v7(),
+            10,
+            Uuid::now_v7(),
+            Some("open".into()),
+            "t".into(),
+            Some("dev".into()),
+        )
+        .unwrap();
+        assert_eq!(adj.delta, 10);
+        assert_eq!(adj.reason, AdjustmentReason::Receive);
+    }
+
+    #[test]
+    fn try_receive_rejects_zero_or_negative_quantity() {
+        assert!(InventoryAdjustment::try_receive(
+            Uuid::now_v7(),
+            0,
+            Uuid::now_v7(),
+            None,
+            "t".into(),
+            None
+        )
+        .is_err());
+        assert!(InventoryAdjustment::try_receive(
+            Uuid::now_v7(),
+            -3,
+            Uuid::now_v7(),
+            None,
+            "t".into(),
+            None
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn try_writeoff_stores_negative_delta_from_positive_qty() {
+        let adj = InventoryAdjustment::try_writeoff(
+            Uuid::now_v7(),
+            7,
+            Uuid::now_v7(),
+            None,
+            "t".into(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(adj.delta, -7);
+        assert_eq!(adj.reason, AdjustmentReason::Writeoff);
+    }
+
+    #[test]
+    fn try_count_correction_rejects_zero_delta() {
+        assert!(InventoryAdjustment::try_count_correction(
+            Uuid::now_v7(),
+            0,
+            Uuid::now_v7(),
+            None,
+            "t".into(),
+            None,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn try_count_correction_accepts_positive_and_negative_signed_delta() {
+        for d in [-5, 5] {
+            let adj = InventoryAdjustment::try_count_correction(
+                Uuid::now_v7(),
+                d,
+                Uuid::now_v7(),
+                None,
+                "t".into(),
+                None,
+            )
+            .unwrap();
+            assert_eq!(adj.delta, d);
+            assert_eq!(adj.reason, AdjustmentReason::CountCorrection);
+        }
+    }
+
+    #[test]
+    fn try_new_seeds_uuid_v7_version_1_dirty_true() {
+        let adj = InventoryAdjustment::try_new(base(AdjustmentReason::Receive, 1)).unwrap();
+        let bytes = adj.id.as_bytes();
+        assert_eq!((bytes[6] & 0xF0) >> 4, 7);
+        assert_eq!(adj.version, 1);
+        assert!(adj.dirty);
+        assert!(adj.deleted_at.is_none());
+    }
+}

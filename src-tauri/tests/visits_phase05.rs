@@ -58,6 +58,7 @@ use app_lib::domains::visits::domain::repositories::{InventoryAdjustmentRepo, Vi
 use app_lib::domains::visits::domain::services::MoneySettings;
 use app_lib::domains::visits::infrastructure::{SqliteInventoryAdjustmentRepo, SqliteVisitRepo};
 use app_lib::domains::visits::service::{CreateDraftInput, VisitService, VisitServiceConfig};
+use chrono::Datelike;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -631,4 +632,680 @@ async fn patients_search_returns_matches_by_fts_prefix() {
         .await
         .unwrap();
     assert!(rows.iter().any(|p| p.name.starts_with("Alice")));
+}
+
+// ---- Phase 05 plan §2.1 extensions ----------------------------------------
+
+async fn create_and_lock_visit(f: &Fixture) -> Uuid {
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: Some(f.doctor.id),
+                dye: false,
+                report: false,
+            },
+        )
+        .await
+        .unwrap();
+    f.visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await
+        .unwrap();
+    draft.id
+}
+
+#[tokio::test]
+async fn lock_writes_audit_row_for_lock_action() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM audit_log WHERE entity = 'visits' AND entity_id = ? AND action = 'lock'",
+    )
+    .bind(visit_id.to_string())
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    assert_eq!(count.0, 1);
+    // Audit row's delta JSON has both a before and after.
+    let row: (String,) = sqlx::query_as(
+        "SELECT delta FROM audit_log WHERE entity = 'visits' AND entity_id = ? AND action = 'lock'",
+    )
+    .bind(visit_id.to_string())
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    // Delta carries field-level `from` and `to` markers.
+    assert!(row.0.contains("\"from\""));
+    assert!(row.0.contains("\"to\""));
+}
+
+#[tokio::test]
+async fn lock_keeps_internal_pct_null_when_doctor_id_set() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    let row: (Option<i64>, Option<String>) =
+        sqlx::query_as("SELECT internal_pct_snapshot, doctor_id FROM visits WHERE id = ?")
+            .bind(visit_id.to_string())
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    // doctor was set, so internal_pct must be NULL.
+    assert!(row.0.is_none());
+    assert!(row.1.is_some());
+}
+
+#[tokio::test]
+async fn lock_house_visit_records_internal_pct_and_null_doctor_snapshot() {
+    let f = seed().await;
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: None,
+                dye: false,
+                report: false,
+            },
+        )
+        .await
+        .unwrap();
+    f.visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await
+        .unwrap();
+    let row: (Option<i64>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT internal_pct_snapshot, doctor_id, doctor_name_snapshot FROM visits WHERE id = ?",
+    )
+    .bind(draft.id.to_string())
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    assert!(row.0.is_some());
+    assert!(row.1.is_none());
+    assert!(row.2.is_none());
+}
+
+#[tokio::test]
+async fn lock_writes_all_required_name_snapshots() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    let row: (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT patient_name_snapshot, doctor_name_snapshot, operator_name_snapshot, check_type_name_ar_snapshot FROM visits WHERE id = ?",
+    )
+    .bind(visit_id.to_string())
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    assert!(row.0.is_some());
+    assert!(row.1.is_some());
+    assert!(row.2.is_some());
+    assert!(row.3.is_some());
+}
+
+#[tokio::test]
+async fn update_draft_rejected_on_locked_visit() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    let err = f
+        .visit_service
+        .update_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            app_lib::domains::visits::service::UpdateDraftInput {
+                visit_id,
+                check_subtype_id: None,
+                doctor_id: None,
+                dye: Some(true),
+                report: None,
+            },
+        )
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn lock_rejects_when_operator_not_in_qualified_set() {
+    let f = seed().await;
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: Some(f.doctor.id),
+                dye: false,
+                report: false,
+            },
+        )
+        .await
+        .unwrap();
+    let stranger_id = Uuid::now_v7();
+    let err = f
+        .visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            stranger_id,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn lock_rejects_voided_visit() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    f.visit_service
+        .void(
+            f.superadmin.id,
+            UserRole::Superadmin,
+            visit_id,
+            "wrong patient".into(),
+        )
+        .await
+        .unwrap();
+    let err = f
+        .visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            visit_id,
+            f.operator.id,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn void_writes_offset_rows_with_matching_visit_id_and_positive_delta() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    f.visit_service
+        .void(
+            f.superadmin.id,
+            UserRole::Superadmin,
+            visit_id,
+            "wrong patient was used".into(),
+        )
+        .await
+        .unwrap();
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT delta, visit_id FROM inventory_adjustments WHERE visit_id = ? ORDER BY created_at",
+    )
+    .bind(visit_id.to_string())
+    .fetch_all(&f.pool)
+    .await
+    .unwrap();
+    // Two rows: original consume (-2) + offset (+2).
+    assert_eq!(rows.len(), 2);
+    let sum: i64 = rows.iter().map(|r| r.0).sum();
+    assert_eq!(sum, 0);
+}
+
+#[tokio::test]
+async fn void_rejected_when_already_voided() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    f.visit_service
+        .void(
+            f.superadmin.id,
+            UserRole::Superadmin,
+            visit_id,
+            "first void".into(),
+        )
+        .await
+        .unwrap();
+    let err = f
+        .visit_service
+        .void(
+            f.superadmin.id,
+            UserRole::Superadmin,
+            visit_id,
+            "second void".into(),
+        )
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn void_writes_audit_row_with_action_void() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    f.visit_service
+        .void(
+            f.superadmin.id,
+            UserRole::Superadmin,
+            visit_id,
+            "void reason here".into(),
+        )
+        .await
+        .unwrap();
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM audit_log WHERE entity = 'visits' AND action = 'void' AND entity_id = ?",
+    )
+    .bind(visit_id.to_string())
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    assert_eq!(count.0, 1);
+}
+
+#[tokio::test]
+async fn discard_rejects_voided_visit() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    f.visit_service
+        .void(
+            f.superadmin.id,
+            UserRole::Superadmin,
+            visit_id,
+            "void reason here".into(),
+        )
+        .await
+        .unwrap();
+    let err = f
+        .visit_service
+        .discard(f.receptionist.id, UserRole::Receptionist, visit_id)
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn create_draft_rejects_subtype_when_check_type_lacks_subtypes() {
+    let f = seed().await;
+    let bogus_subtype = Uuid::now_v7();
+    let err = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: Some(bogus_subtype),
+                doctor_id: None,
+                dye: false,
+                report: false,
+            },
+        )
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn create_draft_rejects_unsupported_dye() {
+    let f = seed().await;
+    // Mark the seed check type as dye_supported=0 via raw SQL.
+    sqlx::query("UPDATE check_types SET dye_supported = 0 WHERE id = ?")
+        .bind(f.check_type.id.to_string())
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let err = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: None,
+                dye: true,
+                report: false,
+            },
+        )
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn create_draft_rejected_for_accountant_role() {
+    let f = seed().await;
+    let err = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Accountant,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: None,
+                dye: false,
+                report: false,
+            },
+        )
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn void_rejected_for_receptionist_role() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    let err = f
+        .visit_service
+        .void(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            visit_id,
+            "valid reason here".into(),
+        )
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn list_today_by_check_returns_locked_visit() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    let rows = f
+        .visit_service
+        .list_today_by_check(ENTITY_ID, f.check_type.id)
+        .await
+        .unwrap();
+    assert!(rows.iter().any(|v| v.id == visit_id));
+}
+
+#[tokio::test]
+async fn list_drafts_by_check_excludes_locked_visits() {
+    let f = seed().await;
+    let _ = create_and_lock_visit(&f).await;
+    let rows = f
+        .visit_service
+        .list_drafts_by_check(ENTITY_ID, f.check_type.id)
+        .await
+        .unwrap();
+    assert!(rows.iter().all(|v| v.status == VisitStatus::Draft));
+}
+
+#[tokio::test]
+async fn checks_grid_includes_today_count_per_check_type() {
+    let f = seed().await;
+    let _ = create_and_lock_visit(&f).await;
+    let grid = f.visit_service.checks_grid(ENTITY_ID).await.unwrap();
+    let our = grid
+        .iter()
+        .find(|c| c.check_type_id == f.check_type.id)
+        .unwrap();
+    assert!(our.todays_visits >= 1);
+}
+
+#[tokio::test]
+async fn lines_run_today_counts_locked_visits_per_operator() {
+    let f = seed().await;
+    let _ = create_and_lock_visit(&f).await;
+    let count = f
+        .visit_service
+        .lines_run_today(ENTITY_ID, f.operator.id)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[tokio::test]
+async fn lines_run_today_returns_zero_for_unknown_operator() {
+    let f = seed().await;
+    let _ = create_and_lock_visit(&f).await;
+    let count = f
+        .visit_service
+        .lines_run_today(ENTITY_ID, Uuid::now_v7())
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn qualified_operators_returns_only_clocked_in_with_matching_specialty() {
+    let f = seed().await;
+    let ops = f
+        .visit_service
+        .qualified_operators(ENTITY_ID, f.check_type.id)
+        .await
+        .unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].id, f.operator.id);
+}
+
+#[tokio::test]
+async fn qualified_operators_empty_when_no_open_shifts() {
+    let f = seed().await;
+    // Close the shift via raw SQL.
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "UPDATE operator_shifts SET check_out_at = ?, updated_at = ? WHERE operator_id = ?",
+    )
+    .bind(&now)
+    .bind(&now)
+    .bind(f.operator.id.to_string())
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let ops = f
+        .visit_service
+        .qualified_operators(ENTITY_ID, f.check_type.id)
+        .await
+        .unwrap();
+    assert!(ops.is_empty());
+}
+
+#[tokio::test]
+async fn pricing_resolve_returns_fresh_snapshot_without_mutating_visit() {
+    let f = seed().await;
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: Some(f.doctor.id),
+                dye: false,
+                report: false,
+            },
+        )
+        .await
+        .unwrap();
+    let pre = f.visit_service.get(draft.id).await.unwrap();
+    let snap = f
+        .visit_service
+        .resolve_snapshots(draft.id, settings())
+        .await
+        .unwrap();
+    assert_eq!(snap.snapshots.price_iqd, 50_000);
+    let post = f.visit_service.get(draft.id).await.unwrap();
+    assert_eq!(pre.version, post.version);
+    assert!(post.snapshots.is_none());
+}
+
+#[tokio::test]
+async fn pricing_resolve_rejected_on_locked_visit() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    let err = f
+        .visit_service
+        .resolve_snapshots(visit_id, settings())
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn lock_increments_visit_version_monotonically_from_create() {
+    let f = seed().await;
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: Some(f.doctor.id),
+                dye: false,
+                report: false,
+            },
+        )
+        .await
+        .unwrap();
+    let create_version = draft.version;
+    f.visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await
+        .unwrap();
+    let locked = f.visit_service.get(draft.id).await.unwrap();
+    assert!(locked.version > create_version);
+}
+
+#[tokio::test]
+async fn lock_produces_receipt_files_under_yyyy_mm_partition() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    // Receipts dir/<yyyy>/<mm>/<visit_id>.{pdf.txt,thermal.txt}
+    let now = chrono::Utc::now();
+    let dir = f
+        .receipts_dir
+        .join(format!("{:04}", now.year()))
+        .join(format!("{:02}", now.month()));
+    let a5_path = dir.join(format!("{}.pdf.txt", visit_id));
+    let thermal_path = dir.join(format!("{}.thermal.txt", visit_id));
+    assert!(a5_path.exists(), "expected A5 receipt at {:?}", a5_path);
+    assert!(
+        thermal_path.exists(),
+        "expected thermal receipt at {:?}",
+        thermal_path
+    );
+}
+
+#[tokio::test]
+async fn reprint_renders_again_without_mutating_audit_log() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    let pre: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM audit_log WHERE entity = 'visits' AND entity_id = ?")
+            .bind(visit_id.to_string())
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    let artifacts = f
+        .visit_service
+        .render_receipt(visit_id, ReceiptRenderOptions::default())
+        .await
+        .unwrap();
+    assert!(artifacts.a5_path.exists());
+    let post: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM audit_log WHERE entity = 'visits' AND entity_id = ?")
+            .bind(visit_id.to_string())
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    assert_eq!(pre.0, post.0);
+}
+
+#[tokio::test]
+async fn migration_005_idempotent_on_populated_db() {
+    let f = seed().await;
+    let _ = create_and_lock_visit(&f).await;
+    // Replay all migrations against the populated DB.
+    migrations::run(&f.pool).await.unwrap();
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM visits WHERE deleted_at IS NULL")
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+    assert!(count.0 >= 1);
+}
+
+#[tokio::test]
+async fn lock_outbox_carries_payload_for_visit_and_each_consume() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    let visit_outbox: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE entity = 'visits' AND entity_id = ?")
+            .bind(visit_id.to_string())
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    assert!(visit_outbox.0 >= 1);
+    let adj_outbox: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE entity = 'inventory_adjustments'")
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    assert!(adj_outbox.0 >= 1);
+}
+
+#[tokio::test]
+async fn inventory_adjustments_no_update_trigger_allows_sync_metadata_only() {
+    let f = seed().await;
+    let visit_id = create_and_lock_visit(&f).await;
+    let adj_id: (String,) =
+        sqlx::query_as("SELECT id FROM inventory_adjustments WHERE visit_id = ? LIMIT 1")
+            .bind(visit_id.to_string())
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    // Updating only sync-metadata fields is allowed (per §7.33 carve-out).
+    let res = sqlx::query(
+        "UPDATE inventory_adjustments SET version = version + 1, dirty = 0, last_synced_at = ? WHERE id = ?",
+    )
+    .bind(chrono::Utc::now().to_rfc3339())
+    .bind(&adj_id.0)
+    .execute(&f.pool)
+    .await;
+    assert!(res.is_ok());
 }

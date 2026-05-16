@@ -122,3 +122,218 @@ impl From<&InventoryAdjustment> for InventoryAdjustmentPushPayload {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::visits::domain::entities::{
+        AdjustmentNewInput, AdjustmentReason, InventoryAdjustment, VisitCreateDraftInput,
+        VisitSnapshots,
+    };
+
+    fn snap_house(price: i64) -> VisitSnapshots {
+        VisitSnapshots {
+            price_iqd: price,
+            dye_cost_iqd: 0,
+            report_cost_iqd: 0,
+            doctor_cut_iqd: price * 40 / 100,
+            operator_cut_iqd: 5_000,
+            internal_pct: Some(40),
+            total_amount_iqd: price,
+            patient_name: "Pat".into(),
+            doctor_name: None,
+            operator_name: "Op".into(),
+            check_type_name_ar: "اختبار".into(),
+            check_type_name_en: Some("Test".into()),
+            check_subtype_name_ar: None,
+            check_subtype_name_en: None,
+        }
+    }
+
+    fn draft() -> Visit {
+        Visit::create_draft(VisitCreateDraftInput {
+            patient_id: Uuid::now_v7(),
+            receptionist_user_id: Uuid::now_v7(),
+            check_type_id: Uuid::now_v7(),
+            check_subtype_id: None,
+            doctor_id: None,
+            dye: false,
+            report: false,
+            entity_id: "t".into(),
+            origin_device_id: Some("dev".into()),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn visit_push_payload_round_trip_via_messagepack_preserves_status_and_id() {
+        let v = draft();
+        let payload = VisitPushPayload::from(&v);
+        let bytes = rmp_serde::to_vec_named(&payload).unwrap();
+        let decoded: VisitPushPayload = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.id, v.id);
+        assert_eq!(decoded.status, "draft");
+        assert_eq!(decoded.entity_id, v.entity_id);
+        assert!(decoded.locked_at.is_none());
+        assert!(decoded.total_amount_iqd_snapshot.is_none());
+    }
+
+    #[test]
+    fn visit_push_payload_for_locked_visit_carries_all_seven_name_snapshots() {
+        let v = draft();
+        let snap = snap_house(50_000);
+        let locked = v
+            .lock(Uuid::now_v7(), snap.clone(), chrono::Utc::now())
+            .unwrap();
+        let payload = VisitPushPayload::from(&locked);
+        assert_eq!(payload.status, "locked");
+        assert_eq!(
+            payload.patient_name_snapshot.as_deref(),
+            Some(snap.patient_name.as_str())
+        );
+        assert_eq!(
+            payload.operator_name_snapshot.as_deref(),
+            Some(snap.operator_name.as_str())
+        );
+        assert_eq!(
+            payload.check_type_name_ar_snapshot.as_deref(),
+            Some(snap.check_type_name_ar.as_str())
+        );
+        assert_eq!(
+            payload.total_amount_iqd_snapshot,
+            Some(snap.total_amount_iqd)
+        );
+        assert_eq!(payload.internal_pct_snapshot, Some(40));
+        // doctor null in house mode -> doctor_name_snapshot None.
+        assert!(payload.doctor_name_snapshot.is_none());
+    }
+
+    #[test]
+    fn visit_push_payload_for_voided_carries_void_reason_trimmed() {
+        let v = draft();
+        let locked = v
+            .lock(Uuid::now_v7(), snap_house(50_000), chrono::Utc::now())
+            .unwrap();
+        let voided = locked
+            .void(
+                "  valid reason  ".into(),
+                Uuid::now_v7(),
+                chrono::Utc::now(),
+            )
+            .unwrap();
+        let payload = VisitPushPayload::from(&voided);
+        assert_eq!(payload.status, "voided");
+        assert_eq!(payload.void_reason.as_deref(), Some("valid reason"));
+        assert!(payload.voided_at.is_some());
+        assert!(payload.voided_by_user_id.is_some());
+    }
+
+    #[test]
+    fn visit_push_payload_json_key_set_is_stable() {
+        let v = draft();
+        let payload = VisitPushPayload::from(&v);
+        let json = serde_json::to_value(&payload).unwrap();
+        let obj = json.as_object().unwrap();
+        let mut keys: Vec<&str> = obj.keys().map(|s| s.as_str()).collect();
+        keys.sort();
+        let expected = [
+            "check_subtype_id",
+            "check_subtype_name_ar_snapshot",
+            "check_subtype_name_en_snapshot",
+            "check_type_id",
+            "check_type_name_ar_snapshot",
+            "check_type_name_en_snapshot",
+            "created_at",
+            "deleted_at",
+            "doctor_cut_snapshot_iqd",
+            "doctor_id",
+            "doctor_name_snapshot",
+            "dye",
+            "dye_cost_snapshot_iqd",
+            "entity_id",
+            "id",
+            "internal_pct_snapshot",
+            "locked_at",
+            "operator_cut_snapshot_iqd",
+            "operator_id",
+            "operator_name_snapshot",
+            "origin_device_id",
+            "patient_id",
+            "patient_name_snapshot",
+            "price_snapshot_iqd",
+            "receptionist_user_id",
+            "report",
+            "report_cost_snapshot_iqd",
+            "status",
+            "total_amount_iqd_snapshot",
+            "updated_at",
+            "version",
+            "void_reason",
+            "voided_at",
+            "voided_by_user_id",
+        ];
+        assert_eq!(keys, expected);
+    }
+
+    #[test]
+    fn adjustment_push_payload_round_trip_via_messagepack() {
+        let adj = InventoryAdjustment::try_new(AdjustmentNewInput {
+            item_id: Uuid::now_v7(),
+            delta: -3,
+            reason: AdjustmentReason::ConsumeVisit,
+            visit_id: Some(Uuid::now_v7()),
+            note: Some("test".into()),
+            by_user_id: Uuid::now_v7(),
+            entity_id: "t".into(),
+            origin_device_id: Some("dev".into()),
+        })
+        .unwrap();
+        let p = InventoryAdjustmentPushPayload::from(&adj);
+        let bytes = rmp_serde::to_vec_named(&p).unwrap();
+        let decoded: InventoryAdjustmentPushPayload = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.id, adj.id);
+        assert_eq!(decoded.delta, -3);
+        assert_eq!(decoded.reason, "consume_visit");
+        assert_eq!(decoded.visit_id, adj.visit_id);
+    }
+
+    #[test]
+    fn adjustment_push_payload_json_keys_stable() {
+        let adj = InventoryAdjustment::try_new(AdjustmentNewInput {
+            item_id: Uuid::now_v7(),
+            delta: 5,
+            reason: AdjustmentReason::Receive,
+            visit_id: None,
+            note: None,
+            by_user_id: Uuid::now_v7(),
+            entity_id: "t".into(),
+            origin_device_id: None,
+        })
+        .unwrap();
+        let p = InventoryAdjustmentPushPayload::from(&adj);
+        let json = serde_json::to_value(&p).unwrap();
+        let mut keys: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|s| s.as_str())
+            .collect();
+        keys.sort();
+        let expected = [
+            "by_user_id",
+            "created_at",
+            "deleted_at",
+            "delta",
+            "entity_id",
+            "id",
+            "item_id",
+            "note",
+            "origin_device_id",
+            "reason",
+            "updated_at",
+            "version",
+            "visit_id",
+        ];
+        assert_eq!(keys, expected);
+    }
+}

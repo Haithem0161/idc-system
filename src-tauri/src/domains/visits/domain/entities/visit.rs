@@ -259,3 +259,316 @@ impl Visit {
         Ok(self)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snap_house(price: i64) -> VisitSnapshots {
+        VisitSnapshots {
+            price_iqd: price,
+            dye_cost_iqd: 0,
+            report_cost_iqd: 0,
+            doctor_cut_iqd: price * 40 / 100,
+            operator_cut_iqd: 5_000,
+            internal_pct: Some(40),
+            total_amount_iqd: price,
+            patient_name: "Pat".into(),
+            doctor_name: None,
+            operator_name: "Op".into(),
+            check_type_name_ar: "اختبار".into(),
+            check_type_name_en: Some("Test".into()),
+            check_subtype_name_ar: None,
+            check_subtype_name_en: None,
+        }
+    }
+
+    fn snap_doctor(price: i64, doctor_name: &str) -> VisitSnapshots {
+        VisitSnapshots {
+            price_iqd: price,
+            dye_cost_iqd: 0,
+            report_cost_iqd: 0,
+            doctor_cut_iqd: 12_500,
+            operator_cut_iqd: 5_000,
+            internal_pct: None,
+            total_amount_iqd: price,
+            patient_name: "Pat".into(),
+            doctor_name: Some(doctor_name.into()),
+            operator_name: "Op".into(),
+            check_type_name_ar: "اختبار".into(),
+            check_type_name_en: Some("Test".into()),
+            check_subtype_name_ar: None,
+            check_subtype_name_en: None,
+        }
+    }
+
+    fn draft_input() -> VisitCreateDraftInput {
+        VisitCreateDraftInput {
+            patient_id: Uuid::now_v7(),
+            receptionist_user_id: Uuid::now_v7(),
+            check_type_id: Uuid::now_v7(),
+            check_subtype_id: None,
+            doctor_id: None,
+            dye: false,
+            report: false,
+            entity_id: "t".into(),
+            origin_device_id: Some("dev".into()),
+        }
+    }
+
+    #[test]
+    fn produces_draft_with_uuid_v7_and_version_1_dirty_true() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        assert_eq!(v.status, VisitStatus::Draft);
+        assert_eq!(v.version, 1);
+        assert!(v.dirty);
+        // UUID v7 carries the version nibble 7 in the second group.
+        let bytes = v.id.as_bytes();
+        assert_eq!((bytes[6] & 0xF0) >> 4, 7);
+        assert!(v.locked_at.is_none());
+        assert!(v.voided_at.is_none());
+        assert!(v.snapshots.is_none());
+    }
+
+    #[test]
+    fn rejects_create_with_empty_entity_id() {
+        let mut input = draft_input();
+        input.entity_id = "  ".into();
+        let err = Visit::create_draft(input);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn assert_transition_legal_set_matches_phase_05_section_7_32() {
+        use VisitStatus::*;
+        // Legal: Draft -> Draft, Draft -> Locked, Locked -> Voided.
+        assert!(Visit::assert_transition(Draft, Draft).is_ok());
+        assert!(Visit::assert_transition(Draft, Locked).is_ok());
+        assert!(Visit::assert_transition(Locked, Voided).is_ok());
+
+        // Illegal: every other combination.
+        for from in [Draft, Locked, Voided] {
+            for to in [Draft, Locked, Voided] {
+                let legal = matches!(
+                    (from, to),
+                    (Draft, Draft) | (Draft, Locked) | (Locked, Voided)
+                );
+                if !legal {
+                    let res = Visit::assert_transition(from, to);
+                    assert!(
+                        res.is_err(),
+                        "expected illegal transition {} -> {}",
+                        from.as_str(),
+                        to.as_str()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn edit_draft_bumps_version_and_records_dye_flag() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let edited = v
+            .clone()
+            .edit_draft(VisitDraftPatch {
+                dye: Some(true),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(edited.dye);
+        assert_eq!(edited.version, v.version + 1);
+        assert!(edited.updated_at >= v.updated_at);
+    }
+
+    #[test]
+    fn edit_draft_rejected_on_locked_visit() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let locked = v
+            .clone()
+            .lock(Uuid::now_v7(), snap_house(50_000), Utc::now())
+            .unwrap();
+        let err = locked.edit_draft(VisitDraftPatch::default());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_house_visit_requires_internal_pct_set() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let mut bad = snap_house(50_000);
+        bad.internal_pct = None;
+        let err = v.lock(Uuid::now_v7(), bad, Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_doctor_visit_requires_internal_pct_null() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        let v = Visit::create_draft(input).unwrap();
+        let mut bad = snap_doctor(50_000, "Dr");
+        bad.internal_pct = Some(40);
+        let err = v.lock(Uuid::now_v7(), bad, Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_rejects_total_not_equal_sum() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let mut bad = snap_house(50_000);
+        bad.total_amount_iqd = 999_999;
+        let err = v.lock(Uuid::now_v7(), bad, Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_produces_locked_status_and_populates_snapshots() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        let v = Visit::create_draft(input).unwrap();
+        let at = Utc::now();
+        let locked = v
+            .clone()
+            .lock(Uuid::now_v7(), snap_doctor(50_000, "Dr"), at)
+            .unwrap();
+        assert_eq!(locked.status, VisitStatus::Locked);
+        assert!(locked.locked_at.is_some());
+        assert!(locked.snapshots.is_some());
+        assert_eq!(locked.version, v.version + 1);
+    }
+
+    #[test]
+    fn lock_preserves_created_at() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let created_at = v.created_at;
+        let later = created_at + chrono::Duration::seconds(5);
+        let locked = v.lock(Uuid::now_v7(), snap_house(50_000), later).unwrap();
+        assert_eq!(locked.created_at, created_at);
+    }
+
+    #[test]
+    fn lock_rejected_when_already_locked() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let at = Utc::now();
+        let locked = v.lock(Uuid::now_v7(), snap_house(50_000), at).unwrap();
+        let err = locked.lock(Uuid::now_v7(), snap_house(50_000), at);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_rejected_when_deleted() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let mut deleted = v.clone();
+        deleted.deleted_at = Some(Utc::now());
+        let err = deleted.lock(Uuid::now_v7(), snap_house(50_000), Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn void_rejects_when_not_locked() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let err = v.void("patient walked out".into(), Uuid::now_v7(), Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn void_rejects_short_reason_under_5_graphemes() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let locked = v
+            .clone()
+            .lock(Uuid::now_v7(), snap_house(50_000), Utc::now())
+            .unwrap();
+        // 4-char trimmed reason
+        let err = locked.void("oops".into(), Uuid::now_v7(), Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn void_accepts_reason_with_leading_trailing_whitespace_trimmed() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let locked = v
+            .clone()
+            .lock(Uuid::now_v7(), snap_house(50_000), Utc::now())
+            .unwrap();
+        let voided = locked
+            .void("    valid reason    ".into(), Uuid::now_v7(), Utc::now())
+            .unwrap();
+        assert_eq!(voided.status, VisitStatus::Voided);
+        assert_eq!(voided.void_reason.as_deref(), Some("valid reason"));
+    }
+
+    #[test]
+    fn void_preserves_locked_at_and_created_at() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let lock_at = Utc::now();
+        let locked = v
+            .clone()
+            .lock(Uuid::now_v7(), snap_house(50_000), lock_at)
+            .unwrap();
+        let void_at = lock_at + chrono::Duration::seconds(10);
+        let voided = locked
+            .clone()
+            .void("patient walked".into(), Uuid::now_v7(), void_at)
+            .unwrap();
+        assert_eq!(voided.locked_at, locked.locked_at);
+        assert_eq!(voided.created_at, locked.created_at);
+        assert_eq!(voided.voided_at, Some(void_at));
+    }
+
+    #[test]
+    fn void_rejects_when_already_voided() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let locked = v
+            .clone()
+            .lock(Uuid::now_v7(), snap_house(50_000), Utc::now())
+            .unwrap();
+        let voided = locked
+            .void("first void".into(), Uuid::now_v7(), Utc::now())
+            .unwrap();
+        let err = voided.void("second void".into(), Uuid::now_v7(), Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn soft_delete_legal_only_from_draft() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let dropped = v.clone().soft_delete().unwrap();
+        assert!(dropped.deleted_at.is_some());
+
+        let locked = v
+            .lock(Uuid::now_v7(), snap_house(50_000), Utc::now())
+            .unwrap();
+        let err = locked.soft_delete();
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn visit_status_parse_round_trips() {
+        for s in ["draft", "locked", "voided"] {
+            let parsed = VisitStatus::parse(s).unwrap();
+            assert_eq!(parsed.as_str(), s);
+        }
+        assert!(VisitStatus::parse("other").is_none());
+    }
+
+    #[test]
+    fn visit_status_serializes_as_lowercase() {
+        let json = serde_json::to_string(&VisitStatus::Locked).unwrap();
+        assert_eq!(json, "\"locked\"");
+    }
+
+    #[test]
+    fn lock_rejects_when_total_under_or_over_sum() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let mut snap = snap_house(50_000);
+        snap.dye_cost_iqd = 2_000;
+        // total wrong (does not include dye)
+        snap.total_amount_iqd = snap.price_iqd;
+        assert!(v
+            .clone()
+            .lock(Uuid::now_v7(), snap.clone(), Utc::now())
+            .is_err());
+        snap.total_amount_iqd = snap.price_iqd + snap.dye_cost_iqd + snap.report_cost_iqd + 1;
+        assert!(v.lock(Uuid::now_v7(), snap, Utc::now()).is_err());
+    }
+}

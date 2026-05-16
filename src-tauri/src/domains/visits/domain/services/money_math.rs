@@ -273,4 +273,464 @@ mod tests {
         });
         assert!(err.is_err());
     }
+
+    // ---- Phase 05 plan §1.1: money_math coverage matrix ------------------
+
+    use crate::domains::catalog::domain::value_objects::CutKind;
+
+    fn doctor() -> Doctor {
+        let now = Utc::now();
+        Doctor {
+            id: Uuid::now_v7(),
+            name: "Dr Sara".into(),
+            specialty: None,
+            phone: None,
+            notes: None,
+            is_active: true,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            version: 1,
+            dirty: false,
+            last_synced_at: None,
+            origin_device_id: None,
+            entity_id: "t".into(),
+        }
+    }
+
+    fn sub(check_type_id: Uuid, price: i64) -> CheckSubtype {
+        let now = Utc::now();
+        CheckSubtype {
+            id: Uuid::now_v7(),
+            check_type_id,
+            name_ar: "فرعي".into(),
+            name_en: Some("Sub".into()),
+            price_iqd: price,
+            sort_order: 0,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            version: 1,
+            dirty: false,
+            last_synced_at: None,
+            origin_device_id: None,
+            entity_id: "t".into(),
+        }
+    }
+
+    fn pricing(
+        doctor_id: Uuid,
+        check_type_id: Uuid,
+        kind: CutKind,
+        value: i64,
+        override_price: Option<i64>,
+    ) -> DoctorCheckPricing {
+        let now = Utc::now();
+        DoctorCheckPricing {
+            id: Uuid::now_v7(),
+            doctor_id,
+            check_type_id,
+            check_subtype_id: None,
+            price_override_iqd: override_price,
+            cut_kind: kind,
+            cut_value: value,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            version: 1,
+            dirty: false,
+            last_synced_at: None,
+            origin_device_id: None,
+            entity_id: "t".into(),
+        }
+    }
+
+    #[test]
+    fn flat_pricing_check_with_no_subtype_no_doctor() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "Pat",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.price_iqd, 50_000);
+        assert_eq!(snap.dye_cost_iqd, 0);
+        assert_eq!(snap.report_cost_iqd, 0);
+        assert_eq!(snap.internal_pct, Some(40));
+        assert_eq!(snap.operator_cut_iqd, op.base_cut_per_check_iqd);
+        assert_eq!(snap.total_amount_iqd, 50_000);
+    }
+
+    #[test]
+    fn subtype_price_overrides_check_when_has_subtypes() {
+        let ct = ct(true, None);
+        let op = operator();
+        let s = sub(ct.id, 70_000);
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: Some(&s),
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "Pat",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.price_iqd, 70_000);
+    }
+
+    #[test]
+    fn doctor_override_replaces_internal_pct_via_flat_cut() {
+        let ct = ct(false, Some(80_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Fixed, 12_000, None);
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "Pat",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 12_000);
+        assert_eq!(snap.internal_pct, None);
+        assert_eq!(snap.total_amount_iqd, 80_000);
+    }
+
+    #[test]
+    fn doctor_override_replaces_internal_pct_via_percentage_cut() {
+        let ct = ct(false, Some(100_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 25, None);
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "Pat",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 25_000);
+        assert_eq!(snap.internal_pct, None);
+    }
+
+    #[test]
+    fn doctor_pricing_price_override_replaces_base() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 10, Some(200_000));
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "Pat",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.price_iqd, 200_000);
+        assert_eq!(snap.doctor_cut_iqd, 20_000);
+    }
+
+    #[test]
+    fn house_doctor_keeps_internal_pct_set_when_doctor_id_is_none() {
+        let ct = ct(false, Some(60_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "Pat",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.internal_pct, Some(40));
+        assert_eq!(snap.doctor_cut_iqd, 24_000); // 40% of 60000
+    }
+
+    #[test]
+    fn dye_cost_added_when_dye_true_and_supported_zero_otherwise() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let on = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: true,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(on.dye_cost_iqd, 2000);
+        let off = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(off.dye_cost_iqd, 0);
+    }
+
+    #[test]
+    fn dye_unsupported_rejects_with_validation_err() {
+        let mut t = ct(false, Some(50_000));
+        t.dye_supported = false;
+        let op = operator();
+        let err = compute(&MoneyMathInputs {
+            check_type: &t,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: true,
+            report: false,
+            settings: settings(),
+        });
+        match err {
+            Err(AppError::Validation(m)) => assert!(m.contains("dye")),
+            _ => panic!("expected Validation"),
+        }
+    }
+
+    #[test]
+    fn report_cost_added_when_report_true_zero_otherwise_and_rejects_when_unsupported() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let on = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: true,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(on.report_cost_iqd, 3000);
+
+        let mut t = ct.clone();
+        t.report_supported = false;
+        let err = compute(&MoneyMathInputs {
+            check_type: &t,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: true,
+            settings: settings(),
+        });
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn requires_subtype_when_check_has_subtypes_and_rejects_subtype_when_disallowed() {
+        let ct_with = ct(true, None);
+        let ct_without = ct(false, Some(40_000));
+        let op = operator();
+        // missing subtype
+        let err = compute(&MoneyMathInputs {
+            check_type: &ct_with,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            settings: settings(),
+        });
+        assert!(err.is_err());
+        // disallowed subtype
+        let s = sub(ct_without.id, 70_000);
+        let err2 = compute(&MoneyMathInputs {
+            check_type: &ct_without,
+            check_subtype: Some(&s),
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            settings: settings(),
+        });
+        assert!(err2.is_err());
+    }
+
+    #[test]
+    fn operator_cut_uses_operator_base_cut() {
+        let ct = ct(false, Some(50_000));
+        let mut op = operator();
+        op.base_cut_per_check_iqd = 7_777;
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.operator_cut_iqd, 7_777);
+    }
+
+    #[test]
+    fn percentage_rounds_consistently_no_float_drift_across_100_runs() {
+        let ct = ct(false, Some(1_000_037));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 25, None);
+        let mut prev: Option<i64> = None;
+        for _ in 0..100 {
+            let snap = compute(&MoneyMathInputs {
+                check_type: &ct,
+                check_subtype: None,
+                doctor: Some(&doc),
+                doctor_pricing: Some(&pr),
+                operator: &op,
+                patient_name: "p",
+                dye: false,
+                report: false,
+                settings: settings(),
+            })
+            .unwrap();
+            if let Some(p) = prev {
+                assert_eq!(p, snap.doctor_cut_iqd);
+            }
+            prev = Some(snap.doctor_cut_iqd);
+        }
+        // 1_000_037 * 25 / 100 = 250_009 (integer truncation)
+        assert_eq!(prev, Some(250_009));
+    }
+
+    #[test]
+    fn rejects_doctor_percentage_out_of_range() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 150, None);
+        let err = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            settings: settings(),
+        });
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn rejects_internal_pct_out_of_range_in_house_mode() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let bad = MoneySettings {
+            dye_cost_iqd: 0,
+            report_cost_iqd: 0,
+            internal_doctor_pct: 250,
+        };
+        let err = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            settings: bad,
+        });
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn rejects_check_type_without_base_when_no_subtype() {
+        let ct = ct(false, None);
+        let op = operator();
+        let err = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            settings: settings(),
+        });
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn snapshot_carries_all_name_fields_when_provided() {
+        let ct = ct(true, None);
+        let s = sub(ct.id, 90_000);
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 10, None);
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: Some(&s),
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "John Doe",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.patient_name, "John Doe");
+        assert_eq!(snap.doctor_name.as_deref(), Some("Dr Sara"));
+        assert_eq!(snap.operator_name, op.name);
+        assert_eq!(snap.check_type_name_ar, ct.name_ar);
+        assert_eq!(snap.check_subtype_name_ar.as_deref(), Some("فرعي"));
+    }
 }
