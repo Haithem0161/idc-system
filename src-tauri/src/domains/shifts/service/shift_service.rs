@@ -380,3 +380,102 @@ impl BusinessWrite for UpsertShiftWrite {
         Ok((after_json, vec![op]))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::shifts::domain::entities::operator_shift::OperatorShiftOpenInput;
+    use uuid::Uuid;
+
+    fn shift(start_min_ago: i64, dur_min: Option<i64>) -> OperatorShift {
+        let base = Utc::now() - chrono::Duration::minutes(start_min_ago);
+        let mut s = OperatorShift::open(OperatorShiftOpenInput {
+            operator_id: Uuid::now_v7(),
+            by_user_id: Uuid::now_v7(),
+            note: None,
+            entity_id: "tenant-x".into(),
+            origin_device_id: Some("dev-1".into()),
+        })
+        .unwrap();
+        s.check_in_at = base;
+        s.check_out_at = dur_min.map(|d| base + chrono::Duration::minutes(d));
+        s
+    }
+
+    #[test]
+    fn require_role_accepts_listed_role() {
+        assert!(ShiftService::require_role(UserRole::Superadmin, &[UserRole::Superadmin]).is_ok());
+        assert!(ShiftService::require_role(
+            UserRole::Receptionist,
+            &[UserRole::Receptionist, UserRole::Superadmin]
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn require_role_rejects_other_role() {
+        let err = ShiftService::require_role(UserRole::Receptionist, &[UserRole::Superadmin])
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn first_overlap_detects_strict_intersection() {
+        let s1 = shift(10, Some(10));
+        let now = Utc::now();
+        let candidate_start = now - chrono::Duration::minutes(5);
+        let candidate_end = now + chrono::Duration::minutes(5);
+        let arr = [s1];
+        let conflict = first_overlap(&arr, candidate_start, candidate_end, now);
+        assert!(conflict.is_some());
+    }
+
+    #[test]
+    fn first_overlap_treats_touching_intervals_as_non_overlap() {
+        let s1 = shift(10, Some(10));
+        let now = Utc::now();
+        let candidate_start = s1.check_out_at.unwrap();
+        let candidate_end = candidate_start + chrono::Duration::minutes(5);
+        let arr = [s1];
+        let conflict = first_overlap(&arr, candidate_start, candidate_end, now);
+        assert!(conflict.is_none());
+    }
+
+    #[test]
+    fn first_overlap_treats_open_shift_as_open_ended_until_now() {
+        let s_open = shift(30, None);
+        let now = Utc::now();
+        let arr = [s_open];
+        let conflict = first_overlap(
+            &arr,
+            now - chrono::Duration::minutes(10),
+            now - chrono::Duration::minutes(5),
+            now,
+        );
+        assert!(conflict.is_some());
+    }
+
+    #[test]
+    fn first_overlap_returns_none_for_disjoint_intervals() {
+        let s1 = shift(120, Some(30));
+        let now = Utc::now();
+        let candidate_start = now - chrono::Duration::minutes(10);
+        let candidate_end = now;
+        let arr = [s1];
+        let conflict = first_overlap(&arr, candidate_start, candidate_end, now);
+        assert!(conflict.is_none());
+    }
+
+    #[test]
+    fn first_overlap_walks_all_siblings_returning_first_hit() {
+        let s1 = shift(120, Some(30));
+        let s2 = shift(10, Some(10));
+        let s2_id = s2.id;
+        let now = Utc::now();
+        let candidate_start = now - chrono::Duration::minutes(5);
+        let candidate_end = now + chrono::Duration::minutes(5);
+        let arr = [s1, s2];
+        let conflict = first_overlap(&arr, candidate_start, candidate_end, now);
+        assert_eq!(conflict.map(|s| s.id), Some(s2_id));
+    }
+}

@@ -37,3 +37,8 @@ not seeded
 
 # House (the synthetic doctor row used in accounting).
 (house)
+
+# TypeScript generic identifier used in test-utility wrapper signatures
+# (e.g. `ReturnType<typeof createElement>` inside `src/features/*/queries.test.ts`).
+# Not user-facing text -- false positive on the i18n lint's jsx-text rule.
+ReturnType

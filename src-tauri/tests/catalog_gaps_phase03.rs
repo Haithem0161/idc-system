@@ -688,4 +688,3 @@ async fn p03_g14_doctor_pricing_cut_kind_round_trips_via_lowercase_wire_format()
             .unwrap();
     assert_eq!(raw_cut_kind, "pct", "wire format must be lowercase 'pct'");
 }
-

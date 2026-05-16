@@ -670,4 +670,3 @@ async fn edge_68_integrity_subtype_belongs_to_a_check_type_referenced_at_repo() 
         "subtype must FK-fail when parent check_type is absent"
     );
 }
-
