@@ -100,4 +100,169 @@ mod tests {
         };
         assert_ne!(compute_input_hash(&a), compute_input_hash(&b));
     }
+
+    /// §7.12: hex digest of SHA-256 is 64 chars and only lowercase hex.
+    #[test]
+    fn hash_is_64_lowercase_hex_chars() {
+        let ids: Vec<String> = vec![];
+        let settings = BTreeMap::new();
+        let h = compute_input_hash(&DailyCloseHashInput {
+            tenant_id: "t",
+            target_date: "2026-05-12",
+            tz_offset_secs: 10800,
+            visit_ids: &ids,
+            settings_snapshot: settings,
+            voided_count: 0,
+            locked_count: 0,
+            total_revenue_iqd: 0,
+            total_doctor_cuts_iqd: 0,
+            total_operator_cuts_iqd: 0,
+        });
+        assert_eq!(h.len(), 64);
+        assert!(h
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+    }
+
+    /// A new visit changes the hash even when totals would coincidentally
+    /// match -- the visit_ids slice contributes (Pass-1 §1.1).
+    #[test]
+    fn hash_changes_when_a_new_visit_id_is_added() {
+        let ids_a = vec!["v1".to_string()];
+        let ids_b = vec!["v1".to_string(), "v2".to_string()];
+        let settings = BTreeMap::new();
+        let h_a = compute_input_hash(&DailyCloseHashInput {
+            tenant_id: "t",
+            target_date: "2026-05-12",
+            tz_offset_secs: 10800,
+            visit_ids: &ids_a,
+            settings_snapshot: settings.clone(),
+            voided_count: 0,
+            locked_count: 1,
+            total_revenue_iqd: 0,
+            total_doctor_cuts_iqd: 0,
+            total_operator_cuts_iqd: 0,
+        });
+        let h_b = compute_input_hash(&DailyCloseHashInput {
+            tenant_id: "t",
+            target_date: "2026-05-12",
+            tz_offset_secs: 10800,
+            visit_ids: &ids_b,
+            settings_snapshot: settings,
+            voided_count: 0,
+            locked_count: 1,
+            total_revenue_iqd: 0,
+            total_doctor_cuts_iqd: 0,
+            total_operator_cuts_iqd: 0,
+        });
+        assert_ne!(h_a, h_b);
+    }
+
+    /// Two tenants with identical aggregates still hash to different values
+    /// (the tenant_id is folded in -- prevents tenant cross-talk on the
+    /// signed-close horizon).
+    #[test]
+    fn hash_differs_across_tenants_with_identical_aggregates() {
+        let ids: Vec<String> = vec!["v1".into()];
+        let settings = BTreeMap::new();
+        let h_a = compute_input_hash(&DailyCloseHashInput {
+            tenant_id: "tenant-a",
+            target_date: "2026-05-12",
+            tz_offset_secs: 10800,
+            visit_ids: &ids,
+            settings_snapshot: settings.clone(),
+            voided_count: 0,
+            locked_count: 1,
+            total_revenue_iqd: 100,
+            total_doctor_cuts_iqd: 30,
+            total_operator_cuts_iqd: 10,
+        });
+        let h_b = compute_input_hash(&DailyCloseHashInput {
+            tenant_id: "tenant-b",
+            target_date: "2026-05-12",
+            tz_offset_secs: 10800,
+            visit_ids: &ids,
+            settings_snapshot: settings,
+            voided_count: 0,
+            locked_count: 1,
+            total_revenue_iqd: 100,
+            total_doctor_cuts_iqd: 30,
+            total_operator_cuts_iqd: 10,
+        });
+        assert_ne!(h_a, h_b);
+    }
+
+    /// A settings tweak (e.g., dye_cost_iqd bump) changes the hash. The
+    /// daily-close key needs to invalidate when the pricing rule changes.
+    #[test]
+    fn hash_changes_when_settings_snapshot_diverges() {
+        let ids: Vec<String> = vec![];
+        let mut settings_a = BTreeMap::new();
+        settings_a.insert("dye_cost_iqd".into(), "2000".into());
+        let mut settings_b = BTreeMap::new();
+        settings_b.insert("dye_cost_iqd".into(), "2500".into());
+        let h_a = compute_input_hash(&DailyCloseHashInput {
+            tenant_id: "t",
+            target_date: "2026-05-12",
+            tz_offset_secs: 10800,
+            visit_ids: &ids,
+            settings_snapshot: settings_a,
+            voided_count: 0,
+            locked_count: 0,
+            total_revenue_iqd: 0,
+            total_doctor_cuts_iqd: 0,
+            total_operator_cuts_iqd: 0,
+        });
+        let h_b = compute_input_hash(&DailyCloseHashInput {
+            tenant_id: "t",
+            target_date: "2026-05-12",
+            tz_offset_secs: 10800,
+            visit_ids: &ids,
+            settings_snapshot: settings_b,
+            voided_count: 0,
+            locked_count: 0,
+            total_revenue_iqd: 0,
+            total_doctor_cuts_iqd: 0,
+            total_operator_cuts_iqd: 0,
+        });
+        assert_ne!(h_a, h_b);
+    }
+
+    /// BTreeMap iteration order is deterministic, so settings keyed in any
+    /// order hash identically.
+    #[test]
+    fn hash_is_independent_of_settings_insertion_order() {
+        let ids: Vec<String> = vec![];
+        let mut m1 = BTreeMap::new();
+        m1.insert("a".to_string(), "1".to_string());
+        m1.insert("b".to_string(), "2".to_string());
+        let mut m2 = BTreeMap::new();
+        m2.insert("b".to_string(), "2".to_string());
+        m2.insert("a".to_string(), "1".to_string());
+        let h1 = compute_input_hash(&DailyCloseHashInput {
+            tenant_id: "t",
+            target_date: "2026-05-12",
+            tz_offset_secs: 10800,
+            visit_ids: &ids,
+            settings_snapshot: m1,
+            voided_count: 0,
+            locked_count: 0,
+            total_revenue_iqd: 0,
+            total_doctor_cuts_iqd: 0,
+            total_operator_cuts_iqd: 0,
+        });
+        let h2 = compute_input_hash(&DailyCloseHashInput {
+            tenant_id: "t",
+            target_date: "2026-05-12",
+            tz_offset_secs: 10800,
+            visit_ids: &ids,
+            settings_snapshot: m2,
+            voided_count: 0,
+            locked_count: 0,
+            total_revenue_iqd: 0,
+            total_doctor_cuts_iqd: 0,
+            total_operator_cuts_iqd: 0,
+        });
+        assert_eq!(h1, h2);
+    }
 }

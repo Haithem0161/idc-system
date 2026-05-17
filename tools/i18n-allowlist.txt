@@ -53,3 +53,8 @@ ReturnType
 # Not user-facing -- assertion inputs only.
 صنف
 ليدوكائين
+
+# Arabic fixture identifiers used by phase-07 reports tests.
+# Not user-facing -- assertion inputs only.
+موجات
+ت

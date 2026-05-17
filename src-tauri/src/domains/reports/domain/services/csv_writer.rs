@@ -378,4 +378,185 @@ mod tests {
         assert!(lines[3].starts_with("(house)"));
         assert!(lines[4].starts_with("TOTAL"));
     }
+
+    /// §7.7 doctor header is exact + footer column count matches body width
+    /// (Pass-2 P07-G19).
+    #[test]
+    fn doctor_csv_footer_column_count_matches_header_and_sums_aggregate() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("doctors.csv");
+        let rows = vec![
+            DoctorEarningsRow {
+                doctor_id: Some(Uuid::nil()),
+                name: "Dr. A".into(),
+                specialty: Some("Spec".into()),
+                visits: 2,
+                revenue_iqd: 10_000,
+                doctor_cut_total_iqd: 3_000,
+                avg_cut_per_visit_iqd: 1_500,
+            },
+            DoctorEarningsRow {
+                doctor_id: Some(Uuid::nil()),
+                name: "Dr. B".into(),
+                specialty: None,
+                visits: 3,
+                revenue_iqd: 30_000,
+                doctor_cut_total_iqd: 9_000,
+                avg_cut_per_visit_iqd: 3_000,
+            },
+        ];
+        write_doctor_earnings_csv(&rows, &path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let header_line = text.lines().next().unwrap();
+        let footer_line = text.lines().last().unwrap();
+        let header_cols = header_line.split(',').count();
+        let footer_cols = footer_line.split(',').count();
+        assert_eq!(header_cols, 6);
+        assert_eq!(footer_cols, 6);
+        // Body sums: visits=5, revenue=40000, cut=12000, avg=12000/5=2400.
+        assert!(footer_line.contains(",5,40000,12000,2400"));
+    }
+
+    /// Operators CSV header + footer parity (Pass-2 P07-G19 mirror).
+    #[test]
+    fn operator_csv_has_bom_and_header_with_hours_column() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("operators.csv");
+        let rows = vec![
+            OperatorEarningsRow {
+                operator_id: Uuid::nil(),
+                name: "Op A".into(),
+                visits: 4,
+                visits_with_dye: 2,
+                operator_cut_total_iqd: 16_000,
+                hours_on_shift_milli: 4 * 3_600_000,
+                avg_cut_per_hour_iqd: 4_000,
+            },
+            OperatorEarningsRow {
+                operator_id: Uuid::nil(),
+                name: "Op B".into(),
+                visits: 2,
+                visits_with_dye: 0,
+                operator_cut_total_iqd: 8_000,
+                hours_on_shift_milli: 2 * 3_600_000,
+                avg_cut_per_hour_iqd: 4_000,
+            },
+        ];
+        write_operator_earnings_csv(&rows, &path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        // BOM.
+        assert_eq!(&bytes[..3], &[0xEF, 0xBB, 0xBF]);
+        let text = std::str::from_utf8(&bytes[3..]).unwrap();
+        // Header has exactly 6 cells including Hours On Shift.
+        let header_line = text.lines().next().unwrap();
+        assert_eq!(header_line.split(',').count(), 6);
+        assert!(header_line.contains("Hours On Shift"));
+        // Footer sums + decimal hours_total.
+        let footer = text.lines().last().unwrap();
+        assert!(footer.starts_with("TOTAL"));
+        // hours sum = 6h => "6.00"
+        assert!(footer.contains(",6.00,"));
+    }
+
+    /// §7.25: rows in the visits CSV come out sorted by (locked_at ASC, visit_id ASC).
+    #[test]
+    fn visits_csv_sorts_rows_by_locked_at_then_visit_id() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("visits.csv");
+        let earlier = Utc.with_ymd_and_hms(2026, 5, 12, 9, 0, 0).unwrap();
+        let later = Utc.with_ymd_and_hms(2026, 5, 12, 17, 0, 0).unwrap();
+        let mut row_later = fixture_row();
+        row_later.visit_id = Uuid::parse_str("01900000-0000-7000-8000-000000000002").unwrap();
+        row_later.patient_name = "Beta".into();
+        row_later.locked_at = Some(later);
+        let mut row_earlier = fixture_row();
+        row_earlier.visit_id = Uuid::parse_str("01900000-0000-7000-8000-000000000003").unwrap();
+        row_earlier.patient_name = "Alpha".into();
+        row_earlier.locked_at = Some(earlier);
+        let totals = VisitsReportTotals::default();
+        // Pass rows in reverse-time order; writer must sort to (Alpha, Beta).
+        write_visits_csv(&[row_later, row_earlier], &totals, &path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let alpha_idx = text.find("Alpha").unwrap();
+        let beta_idx = text.find("Beta").unwrap();
+        assert!(alpha_idx < beta_idx, "Alpha must precede Beta");
+    }
+
+    /// `quote_field` covers comma, quote, newline; bare strings pass through.
+    #[test]
+    fn quote_field_only_quotes_when_special_chars_present() {
+        assert_eq!(quote_field("plain text"), "plain text");
+        assert_eq!(quote_field("hello, world"), "\"hello, world\"");
+        assert_eq!(quote_field("she said \"hi\""), "\"she said \"\"hi\"\"\"");
+        assert_eq!(quote_field("line1\nline2"), "\"line1\nline2\"");
+        // CR alone also triggers quoting per RFC 4180.
+        assert_eq!(quote_field("a\rb"), "\"a\rb\"");
+    }
+
+    /// `visit_number` formats as `V-<last 6 simple-hex chars>`.
+    #[test]
+    fn visit_number_uses_last_six_simple_hex_chars() {
+        let id = Uuid::parse_str("01900000-0000-7000-8000-0000000000ab").unwrap();
+        assert_eq!(visit_number(id), "V-0000ab");
+    }
+
+    /// Atomic rename: the writer leaves no `.tmp` file in the parent
+    /// directory after a successful write (Pass-2 P07-G26 / phase-07 §6.5).
+    #[test]
+    fn write_atomic_leaves_no_tmp_file_on_success_visits() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("visits.csv");
+        let totals = VisitsReportTotals::default();
+        write_visits_csv(&[fixture_row()], &totals, &path).unwrap();
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        // Only the destination file remains; no stray ".visits.csv.tmp".
+        assert_eq!(entries.len(), 1);
+        let only = entries[0].to_string_lossy().to_string();
+        assert_eq!(only, "visits.csv");
+        assert!(!only.starts_with('.'));
+        assert!(!only.ends_with(".tmp"));
+    }
+
+    /// Mirror atomic-rename invariant on doctor + operator writers.
+    #[test]
+    fn write_atomic_leaves_no_tmp_file_on_success_doctors() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("doctors.csv");
+        write_doctor_earnings_csv(&[], &path).unwrap();
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn write_atomic_leaves_no_tmp_file_on_success_operators() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("operators.csv");
+        write_operator_earnings_csv(&[], &path).unwrap();
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(entries.len(), 1);
+    }
+
+    /// Empty rows + zero totals still produce a valid CSV with header + footer
+    /// and BOM. Used by the empty-day code path (phase-07 §6.5).
+    #[test]
+    fn visits_csv_with_zero_rows_still_renders_header_and_footer() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("visits.csv");
+        let totals = VisitsReportTotals::default();
+        write_visits_csv(&[], &totals, &path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("Date,Visit #,Patient"));
+        assert!(lines[1].starts_with("TOTAL"));
+    }
 }
