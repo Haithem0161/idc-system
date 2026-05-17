@@ -131,3 +131,244 @@ impl MetricsRepo for SqliteMetricsRepo {
         Ok(n.max(0) as u32)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+    use uuid::Uuid;
+
+    async fn fresh_pool() -> sqlx::SqlitePool {
+        let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+            .unwrap()
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        crate::db::migrations::run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn insert(pool: &sqlx::SqlitePool, kind: &str, at: DateTime<Utc>, tenant: &str) {
+        sqlx::query(
+            "INSERT INTO metrics_events (id,kind,at,payload_json,entity_id) VALUES (?,?,?,?,?)",
+        )
+        .bind(Uuid::now_v7().to_string())
+        .bind(kind)
+        .bind(at.to_rfc3339())
+        .bind("{}")
+        .bind(tenant)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn vacuum_older_than_returns_deleted_row_count() {
+        let pool = fresh_pool().await;
+        let repo = SqliteMetricsRepo::new(pool.clone());
+        let now = Utc::now();
+        let cutoff = now - Duration::days(30) - Duration::hours(1);
+        insert(&pool, "sync_push_ok", cutoff, "t-1").await;
+        insert(&pool, "sync_push_ok", cutoff, "t-1").await;
+        insert(&pool, "sync_push_ok", now, "t-1").await;
+        let removed = repo
+            .vacuum_older_than(now - Duration::days(30))
+            .await
+            .unwrap();
+        assert_eq!(removed, 2);
+    }
+
+    #[tokio::test]
+    async fn vacuum_older_than_returns_zero_when_no_match() {
+        let pool = fresh_pool().await;
+        let repo = SqliteMetricsRepo::new(pool.clone());
+        let now = Utc::now();
+        insert(&pool, "sync_push_ok", now, "t-1").await;
+        let removed = repo
+            .vacuum_older_than(now - Duration::days(30))
+            .await
+            .unwrap();
+        assert_eq!(removed, 0);
+    }
+
+    #[tokio::test]
+    async fn receipt_print_success_rate_returns_none_when_no_print_events() {
+        let pool = fresh_pool().await;
+        let repo = SqliteMetricsRepo::new(pool.clone());
+        // Insert unrelated kinds.
+        insert(&pool, "sync_push_ok", Utc::now(), "t-1").await;
+        let r = repo
+            .receipt_print_success_rate("t-1", Duration::days(30))
+            .await
+            .unwrap();
+        assert!(r.is_none());
+    }
+
+    #[tokio::test]
+    async fn receipt_print_success_rate_rounds_to_four_decimals() {
+        let pool = fresh_pool().await;
+        let repo = SqliteMetricsRepo::new(pool.clone());
+        let now = Utc::now();
+        // 7 / 11 = 0.636363... -> 0.6364 after 4-decimal rounding.
+        for _ in 0..7 {
+            insert(&pool, "receipt_print_ok", now, "t-1").await;
+        }
+        for _ in 0..4 {
+            insert(&pool, "receipt_print_fail", now, "t-1").await;
+        }
+        let r = repo
+            .receipt_print_success_rate("t-1", Duration::days(30))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!((r - 0.6364).abs() < 1e-6, "got {r}");
+    }
+
+    #[tokio::test]
+    async fn conflict_count_filters_by_tenant_and_window() {
+        let pool = fresh_pool().await;
+        let repo = SqliteMetricsRepo::new(pool.clone());
+        let now = Utc::now();
+        for _ in 0..3 {
+            insert(&pool, "sync_conflict", now, "t-1").await;
+        }
+        insert(&pool, "sync_conflict", now - Duration::days(8), "t-1").await;
+        insert(&pool, "sync_conflict", now, "t-other").await;
+        let n = repo.conflict_count("t-1", Duration::days(7)).await.unwrap();
+        assert_eq!(n, 3);
+    }
+
+    #[tokio::test]
+    async fn lock_latency_p95_ms_returns_none_below_five_pairs() {
+        let pool = fresh_pool().await;
+        let repo = SqliteMetricsRepo::new(pool.clone());
+        let now = Utc::now();
+        for i in 0..3 {
+            let vid = Uuid::now_v7().to_string();
+            sqlx::query(
+                "INSERT INTO metrics_events (id,kind,at,payload_json,entity_id) VALUES (?,?,?,?,?)",
+            )
+            .bind(Uuid::now_v7().to_string())
+            .bind("lock_start")
+            .bind((now - Duration::minutes(i + 1)).to_rfc3339())
+            .bind(format!("{{\"visit_id\":\"{vid}\"}}"))
+            .bind("t-1")
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO metrics_events (id,kind,at,payload_json,entity_id) VALUES (?,?,?,?,?)",
+            )
+            .bind(Uuid::now_v7().to_string())
+            .bind("lock_end")
+            .bind((now - Duration::minutes(i + 1) + Duration::milliseconds(50)).to_rfc3339())
+            .bind(format!("{{\"visit_id\":\"{vid}\"}}"))
+            .bind("t-1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let r = repo
+            .lock_latency_p95_ms("t-1", Duration::days(7))
+            .await
+            .unwrap();
+        assert!(r.is_none());
+    }
+
+    #[tokio::test]
+    async fn lock_latency_p95_ms_returns_value_with_five_or_more_pairs() {
+        let pool = fresh_pool().await;
+        let repo = SqliteMetricsRepo::new(pool.clone());
+        let now = Utc::now();
+        for i in 0..6 {
+            let vid = Uuid::now_v7().to_string();
+            let start = now - Duration::minutes(i + 1);
+            sqlx::query(
+                "INSERT INTO metrics_events (id,kind,at,payload_json,entity_id) VALUES (?,?,?,?,?)",
+            )
+            .bind(Uuid::now_v7().to_string())
+            .bind("lock_start")
+            .bind(start.to_rfc3339())
+            .bind(format!("{{\"visit_id\":\"{vid}\"}}"))
+            .bind("t-1")
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO metrics_events (id,kind,at,payload_json,entity_id) VALUES (?,?,?,?,?)",
+            )
+            .bind(Uuid::now_v7().to_string())
+            .bind("lock_end")
+            .bind((start + Duration::milliseconds(10 * (i + 1))).to_rfc3339())
+            .bind(format!("{{\"visit_id\":\"{vid}\"}}"))
+            .bind("t-1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let r = repo
+            .lock_latency_p95_ms("t-1", Duration::days(7))
+            .await
+            .unwrap();
+        assert!(r.is_some());
+        // Six pairs at 10,20,30,40,50,60ms -> p95 index = ceil(6*0.95)-1 = 5 -> 60.
+        assert_eq!(r.unwrap(), 60);
+    }
+
+    #[tokio::test]
+    async fn lock_latency_p95_ms_drops_unpaired_starts() {
+        let pool = fresh_pool().await;
+        let repo = SqliteMetricsRepo::new(pool.clone());
+        let now = Utc::now();
+        // Seed 6 paired samples.
+        for i in 0..6 {
+            let vid = Uuid::now_v7().to_string();
+            let start = now - Duration::minutes(i + 1);
+            sqlx::query(
+                "INSERT INTO metrics_events (id,kind,at,payload_json,entity_id) VALUES (?,?,?,?,?)",
+            )
+            .bind(Uuid::now_v7().to_string())
+            .bind("lock_start")
+            .bind(start.to_rfc3339())
+            .bind(format!("{{\"visit_id\":\"{vid}\"}}"))
+            .bind("t-1")
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO metrics_events (id,kind,at,payload_json,entity_id) VALUES (?,?,?,?,?)",
+            )
+            .bind(Uuid::now_v7().to_string())
+            .bind("lock_end")
+            .bind((start + Duration::milliseconds(20)).to_rfc3339())
+            .bind(format!("{{\"visit_id\":\"{vid}\"}}"))
+            .bind("t-1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        // Add an unpaired lock_start.
+        sqlx::query(
+            "INSERT INTO metrics_events (id,kind,at,payload_json,entity_id) VALUES (?,?,?,?,?)",
+        )
+        .bind(Uuid::now_v7().to_string())
+        .bind("lock_start")
+        .bind(now.to_rfc3339())
+        .bind("{\"visit_id\":\"unpaired\"}")
+        .bind("t-1")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let r = repo
+            .lock_latency_p95_ms("t-1", Duration::days(7))
+            .await
+            .unwrap()
+            .unwrap();
+        // Unpaired start should not poison the result; all 6 paired = 20ms.
+        assert_eq!(r, 20);
+    }
+}

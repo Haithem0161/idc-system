@@ -362,6 +362,7 @@ impl DiagnosticsService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid as TestUuid;
 
     #[test]
     fn audit_retention_constants_match_prd() {
@@ -376,9 +377,82 @@ mod tests {
     }
 
     #[test]
+    fn duration_until_next_03_falls_under_one_day() {
+        // Belt-and-braces: regardless of when this test runs, the scheduler
+        // wakes up within 24h.
+        let d = duration_until_next_03_local();
+        assert!(d.as_secs() <= 24 * 3600);
+    }
+
+    #[test]
     fn audit_role_gate_rejects_non_superadmin() {
         assert!(AuditQueryService::require_audit_role(UserRole::Receptionist).is_err());
         assert!(AuditQueryService::require_audit_role(UserRole::Accountant).is_err());
         assert!(AuditQueryService::require_audit_role(UserRole::Superadmin).is_ok());
+    }
+
+    #[test]
+    fn audit_role_gate_error_mentions_superadmin_requirement() {
+        let err = AuditQueryService::require_audit_role(UserRole::Receptionist).unwrap_err();
+        let msg = format!("{err}").to_lowercase();
+        assert!(
+            msg.contains("superadmin"),
+            "error should mention the gating role: {msg}"
+        );
+    }
+
+    #[test]
+    fn system_vacuum_entity_id_is_the_zero_uuid_sentinel() {
+        // §7.3: the entity_id of a system-issued vacuum row MUST be the
+        // canonical zero UUID so audit consumers can distinguish "this row
+        // is about a real row" from "this row is about a system event."
+        assert_eq!(
+            SYSTEM_VACUUM_ENTITY_ID,
+            "00000000-0000-0000-0000-000000000000"
+        );
+        let parsed = TestUuid::parse_str(SYSTEM_VACUUM_ENTITY_ID).expect("parses as uuid");
+        assert!(parsed.is_nil());
+    }
+
+    #[test]
+    fn system_actor_id_is_the_zero_uuid_for_unattended_runs() {
+        // Scheduler-driven runs have no human actor. They use the same zero
+        // UUID so consumers can filter audit history by "real users".
+        assert_eq!(SYSTEM_ACTOR_ID, "00000000-0000-0000-0000-000000000000");
+        let parsed = TestUuid::parse_str(SYSTEM_ACTOR_ID).expect("parses as uuid");
+        assert!(parsed.is_nil());
+    }
+
+    #[test]
+    fn vacuum_outcome_default_is_zero_zero() {
+        let zero = AuditVacuumOutcome::default();
+        assert_eq!(zero.audit_purged, 0);
+        assert_eq!(zero.metrics_purged, 0);
+    }
+
+    #[test]
+    fn vacuum_outcome_round_trips_via_serde() {
+        let oc = AuditVacuumOutcome {
+            audit_purged: 42,
+            metrics_purged: 7,
+        };
+        let json = serde_json::to_value(oc).unwrap();
+        assert_eq!(json["audit_purged"], serde_json::json!(42));
+        assert_eq!(json["metrics_purged"], serde_json::json!(7));
+        let back: AuditVacuumOutcome = serde_json::from_value(json).unwrap();
+        assert_eq!(back.audit_purged, 42);
+        assert_eq!(back.metrics_purged, 7);
+    }
+
+    #[test]
+    fn audit_retention_window_is_three_times_metrics_window() {
+        // Lock the relationship between the two retention windows. If a
+        // future phase widens metrics retention to 60d the audit window
+        // must move with it; otherwise diagnostics references rows that
+        // were pruned out from under them.
+        let audit = AUDIT_RETENTION_DAYS;
+        let metrics = METRICS_RETENTION_DAYS;
+        assert!(audit > metrics);
+        assert_eq!(audit, metrics * 3);
     }
 }
