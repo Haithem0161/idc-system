@@ -82,7 +82,9 @@ use crate::domains::reports::domain::repositories::ReportsReadModel;
 use crate::domains::reports::infrastructure::SqliteReportsReadModel;
 use crate::domains::reports::service::ReportsServiceConfig;
 use crate::domains::reports::ReportsService;
-use crate::domains::settings::commands::{settings_get, settings_list, settings_update};
+use crate::domains::settings::commands::{
+    settings_get, settings_list, settings_set_locale, settings_update,
+};
 use crate::domains::settings::domain::repositories::SettingRepo;
 use crate::domains::settings::infrastructure::SqliteSettingRepo;
 use crate::domains::settings::service::SettingsService;
@@ -211,6 +213,7 @@ pub fn run() {
             settings_list,
             settings_get,
             settings_update,
+            settings_set_locale,
             // catalog: check_types
             check_types_list,
             check_types_get,

@@ -135,3 +135,55 @@ pub async fn settings_update(
     );
     Ok(updated)
 }
+
+#[derive(Debug, Deserialize)]
+pub struct SetLocaleArgs {
+    pub locale: String,
+}
+
+const ALLOWED_LOCALES: &[&str] = &["en", "ar"];
+
+pub async fn settings_set_locale_impl(
+    state: &AppState,
+    args: SetLocaleArgs,
+) -> AppResult<SettingResponse> {
+    if !ALLOWED_LOCALES.contains(&args.locale.as_str()) {
+        return Err(AppError::Validation(format!(
+            "locale must be one of: en, ar (got {})",
+            args.locale
+        )));
+    }
+    settings_update_impl(
+        state,
+        SettingUpdateArgs {
+            key: "locale".into(),
+            value: SettingValue::Text(args.locale),
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+#[instrument(skip(state, app, args))]
+pub async fn settings_set_locale(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    args: SetLocaleArgs,
+) -> AppResult<SettingResponse> {
+    let updated = settings_set_locale_impl(&state, args).await?;
+    let _ = app.emit(
+        "settings:changed",
+        serde_json::json!({
+            "key": updated.key,
+            "version": updated.version,
+        }),
+    );
+    let _ = app.emit(
+        "locale:changed",
+        serde_json::json!({
+            "locale": updated.value.as_storage(),
+            "version": updated.version,
+        }),
+    );
+    Ok(updated)
+}

@@ -139,6 +139,10 @@ fn validate_value_for_key(key: &str, value: &SettingValue) -> AppResult<()> {
             SettingValue::Text(_) => Ok(()),
             _ => Err(AppError::Validation(format!("{key} must be text"))),
         },
+        "locale" => match value {
+            SettingValue::Text(s) if s == "en" || s == "ar" => Ok(()),
+            _ => Err(AppError::Validation("locale must be one of: en, ar".into())),
+        },
         _ => Ok(()),
     }
 }

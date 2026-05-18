@@ -56,5 +56,8 @@
       "esbuild",
       "prisma"
     ]
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }

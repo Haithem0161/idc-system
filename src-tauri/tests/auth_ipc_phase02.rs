@@ -26,7 +26,8 @@ use app_lib::domains::auth::infrastructure::SqliteUserRepo;
 use app_lib::domains::auth::AuthService;
 use app_lib::domains::auth::UserService;
 use app_lib::domains::settings::commands::{
-    settings_get_impl, settings_list_impl, settings_update_impl, SettingKeyArgs, SettingUpdateArgs,
+    settings_get_impl, settings_list_impl, settings_set_locale_impl, settings_update_impl,
+    SetLocaleArgs, SettingKeyArgs, SettingUpdateArgs,
 };
 use app_lib::domains::settings::domain::value_objects::SettingValue;
 use app_lib::domains::settings::infrastructure::SqliteSettingRepo;
@@ -1159,4 +1160,187 @@ async fn auth_login_online_with_wiremock_populates_token_and_caches_local_row() 
         .unwrap();
     assert!(cached.is_some());
     let _ = rig.pool; // keep field alive in this test
+}
+
+// --- DEF-007 G16: settings_set_locale IPC --------------------------------
+//
+// Phase-02 §7 advertised a `set_locale` command that the frontend would call
+// from the language toggle in the header. The phase-02 build only landed the
+// generic `settings_update` -- so the toggle either had to roll a custom
+// validation path (locale not in REQUIRED_KEYS and `validate_value_for_key`
+// had no `locale` arm) or accept anything. These tests pin the contract:
+//   1. The dedicated IPC validates locale in {'en','ar'} at the boundary.
+//   2. `settings_update` direct-call with key="locale" is ALSO validated by
+//      `validate_value_for_key` so the locale invariant survives even if
+//      someone bypasses the wrapper.
+//   3. The write goes through `settings_update_impl`, so the existing
+//      cache + audit path is inherited (no second code path to keep in sync).
+
+#[tokio::test]
+async fn def_007_g16_settings_set_locale_accepts_en_and_persists_text_value() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let updated = settings_set_locale_impl(
+        &rig.state,
+        SetLocaleArgs {
+            locale: "en".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.key, "locale");
+    assert_eq!(updated.value, SettingValue::Text("en".into()));
+    assert!(updated.version >= 1);
+}
+
+#[tokio::test]
+async fn def_007_g16_settings_set_locale_accepts_ar_and_persists_text_value() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let updated = settings_set_locale_impl(
+        &rig.state,
+        SetLocaleArgs {
+            locale: "ar".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.value, SettingValue::Text("ar".into()));
+}
+
+#[tokio::test]
+async fn def_007_g16_settings_set_locale_rejects_unknown_locale_with_validation_error() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let err = settings_set_locale_impl(
+        &rig.state,
+        SetLocaleArgs {
+            locale: "fr".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    let msg = match &err {
+        AppError::Validation(s) => s.clone(),
+        other => panic!("expected Validation, got {other:?}"),
+    };
+    assert!(
+        msg.contains("locale must be one of"),
+        "validation message must enumerate allowed locales (got: {msg})"
+    );
+    assert!(
+        msg.contains("fr"),
+        "validation message must echo the rejected input (got: {msg})"
+    );
+}
+
+#[tokio::test]
+async fn def_007_g16_settings_set_locale_rejects_empty_string() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let err = settings_set_locale_impl(
+        &rig.state,
+        SetLocaleArgs {
+            locale: String::new(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+}
+
+#[tokio::test]
+async fn def_007_g16_settings_set_locale_rejects_uppercase_variant_strict_match() {
+    // Lower-case enforcement matches the i18next locale code convention --
+    // a "EN"/"AR" admitted at the wire boundary would force every consumer
+    // to also handle the canonicalised form. Reject at the source.
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let err = settings_set_locale_impl(
+        &rig.state,
+        SetLocaleArgs {
+            locale: "EN".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+}
+
+#[tokio::test]
+async fn def_007_g16_settings_set_locale_requires_authenticated_caller() {
+    let rig = rig(None).await;
+    let err = settings_set_locale_impl(
+        &rig.state,
+        SetLocaleArgs {
+            locale: "en".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+}
+
+#[tokio::test]
+async fn def_007_g16_settings_set_locale_round_trip_visible_via_settings_get() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let _ = settings_set_locale_impl(
+        &rig.state,
+        SetLocaleArgs {
+            locale: "ar".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let read = settings_get_impl(
+        &rig.state,
+        SettingKeyArgs {
+            key: "locale".into(),
+        },
+    )
+    .await
+    .unwrap()
+    .expect("locale row must persist");
+    assert_eq!(read.value, SettingValue::Text("ar".into()));
+}
+
+#[tokio::test]
+async fn def_007_g16_settings_update_direct_with_invalid_locale_also_rejected_defense_in_depth() {
+    // Even if a future call site bypasses `settings_set_locale` and goes
+    // through the generic `settings_update`, `validate_value_for_key`
+    // enforces the same enum. A regression that drops the `locale` arm
+    // would silently let `settings_update { key: "locale", value: "fr" }`
+    // through.
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let err = settings_update_impl(
+        &rig.state,
+        SettingUpdateArgs {
+            key: "locale".into(),
+            value: SettingValue::Text("fr".into()),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+}
+
+#[tokio::test]
+async fn def_007_g16_settings_update_direct_with_int_locale_rejected_type_check() {
+    // Locale must be Text, never Int. A typo in the frontend that sends
+    // SettingValue::Int(1) instead of Text("en") must surface as a validation
+    // error -- not silently coerce.
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let err = settings_update_impl(
+        &rig.state,
+        SettingUpdateArgs {
+            key: "locale".into(),
+            value: SettingValue::Int(1),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
 }
