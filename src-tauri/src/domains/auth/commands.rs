@@ -107,6 +107,20 @@ pub async fn auth_login_impl(state: &AppState, args: LoginArgs) -> AppResult<Log
 }
 
 pub async fn auth_logout_impl(state: &AppState) -> AppResult<()> {
+    // DEF-007 G18: write a `logout` audit row BEFORE clearing the session
+    // so the actor + entity_id are still resolvable. Failures emitting
+    // the audit row are non-fatal -- a corrupt audit pipeline must not
+    // strand a session. Tests with a fully-wired AuthService assert the
+    // row IS written.
+    if let Some(ctx) = state.get_current_user().await {
+        if let Some(svc) = state.auth_service() {
+            if let Ok(user_id) = Uuid::parse_str(&ctx.user_id) {
+                if let Err(err) = svc.write_logout_audit(user_id, &ctx.entity_id).await {
+                    tracing::warn!(error = %err, "logout audit write failed; continuing");
+                }
+            }
+        }
+    }
     state.clear_auth().await;
     Ok(())
 }

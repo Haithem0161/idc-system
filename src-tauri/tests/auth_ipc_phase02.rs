@@ -264,6 +264,95 @@ async fn auth_logout_is_idempotent_on_a_signed_out_state() {
     assert!(rig.state.get_current_user().await.is_none());
 }
 
+// DEF-007 G18 FIX VERIFICATION: auth_logout MUST emit one audit_log row with
+// `action='logout'`, `entity='users'`, `actor_user_id=<current user>` BEFORE
+// clearing the session. Without this row, the forensic trail has a hole
+// between the prior `login` row and the next state-changing action -- a
+// superadmin reviewing the audit log cannot tell when a session ended.
+#[tokio::test]
+async fn p02_g18_auth_logout_writes_audit_row_def_007_g18_fixed() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let user_ctx = rig.state.get_current_user().await.expect("user signed in");
+
+    let (before,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM audit_log WHERE action = 'logout'")
+            .fetch_one(&rig.pool)
+            .await
+            .unwrap();
+    assert_eq!(before, 0, "no prior logout rows before this test runs");
+
+    auth_logout_impl(&rig.state).await.unwrap();
+
+    let (after,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM audit_log WHERE action = 'logout'")
+            .fetch_one(&rig.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        after, 1,
+        "DEF-007 G18 fix: logout must write exactly one audit row",
+    );
+
+    // Pin the action + entity + actor + delta shape so future regressions
+    // surface here. The audit row's actor_user_id must match the cleared
+    // session's user (resolved BEFORE clear_auth).
+    let (action, entity, actor, delta_str): (String, String, String, String) = sqlx::query_as(
+        "SELECT action, entity, actor_user_id, delta FROM audit_log \
+         WHERE action = 'logout' ORDER BY at DESC LIMIT 1",
+    )
+    .fetch_one(&rig.pool)
+    .await
+    .unwrap();
+    assert_eq!(action, "logout");
+    assert_eq!(entity, "users");
+    assert_eq!(actor, user_ctx.user_id, "actor must be the user who just logged out");
+    let parsed: serde_json::Value = serde_json::from_str(&delta_str).unwrap();
+    assert_eq!(parsed["mode"], "manual");
+
+    // The session is still cleared after the audit row lands.
+    assert!(rig.state.get_current_user().await.is_none());
+
+    // The audit row carries the entity_id_tenant matching the actor's tenant.
+    let (tenant,): (String,) = sqlx::query_as(
+        "SELECT entity_id_tenant FROM audit_log WHERE action = 'logout' LIMIT 1",
+    )
+    .fetch_one(&rig.pool)
+    .await
+    .unwrap();
+    assert_eq!(tenant, user_ctx.entity_id);
+
+    // Sync envelope: the logout audit row is enqueued into outbox so the
+    // server-side audit query sees client logouts. (Mirrors DEF-005 login.)
+    let (outbox_count,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM outbox WHERE entity = 'audit_log'",
+    )
+    .fetch_one(&rig.pool)
+    .await
+    .unwrap();
+    assert!(
+        outbox_count >= 1,
+        "outbox must carry at least one audit_log push after logout (got {outbox_count})",
+    );
+}
+
+#[tokio::test]
+async fn p02_g18_auth_logout_signed_out_state_emits_no_audit_row() {
+    // DEF-007 G18 negative case: if no user is signed in, logout is a no-op
+    // and must NOT emit a stray audit row (no actor to attribute it to).
+    let rig = rig(None).await;
+    // No bootstrap.
+    assert!(rig.state.get_current_user().await.is_none());
+
+    auth_logout_impl(&rig.state).await.unwrap();
+
+    let (after,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM audit_log")
+        .fetch_one(&rig.pool)
+        .await
+        .unwrap();
+    assert_eq!(after, 0, "signed-out logout must not write an audit row");
+}
+
 // --- auth_current_user ---------------------------------------------------
 
 #[tokio::test]

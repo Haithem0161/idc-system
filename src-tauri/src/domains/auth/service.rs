@@ -143,6 +143,38 @@ impl AuthService {
         Ok(())
     }
 
+    /// DEF-007 G18 fix: emit a single `audit_log` row with `action='logout'`
+    /// so the audit log can reconstruct who logged out and when (without
+    /// it, a logout silently clears the session and the forensic trail
+    /// has a hole between the prior `login` row and the next state-changing
+    /// action). Mirrors `write_login_audit` -- one tx, audit row + outbox
+    /// push, same `entity_id_tenant` scoping. Called from
+    /// `auth_logout_impl` before the session is cleared so the
+    /// `actor_user_id` is still resolvable.
+    pub async fn write_logout_audit(
+        &self,
+        user_id: Uuid,
+        entity_id: &str,
+    ) -> AppResult<()> {
+        let audit = AuditEntry::create(AuditCreateInput {
+            actor_user_id: user_id,
+            action: AuditAction::Logout,
+            entity: "users".into(),
+            entity_id: user_id.to_string(),
+            delta: serde_json::json!({ "mode": "manual" }),
+            ip: None,
+            device_id: self.device_id.clone(),
+            entity_id_tenant: entity_id.to_string(),
+        });
+        let mut tx = self.pool.begin().await.map_err(AppError::from)?;
+        self.audit_repo.append(&mut tx, &audit).await?;
+        let audit_payload = rmp_serde::to_vec_named(&audit)?;
+        let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
+        self.outbox_repo.enqueue(&mut tx, &audit_outbox).await?;
+        tx.commit().await.map_err(AppError::from)?;
+        Ok(())
+    }
+
     async fn online_login(
         &self,
         server_url: &str,
