@@ -2,19 +2,27 @@ FROM node:22-alpine
 
 WORKDIR /app
 
+# Pin pnpm to match host (10.28.2 honors `pnpm.onlyBuiltDependencies` in
+# package.json so prisma + esbuild postinstall scripts run without a
+# manual approve-builds step inside the image).
 RUN apk add --no-cache postgresql-client \
     && corepack enable \
-    && corepack prepare pnpm@latest --activate
+    && corepack prepare pnpm@10.28.2 --activate
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN pnpm prisma generate
+# `prisma generate` reads DATABASE_URL via prisma.config.ts. Pass a
+# placeholder at build-time so it can produce the generated client (which
+# build:ts requires for type-checking). The real URL is supplied at runtime
+# from docker-compose.yaml.
+RUN DATABASE_URL='postgresql://placeholder:placeholder@build-time:5432/placeholder' \
+    pnpm prisma generate
 RUN pnpm build:ts
 
 EXPOSE 3161
 
 # Phase-09 §5 (Docker / sync-server). Schema sync on every container start so
 # no manual `docker exec` is needed after `prisma/schema.prisma` edits.
-CMD ["sh", "-c", "pnpm prisma db push --accept-data-loss && psql \"$DATABASE_URL\" -f prisma/init-custom-sql.sql && pnpm exec fastify start -a 0.0.0.0 -p 3161 -l info dist/app/app.js"]
+CMD ["sh", "-c", "pnpm prisma generate && pnpm prisma db push --accept-data-loss && psql \"$DATABASE_URL\" -f prisma/init-custom-sql.sql && pnpm exec fastify start -a 0.0.0.0 -p 3161 -l info dist/app/app.js"]
