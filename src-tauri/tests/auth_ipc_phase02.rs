@@ -284,11 +284,10 @@ async fn p02_g18_auth_logout_writes_audit_row_def_007_g18_fixed() {
 
     auth_logout_impl(&rig.state).await.unwrap();
 
-    let (after,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM audit_log WHERE action = 'logout'")
-            .fetch_one(&rig.pool)
-            .await
-            .unwrap();
+    let (after,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM audit_log WHERE action = 'logout'")
+        .fetch_one(&rig.pool)
+        .await
+        .unwrap();
     assert_eq!(
         after, 1,
         "DEF-007 G18 fix: logout must write exactly one audit row",
@@ -306,7 +305,10 @@ async fn p02_g18_auth_logout_writes_audit_row_def_007_g18_fixed() {
     .unwrap();
     assert_eq!(action, "logout");
     assert_eq!(entity, "users");
-    assert_eq!(actor, user_ctx.user_id, "actor must be the user who just logged out");
+    assert_eq!(
+        actor, user_ctx.user_id,
+        "actor must be the user who just logged out"
+    );
     let parsed: serde_json::Value = serde_json::from_str(&delta_str).unwrap();
     assert_eq!(parsed["mode"], "manual");
 
@@ -314,22 +316,20 @@ async fn p02_g18_auth_logout_writes_audit_row_def_007_g18_fixed() {
     assert!(rig.state.get_current_user().await.is_none());
 
     // The audit row carries the entity_id_tenant matching the actor's tenant.
-    let (tenant,): (String,) = sqlx::query_as(
-        "SELECT entity_id_tenant FROM audit_log WHERE action = 'logout' LIMIT 1",
-    )
-    .fetch_one(&rig.pool)
-    .await
-    .unwrap();
+    let (tenant,): (String,) =
+        sqlx::query_as("SELECT entity_id_tenant FROM audit_log WHERE action = 'logout' LIMIT 1")
+            .fetch_one(&rig.pool)
+            .await
+            .unwrap();
     assert_eq!(tenant, user_ctx.entity_id);
 
     // Sync envelope: the logout audit row is enqueued into outbox so the
     // server-side audit query sees client logouts. (Mirrors DEF-005 login.)
-    let (outbox_count,): (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM outbox WHERE entity = 'audit_log'",
-    )
-    .fetch_one(&rig.pool)
-    .await
-    .unwrap();
+    let (outbox_count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE entity = 'audit_log'")
+            .fetch_one(&rig.pool)
+            .await
+            .unwrap();
     assert!(
         outbox_count >= 1,
         "outbox must carry at least one audit_log push after logout (got {outbox_count})",

@@ -196,12 +196,42 @@ Phase 09 adds NO new IPC commands and modifies NO existing return shapes. Regres
 
 ### §3.3 Sync envelope contract
 
-No new envelope contributions. Phase 09 preserves every existing envelope; the Prisma swap is purely at the persistence layer.
+Phase-09 §3.3 closes the canonical wire-shape snapshot set promoted from the v0.1.0 ship audit. Each snapshot is a paired `<name>.json` (or `.txt`) + `<name>.json.sha256` under `sync-server/test/expected/snapshots/`. The drift gate is bi-directional: `Value.Check(<Schema>, parsed)` catches server-side schema changes that lack a sample regen, and the SHA-256 hash catches stealth sample edits that lack a deliberate hash regen.
 
-- **Snapshot files**:
+- **Test harness:** `sync-server/test/contract/canonical-snapshots.test.ts` (32 tests).
+- **Snapshot files** -- 13 wire shapes per the §3.3 brief, listed by category:
+
+  Healthz response (pre-existing, retained):
   - `expected/healthz/healthz-ok-canonical.json.sha256`
   - `expected/healthz/healthz-fail-canonical.json.sha256`
+
+  Pre-ship env template (pre-existing, retained):
   - `expected/preship/env-template-canonical.txt.sha256` -- byte-hash of the canonical `.env.template` per §3 env schema; drift indicates the template fell out of sync with runtime reads.
+
+  PushBody samples (`PushBodySchema`):
+  - `expected/snapshots/patient-push.json` (+`.sha256`)
+  - `expected/snapshots/visit-push-locked.json` (+`.sha256`)
+  - `expected/snapshots/visit-push-voided.json` (+`.sha256`)
+  - `expected/snapshots/inventory-adjustment-push.json` (+`.sha256`)
+  - `expected/snapshots/operator-shift-push.json` (+`.sha256`)
+  - `expected/snapshots/operator-shift-soft-delete.json` (+`.sha256`)
+
+  PullResponse samples (`PullResponseSchema`):
+  - `expected/snapshots/visit-pull-row.json` (+`.sha256`)
+  - `expected/snapshots/operator-shift-pull.json` (+`.sha256`)
+
+  Audit query response (`AuditQueryResponseSchema`):
+  - `expected/snapshots/audit-query-response-mixed-50-row.json` (+`.sha256`) -- exercises all 14 action values + tri-state `ip` per the "exercises 14 distinct actions" invariant.
+
+  Conflict resolver shapes:
+  - `expected/snapshots/conflict-list-response-canonical.json` (+`.sha256`) -- two open conflicts (version-conflict + manual-policy), both `resolved_at=null` per phase-08 §7.11 open-only contract.
+  - `expected/snapshots/conflict-resolve-applied-response.json` (+`.sha256`) -- canonical `{ok:true, status:"applied"}`.
+  - `expected/snapshots/conflict-resolve-already-resolved-response.json` (+`.sha256`) -- 409 `ErrorResponseSchema` with `code="ALREADY_RESOLVED"` + `details.resolvedAt` (load-bearing for the 409 UI).
+
+  Prometheus exposition (plaintext; hash-only -- no TypeBox schema):
+  - `expected/snapshots/prometheus-exposition-sample.txt` (+`.sha256`) -- all 10 named metrics from `src/app/plugins/metrics.ts` MetricsRegistry + `outbox_depth_gauge` with tenant label.
+
+  Regeneration is explicit (edit the JSON, recompute the hash, commit both); the README under `expected/snapshots/` documents the one-liner.
 
 ---
 
@@ -372,10 +402,23 @@ Phase 09's perf gate is regression-only -- no new SLOs, just verification that t
   - [ ] `unreachable!()` in `inventory/service/mod.rs:282` swapped for `Err(AppError::Internal)`.
   - [ ] Stale phase-04 comment in `operator_service.rs` removed.
   - [ ] `eprintln!` in `lib.rs` swapped for `tracing::info!`.
-- [ ] Snapshot files committed:
+- [x] Snapshot files committed:
   - `expected/healthz/healthz-ok-canonical.json.sha256`
   - `expected/healthz/healthz-fail-canonical.json.sha256`
   - `expected/preship/env-template-canonical.txt.sha256`
+  - `expected/snapshots/patient-push.json.sha256`
+  - `expected/snapshots/visit-push-locked.json.sha256`
+  - `expected/snapshots/visit-push-voided.json.sha256`
+  - `expected/snapshots/inventory-adjustment-push.json.sha256`
+  - `expected/snapshots/operator-shift-push.json.sha256`
+  - `expected/snapshots/operator-shift-soft-delete.json.sha256`
+  - `expected/snapshots/visit-pull-row.json.sha256`
+  - `expected/snapshots/operator-shift-pull.json.sha256`
+  - `expected/snapshots/audit-query-response-mixed-50-row.json.sha256`
+  - `expected/snapshots/conflict-list-response-canonical.json.sha256`
+  - `expected/snapshots/conflict-resolve-applied-response.json.sha256`
+  - `expected/snapshots/conflict-resolve-already-resolved-response.json.sha256`
+  - `expected/snapshots/prometheus-exposition-sample.txt.sha256`
 - [ ] CI guardrail in place: `test "$(git ls-files sync-server/.env)" = ""` per §5.
 - [ ] CI grep checks pass: no `phase-04` forward-ref, no banner `eprintln!`, no `'dev-only-secret'`, no `SYNC_STORE` env-var comment.
 - [ ] `pnpm prisma validate` clean.

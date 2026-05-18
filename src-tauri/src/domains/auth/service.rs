@@ -151,11 +151,7 @@ impl AuthService {
     /// push, same `entity_id_tenant` scoping. Called from
     /// `auth_logout_impl` before the session is cleared so the
     /// `actor_user_id` is still resolvable.
-    pub async fn write_logout_audit(
-        &self,
-        user_id: Uuid,
-        entity_id: &str,
-    ) -> AppResult<()> {
+    pub async fn write_logout_audit(&self, user_id: Uuid, entity_id: &str) -> AppResult<()> {
         let audit = AuditEntry::create(AuditCreateInput {
             actor_user_id: user_id,
             action: AuditAction::Logout,

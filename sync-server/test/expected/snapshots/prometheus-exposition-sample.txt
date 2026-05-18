@@ -1,0 +1,30 @@
+# HELP sync_push_duration_seconds_count Sync push observations.
+# TYPE sync_push_duration_seconds_count counter
+sync_push_duration_seconds_count 4
+# HELP sync_push_duration_seconds_sum Total seconds spent in push.
+# TYPE sync_push_duration_seconds_sum counter
+sync_push_duration_seconds_sum 0.512
+# HELP sync_push_fail_total Failed push attempts.
+# TYPE sync_push_fail_total counter
+sync_push_fail_total 0
+# HELP sync_pull_duration_seconds_count Sync pull observations.
+# TYPE sync_pull_duration_seconds_count counter
+sync_pull_duration_seconds_count 2
+# HELP sync_pull_duration_seconds_sum Total seconds spent in pull.
+# TYPE sync_pull_duration_seconds_sum counter
+sync_pull_duration_seconds_sum 0.250
+# HELP sync_pull_fail_total Failed pull attempts.
+# TYPE sync_pull_fail_total counter
+sync_pull_fail_total 0
+# HELP sync_conflict_total Total parked conflicts.
+# TYPE sync_conflict_total counter
+sync_conflict_total 1
+# HELP audit_query_duration_seconds_count Audit query observations.
+# TYPE audit_query_duration_seconds_count counter
+audit_query_duration_seconds_count 3
+# HELP audit_query_duration_seconds_sum Total seconds in audit queries.
+# TYPE audit_query_duration_seconds_sum counter
+audit_query_duration_seconds_sum 0.075
+# HELP outbox_depth_gauge Pending outbox depth per tenant.
+# TYPE outbox_depth_gauge gauge
+outbox_depth_gauge{tenant="01923af0-7c1a-7000-e000-000000000001"} 7
