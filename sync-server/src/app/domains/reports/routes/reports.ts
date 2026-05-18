@@ -14,7 +14,10 @@ import { ReportsService } from '../service/reports-service'
 
 const ErrorRef = Type.Ref('ErrorResponse')
 
-const VisitsQuerySchema = Type.Object({
+// Phase-09 §3.1 contract slice: schemas exported so the Ajv-equivalent
+// (`Value.Check`) harness can drift-test the wire shape without
+// re-declaring it.
+export const VisitsQuerySchema = Type.Object({
   groupBy: Type.Optional(Type.Union([
     Type.Literal('none'),
     Type.Literal('by_date'),
@@ -51,7 +54,7 @@ const VisitsQuerySchema = Type.Object({
   limit: Type.Optional(Type.String({ pattern: '^\\d+$' })),
 })
 
-const TotalsSchema = Type.Object({
+export const TotalsSchema = Type.Object({
   visits: Type.Integer(),
   revenue_iqd: Type.Integer(),
   doctor_cut_iqd: Type.Integer(),
@@ -59,7 +62,7 @@ const TotalsSchema = Type.Object({
   net_iqd: Type.Integer(),
 })
 
-const RowSchema = Type.Object({
+export const RowSchema = Type.Object({
   visit_id: Type.String(),
   locked_at: Type.Union([Type.String(), Type.Null()]),
   status: Type.String(),
@@ -78,7 +81,7 @@ const RowSchema = Type.Object({
   net_iqd: Type.Integer(),
 })
 
-const GroupSchema = Type.Object({
+export const GroupSchema = Type.Object({
   key: Type.String(),
   label: Type.String(),
   visits: Type.Integer(),
@@ -88,7 +91,7 @@ const GroupSchema = Type.Object({
   net_iqd: Type.Integer(),
 })
 
-const VisitsResponseSchema = Type.Union([
+export const VisitsResponseSchema = Type.Union([
   Type.Object({
     mode: Type.Literal('rows'),
     rows: Type.Array(RowSchema),
@@ -101,18 +104,18 @@ const VisitsResponseSchema = Type.Union([
   }),
 ])
 
-const DailyCloseParamsSchema = Type.Object({
+export const DailyCloseParamsSchema = Type.Object({
   date: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
 })
 
-const DailyCloseQuerySchema = Type.Object({
+export const DailyCloseQuerySchema = Type.Object({
   // Fastify's TypeBox compiler does not coerce query-string integers by
   // default; accept as string and parse server-side. Default = 180 minutes
   // (Asia/Baghdad UTC+03:00).
   tzOffsetMinutes: Type.Optional(Type.String({ pattern: '^-?\\d+$' })),
 })
 
-const DailyCloseResponseSchema = Type.Object({
+export const DailyCloseResponseSchema = Type.Object({
   tenant_id: Type.String(),
   target_date: Type.String(),
   tz_offset: Type.String(),

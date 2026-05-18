@@ -2,11 +2,14 @@ import { Type } from '@sinclair/typebox'
 import type { FastifyPluginAsync } from 'fastify'
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 
-const LookupBodySchema = Type.Object({
+// Phase-09 §3.1 contract slice: schemas exported so the Ajv-equivalent
+// (`Value.Check`) harness can drift-test the wire shape without
+// re-declaring it.
+export const LookupBodySchema = Type.Object({
   op_ids: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 200 }),
 })
 
-const LookupResponseSchema = Type.Object({
+export const LookupResponseSchema = Type.Object({
   found: Type.Array(Type.String()),
 })
 
