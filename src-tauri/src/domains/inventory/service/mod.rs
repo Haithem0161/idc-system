@@ -254,37 +254,15 @@ impl InventoryAdjustmentService {
                 Some(trimmed)
             }
         });
-        let adjustment = match input.reason {
-            AdjustmentReason::Receive => InventoryAdjustment::try_receive(
-                input.item_id,
-                input.delta,
-                actor_user_id,
-                note,
-                entity_id.to_string(),
-                Some(self.device_id.clone()),
-            )?,
-            AdjustmentReason::Writeoff => InventoryAdjustment::try_writeoff(
-                input.item_id,
-                input.delta,
-                actor_user_id,
-                note,
-                entity_id.to_string(),
-                Some(self.device_id.clone()),
-            )?,
-            AdjustmentReason::CountCorrection => InventoryAdjustment::try_count_correction(
-                input.item_id,
-                input.delta,
-                actor_user_id,
-                note,
-                entity_id.to_string(),
-                Some(self.device_id.clone()),
-            )?,
-            AdjustmentReason::ConsumeVisit => {
-                return Err(AppError::Internal(
-                    "ConsumeVisit reached construction switch after early-return guard".into(),
-                ));
-            }
-        };
+        let adjustment = Self::try_build_adjustment_from_input(
+            input.reason,
+            input.item_id,
+            input.delta,
+            actor_user_id,
+            note,
+            entity_id.to_string(),
+            self.device_id.clone(),
+        )?;
 
         let write = CreateAdjustmentWrite {
             adjustment: adjustment.clone(),
@@ -361,6 +339,46 @@ impl InventoryAdjustmentService {
         self.outbox.enqueue(&mut tx, &audit_outbox).await?;
         tx.commit().await.map_err(AppError::from)?;
         Ok(after)
+    }
+
+    fn try_build_adjustment_from_input(
+        reason: AdjustmentReason,
+        item_id: Uuid,
+        delta: i64,
+        actor_user_id: Uuid,
+        note: Option<String>,
+        entity_id: String,
+        device_id: String,
+    ) -> AppResult<InventoryAdjustment> {
+        match reason {
+            AdjustmentReason::Receive => InventoryAdjustment::try_receive(
+                item_id,
+                delta,
+                actor_user_id,
+                note,
+                entity_id,
+                Some(device_id),
+            ),
+            AdjustmentReason::Writeoff => InventoryAdjustment::try_writeoff(
+                item_id,
+                delta,
+                actor_user_id,
+                note,
+                entity_id,
+                Some(device_id),
+            ),
+            AdjustmentReason::CountCorrection => InventoryAdjustment::try_count_correction(
+                item_id,
+                delta,
+                actor_user_id,
+                note,
+                entity_id,
+                Some(device_id),
+            ),
+            AdjustmentReason::ConsumeVisit => Err(AppError::Internal(
+                "ConsumeVisit reached construction switch after early-return guard".into(),
+            )),
+        }
     }
 
     fn require_role(role: UserRole, allowed: &[UserRole]) -> AppResult<()> {
@@ -496,5 +514,79 @@ impl BusinessWrite for CreateAdjustmentWrite {
         // `(before=Null, after=this)`, so we hand back the adjustment shape.
         let after = serde_json::to_value(InventoryAdjustmentPushPayload::from(&self.adjustment))?;
         Ok((after, outbox))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consume_visit_in_construct_switch_returns_internal_error_not_panic() {
+        let result = InventoryAdjustmentService::try_build_adjustment_from_input(
+            AdjustmentReason::ConsumeVisit,
+            Uuid::now_v7(),
+            -1,
+            Uuid::now_v7(),
+            None,
+            "tenant-1".to_string(),
+            "device-1".to_string(),
+        );
+        match result {
+            Err(AppError::Internal(msg)) => assert_eq!(
+                msg, "ConsumeVisit reached construction switch after early-return guard",
+            ),
+            other => panic!(
+                "expected AppError::Internal with the documented message, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn receive_in_construct_switch_returns_ok_with_positive_delta() {
+        let result = InventoryAdjustmentService::try_build_adjustment_from_input(
+            AdjustmentReason::Receive,
+            Uuid::now_v7(),
+            5,
+            Uuid::now_v7(),
+            None,
+            "tenant-1".to_string(),
+            "device-1".to_string(),
+        );
+        let adj = result.expect("receive with positive delta must succeed");
+        assert_eq!(adj.delta, 5);
+        assert!(matches!(adj.reason, AdjustmentReason::Receive));
+    }
+
+    #[test]
+    fn writeoff_in_construct_switch_negates_positive_quantity() {
+        let result = InventoryAdjustmentService::try_build_adjustment_from_input(
+            AdjustmentReason::Writeoff,
+            Uuid::now_v7(),
+            3,
+            Uuid::now_v7(),
+            None,
+            "tenant-1".to_string(),
+            "device-1".to_string(),
+        );
+        let adj = result.expect("writeoff with positive ui quantity must succeed");
+        assert_eq!(adj.delta, -3);
+        assert!(matches!(adj.reason, AdjustmentReason::Writeoff));
+    }
+
+    #[test]
+    fn count_correction_in_construct_switch_preserves_signed_delta() {
+        let result = InventoryAdjustmentService::try_build_adjustment_from_input(
+            AdjustmentReason::CountCorrection,
+            Uuid::now_v7(),
+            -7,
+            Uuid::now_v7(),
+            None,
+            "tenant-1".to_string(),
+            "device-1".to_string(),
+        );
+        let adj = result.expect("count_correction with signed delta must succeed");
+        assert_eq!(adj.delta, -7);
+        assert!(matches!(adj.reason, AdjustmentReason::CountCorrection));
     }
 }

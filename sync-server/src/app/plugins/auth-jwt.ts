@@ -12,7 +12,8 @@ import { DomainError } from '../common/errors/domain'
  *
  * Non-production: falls back to HS256 with `JWT_SECRET` (>= 32 chars) for
  * local dev and the existing test fixtures. The phase-09 §3 rewrite ELIMINATED
- * the silent `'dev-only-secret'` fallback.
+ * the prior hardcoded constant-string fallback (the CI grep guardrail in
+ * `test/plugins/auth-jwt-boot.test.ts` enforces it never reappears).
  */
 async function plugin (fastify: FastifyInstance): Promise<void> {
   const publicKey = process.env.JWT_PUBLIC_KEY

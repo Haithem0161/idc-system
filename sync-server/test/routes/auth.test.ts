@@ -187,10 +187,24 @@ test('POST /auth/login returns 401 for unknown email without revealing existence
 })
 
 test('POST /auth/login isolates by tenant: matching email in other tenant 401s', async (t) => {
+  const { hash: argonHash } = await import('@node-rs/argon2')
+  const { randomUUID } = await import('node:crypto')
   const app = await build(t)
   const typed = app as unknown as FastifyAppLike
+  // bootstrapSuperadmin is single-use globally (refuses when any user exists)
+  // so we use it for tenant-A and seed tenant-B directly via the user store.
   await typed.authService.bootstrapSuperadmin('shared@example.com', 'A', 'hunter22', 'tenant-A')
-  await typed.authService.bootstrapSuperadmin('shared@example.com', 'B', 'differentpw1', 'tenant-B')
+  const userStore = (app as unknown as { userStore: { create: (rec: {
+    id: string; email: string; name: string; passwordHash: string; role: string; entityId: string;
+  }) => Promise<unknown> } }).userStore
+  await userStore.create({
+    id: randomUUID(),
+    email: 'shared@example.com',
+    name: 'B',
+    passwordHash: await argonHash('differentpw1'),
+    role: 'superadmin',
+    entityId: 'tenant-B',
+  })
 
   // Tenant-A's password against tenant-B does NOT cross over.
   const cross = await app.inject({
@@ -227,11 +241,9 @@ test('POST /auth/login persists a 30-day refresh token (TTL invariant, P02-G05)'
 
   // Inspect the in-memory store directly.
   const stored = app as unknown as {
-    authService: {
-      userStore: { tokens: Map<string, { expiresAt: string, createdAt: string }> }
-    }
+    userStore: { tokens: Map<string, { expiresAt: string, createdAt: string }> }
   }
-  const tokens = stored.authService.userStore.tokens
+  const tokens = stored.userStore.tokens
   assert.ok(tokens.size >= 1, 'at least one refresh token should be persisted')
   const [, record] = tokens.entries().next().value as [string, { expiresAt: string, createdAt: string }]
   const expiresMs = new Date(record.expiresAt).getTime()
@@ -255,11 +267,9 @@ test('Refresh tokens are persisted as sha256 hashes, never plaintext (P02-G05 / 
   assert.ok(plaintext.length >= 32, 'plaintext refresh token should be long')
 
   const stored = app as unknown as {
-    authService: {
-      userStore: { tokenHashes: Map<string, string>, tokens: Map<string, { tokenHash: string }> }
-    }
+    userStore: { tokenHashes: Map<string, string>, tokens: Map<string, { tokenHash: string }> }
   }
-  const tokens = stored.authService.userStore.tokens
+  const tokens = stored.userStore.tokens
   // No persisted row's tokenHash should equal the plaintext bytes.
   for (const [, record] of tokens.entries()) {
     assert.notStrictEqual(record.tokenHash, plaintext, 'token must be stored as hash, not plaintext')
@@ -278,9 +288,9 @@ test('POST /auth/login persists deviceId onto the refresh-token row (P02-G04)', 
   })
 
   const stored = app as unknown as {
-    authService: { userStore: { tokens: Map<string, { deviceId: string | null }> } }
+    userStore: { tokens: Map<string, { deviceId: string | null }> }
   }
-  const tokens = Array.from(stored.authService.userStore.tokens.values())
+  const tokens = Array.from(stored.userStore.tokens.values())
   assert.ok(tokens.length >= 1, 'token should be persisted')
   assert.ok(
     tokens.some((t) => t.deviceId === 'device-A-uuid'),
@@ -304,24 +314,29 @@ test('POST /auth/login from two devices creates two refresh-token rows (multi-de
   })
 
   const stored = app as unknown as {
-    authService: { userStore: { tokens: Map<string, { deviceId: string | null }> } }
+    userStore: { tokens: Map<string, { deviceId: string | null }> }
   }
-  const tokens = Array.from(stored.authService.userStore.tokens.values())
+  const tokens = Array.from(stored.userStore.tokens.values())
   // Both device-A and device-B rows present, no collision.
   const ids = new Set(tokens.map((t) => t.deviceId))
   assert.ok(ids.has('device-A'))
   assert.ok(ids.has('device-B'))
 })
 
-test('POST /auth/login returns 400 when email is missing (request schema)', async (t) => {
+test('POST /auth/login returns 422 when email is missing (request schema)', async (t) => {
   const app = await build(t)
   const res = await app.inject({
     method: 'POST',
     url: '/auth/login',
     payload: { password: 'hunter22', entityId: TENANT },
   })
-  // Fastify validation returns 400 with body-validation error.
-  assert.ok(res.statusCode === 400, `expected 400, got ${res.statusCode}: ${res.payload}`)
+  // The app's error-handler plugin (per phase-02) maps schema validation
+  // errors to 422 with a typed `{ code: 'VALIDATION_ERROR', message, details }`
+  // envelope so the client distinguishes "you sent malformed input" from
+  // "you sent valid input we rejected on business grounds (400)".
+  assert.strictEqual(res.statusCode, 422, `expected 422, got ${res.statusCode}: ${res.payload}`)
+  const body = JSON.parse(res.payload) as { code: string; message: string }
+  assert.strictEqual(body.code, 'VALIDATION_ERROR')
 })
 
 test('POST /auth/refresh returns 401 for a syntactically valid but unknown token', async (t) => {

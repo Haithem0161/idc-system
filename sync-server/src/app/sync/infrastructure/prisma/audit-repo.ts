@@ -23,8 +23,20 @@ export class PrismaAuditLogRepo implements AuditLogRepository {
   ) {}
 
   async insertMany (rows: AuditPayload[]): Promise<number> {
+    return this.insertManyTx(this.prisma, rows)
+  }
+
+  /**
+   * Same as `insertMany` but accepts an interactive Prisma transaction client
+   * so callers (notably `ConflictResolveService`) can compose the audit
+   * write with sibling writes in one atomic `$transaction`. Phase-09 BLOCKER-6.
+   */
+  async insertManyTx (
+    tx: Pick<PrismaClient, 'auditLog'>,
+    rows: AuditPayload[]
+  ): Promise<number> {
     if (rows.length === 0) return 0
-    const result = await this.prisma.auditLog.createMany({
+    const result = await tx.auditLog.createMany({
       data: rows.map((r) => toCreateRow(r)),
       skipDuplicates: true,
     })

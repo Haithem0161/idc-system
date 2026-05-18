@@ -39,13 +39,9 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
   let conflictRepo: ConflictParkedRepository
   let entityStore: SyncEntityStore
 
-  // Reports + audit-service Phase-7 still read from the memory store in
-  // v0.1.0 (Phase-10 ports them to Prisma). We always allocate one so
-  // those routes don't 500 when Prisma is wired; in Prisma mode the memory
-  // store stays empty and reports return degraded data until the port lands.
-  const memoryStore = new MemorySyncStore()
-
   if (fastify.prisma) {
+    // Production path. MemorySyncStore is NOT instantiated — sync routes
+    // run exclusively through Prisma. Phase-09 BLOCKER-3 invariant.
     const prisma = fastify.prisma
     const prismaEntity = new PrismaEntityStore(prisma)
     auditRepo = new PrismaAuditLogRepo(prisma, prismaEntity)
@@ -54,9 +50,12 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
     conflictRepo = new PrismaConflictParkedRepo(prisma)
     entityStore = prismaEntity
   } else {
+    // Test / dev path only. The memory store stays in the tree exclusively
+    // for unit + integration tests that don't spin Postgres.
     fastify.log.warn(
       'sync-services: Prisma client not available; falling back to MemorySyncStore (test/dev only)'
     )
+    const memoryStore = new MemorySyncStore()
     auditRepo = memoryStore
     processedRepo = memoryStore
     cursorRepo = memoryStore
@@ -66,13 +65,16 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
 
   const pushService = new SyncPushService(auditRepo, conflictRepo, processedRepo, entityStore)
   const pullService = new SyncPullService(auditRepo, cursorRepo)
+  // Phase-09 BLOCKER-6: when Prisma is wired, hand the client to the
+  // resolver service so the conflict_resolve audit row commits in the
+  // SAME $transaction as the resolve write.
   const conflictService = new ConflictResolveService(
     conflictRepo,
     processedRepo,
-    auditRepo
+    auditRepo,
+    fastify.prisma ?? null,
   )
 
-  fastify.decorate('syncStore', memoryStore)
   fastify.decorate('entityStore', entityStore)
   fastify.decorate('auditQueryRepo', auditRepo)
   fastify.decorate('conflictsRepo', conflictRepo)
@@ -89,7 +91,6 @@ export default fp(plugin, {
 
 declare module 'fastify' {
   interface FastifyInstance {
-    syncStore: MemorySyncStore
     entityStore: SyncEntityStore
     auditQueryRepo: AuditLogRepository
     conflictsRepo: ConflictParkedRepository

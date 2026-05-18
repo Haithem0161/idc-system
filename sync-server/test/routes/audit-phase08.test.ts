@@ -9,9 +9,8 @@ const SUPERADMIN_ID = '00000000-0000-7000-8000-000000000088'
 
 interface FastifyAppLike {
   jwt: { sign: (payload: Record<string, unknown>) => string }
-  syncStore: {
+  conflictsRepo: {
     park: (record: Record<string, unknown>) => Promise<void>
-    audit: Map<string, Record<string, unknown>>
   }
   inject: (opts: object) => Promise<{ statusCode: number, payload: string, headers: Record<string, string> }>
 }
@@ -162,7 +161,7 @@ test('GET /sync/conflicts lists open envelopes for the tenant', async (t) => {
   const a = app as unknown as FastifyAppLike
   const token = authToken(a, 'superadmin')
 
-  await a.syncStore.park({
+  await a.conflictsRepo.park({
     opId: 'op-cf-1',
     entity: 'settings',
     entityId: 'setting-key-1',
@@ -171,7 +170,7 @@ test('GET /sync/conflicts lists open envelopes for the tenant', async (t) => {
     reason: 'manual_policy_version_divergence',
     tenantId: TENANT,
   })
-  await a.syncStore.park({
+  await a.conflictsRepo.park({
     opId: 'op-cf-2',
     entity: 'visits',
     entityId: 'visit-1',
@@ -198,7 +197,7 @@ test('POST /sync/conflicts/:opId/resolve is idempotent on resolve_op_id', async 
   const a = app as unknown as FastifyAppLike
   const token = authToken(a, 'superadmin')
 
-  await a.syncStore.park({
+  await a.conflictsRepo.park({
     opId: 'op-cf-resolve-1',
     entity: 'settings',
     entityId: 'setting-key-1',
@@ -233,7 +232,7 @@ test('POST /sync/conflicts/:opId/resolve returns 409 ALREADY_RESOLVED on conflic
   const a = app as unknown as FastifyAppLike
   const token = authToken(a, 'superadmin')
 
-  await a.syncStore.park({
+  await a.conflictsRepo.park({
     opId: 'op-cf-already-1',
     entity: 'settings',
     entityId: 'setting-key-1',

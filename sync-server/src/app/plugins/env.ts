@@ -1,49 +1,86 @@
 import fp from 'fastify-plugin'
+import fastifyEnv from '@fastify/env'
 import type { FastifyInstance } from 'fastify'
 
 /**
- * Minimal env validation. Fails fast at boot when required vars are missing.
+ * Env validation via `@fastify/env`. Fails fast at boot when the production
+ * invariants are violated (missing `DATABASE_URL` or `JWT_PUBLIC_KEY`).
  *
- * Production (`NODE_ENV=production`):
- *   - `DATABASE_URL` MUST be set and non-empty (Prisma connection target).
- *   - One of `JWT_PUBLIC_KEY` (RS256) MUST be set; `JWT_SECRET` alone is not
- *     enough. The auth-jwt plugin enforces this; we surface the rule here.
+ * The schema below enumerates every var the server actually reads at runtime
+ * — kept in sync with `.env.template` by the CI grep guardrail in
+ * phase-09 §8 DoD.
  *
- * Non-production: any missing var is logged at `warn` level. Tests bootstrap
- * with `JWT_SECRET` and (when exercising Prisma paths) `DATABASE_URL`.
- *
- * Authored per phase-09 §5 to replace the runtime "fall through to a Prisma
- * connection error" failure mode.
+ * Authored per phase-09 SHIP-1 (env validation rewrite using the canonical
+ * plugin instead of a hand-rolled `if (!DATABASE_URL)` check).
  */
+
+const envSchema = {
+  type: 'object',
+  properties: {
+    NODE_ENV: { type: 'string', default: 'development' },
+    DATABASE_URL: { type: 'string', default: '' },
+    REDIS_URL: { type: 'string', default: '' },
+    JWT_PUBLIC_KEY: { type: 'string', default: '' },
+    JWT_SECRET: { type: 'string', default: '' },
+    JWT_ACCESS_TTL_SECONDS: { type: 'string', default: '900' },
+    JWT_REFRESH_TTL_SECONDS: { type: 'string', default: '2592000' },
+    BOOTSTRAP_SUPERADMIN_EMAIL: { type: 'string', default: '' },
+    BOOTSTRAP_SUPERADMIN_PASSWORD: { type: 'string', default: '' },
+    BOOTSTRAP_TENANT_ID: { type: 'string', default: '' },
+    METRICS_TOKEN: { type: 'string', default: '' },
+  },
+} as const
+
+interface ConfigShape {
+  NODE_ENV: string
+  DATABASE_URL: string
+  REDIS_URL: string
+  JWT_PUBLIC_KEY: string
+  JWT_SECRET: string
+  JWT_ACCESS_TTL_SECONDS: string
+  JWT_REFRESH_TTL_SECONDS: string
+  BOOTSTRAP_SUPERADMIN_EMAIL: string
+  BOOTSTRAP_SUPERADMIN_PASSWORD: string
+  BOOTSTRAP_TENANT_ID: string
+  METRICS_TOKEN: string
+}
+
 async function plugin (fastify: FastifyInstance): Promise<void> {
-  const env = process.env.NODE_ENV ?? 'development'
+  await fastify.register(fastifyEnv, {
+    schema: envSchema,
+    confKey: 'config',
+    // We already load .env ourselves in the entry path; skip duplicate work
+    // and avoid `.env` polluting test runs that explicitly scrub vars.
+    dotenv: false,
+  })
+
+  const cfg = fastify.config as ConfigShape
+  const env = cfg.NODE_ENV
   const isProd = env === 'production'
 
-  const missing: string[] = []
   if (isProd) {
-    if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim().length === 0) {
+    const missing: string[] = []
+    if (cfg.DATABASE_URL.trim().length === 0) {
       missing.push('DATABASE_URL')
     }
-    const hasPublic = process.env.JWT_PUBLIC_KEY && process.env.JWT_PUBLIC_KEY.trim().length > 0
-    if (!hasPublic) {
+    if (cfg.JWT_PUBLIC_KEY.trim().length === 0) {
       missing.push('JWT_PUBLIC_KEY')
     }
-  } else if (!process.env.DATABASE_URL) {
+    if (missing.length > 0) {
+      throw new Error(
+        `env plugin: missing required environment variables in production: ${missing.join(', ')}`
+      )
+    }
+  } else if (cfg.DATABASE_URL.trim().length === 0) {
     fastify.log.warn(
       'DATABASE_URL is not set. Prisma plugin will not connect and routes will fall back to the in-memory store.'
-    )
-  }
-
-  if (missing.length > 0) {
-    throw new Error(
-      `env plugin: missing required environment variables in production: ${missing.join(', ')}`
     )
   }
 
   fastify.decorate('appEnv', {
     nodeEnv: env,
     isProduction: isProd,
-    databaseUrl: process.env.DATABASE_URL ?? null,
+    databaseUrl: cfg.DATABASE_URL.length > 0 ? cfg.DATABASE_URL : null,
   })
 }
 
@@ -58,5 +95,6 @@ export default fp(plugin, { name: 'env' })
 declare module 'fastify' {
   interface FastifyInstance {
     appEnv: AppEnv
+    config: ConfigShape
   }
 }

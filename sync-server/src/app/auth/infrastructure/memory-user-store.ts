@@ -17,9 +17,11 @@ import type {
  * port contract.
  */
 export class MemoryUserStore implements UserRepository, RefreshTokenRepository {
-  private readonly users = new Map<string, UserRecord>()
-  private readonly tokens = new Map<string, RefreshTokenRecord>()
-  private readonly tokenHashes = new Map<string, string>()
+  // Test-introspectable. Production swap (PrismaUserStore) replaces this store
+  // entirely; these Maps exist only on the in-memory test/dev path.
+  readonly users = new Map<string, UserRecord>()
+  readonly tokens = new Map<string, RefreshTokenRecord>()
+  readonly tokenHashes = new Map<string, string>()
 
   async getByEmail (email: string, entityId: string): Promise<UserRecord | null> {
     const lower = email.trim().toLowerCase()

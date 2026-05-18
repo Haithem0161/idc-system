@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
+import type { PrismaClient } from '@prisma/client'
+
 import { DomainError } from '../../common/errors/domain'
 import type {
   AuditLogRepository,
@@ -8,6 +10,9 @@ import type {
   ProcessedOpResponse,
 } from '../domain/repositories'
 import type { AuditPayload } from '../domain/types'
+import { PrismaAuditLogRepo } from '../infrastructure/prisma/audit-repo'
+import { PrismaConflictParkedRepo } from '../infrastructure/prisma/conflict-parked-repo'
+import { PrismaProcessedOpRepo } from '../infrastructure/prisma/processed-op-repo'
 
 export interface ResolveInput {
   choice: 'local' | 'server' | 'merged'
@@ -29,7 +34,15 @@ export class ConflictResolveService {
   constructor (
     private readonly conflicts: ConflictParkedRepository,
     private readonly processed: ProcessedOpRepository,
-    private readonly audit: AuditLogRepository
+    private readonly audit: AuditLogRepository,
+    /**
+     * When set, the three resolve-time writes (conflict resolve, audit row,
+     * processed-op cache) run in a single Prisma `$transaction` to satisfy
+     * the phase-09 BLOCKER-6 atomicity invariant. When null (test/memory
+     * path), the writes run sequentially — memory store is single-threaded
+     * so partial-failure rollback is not a hazard.
+     */
+    private readonly prisma: PrismaClient | null = null
   ) {}
 
   async resolve (
@@ -70,8 +83,6 @@ export class ConflictResolveService {
       )
     }
 
-    await this.conflicts.resolve(opId, tenantId, userId)
-
     // Phase-09 §3 (conflict-resolve audit): emit the audit row that the
     // phase-08 §1 enum advertised but no writer was emitting. Server-
     // canonical: the row lives only on the server until the next
@@ -99,15 +110,37 @@ export class ConflictResolveService {
       origin_device_id: deviceId,
       entity_id_tenant: tenantId,
     }
-    await this.audit.insertMany([auditRow])
+    const response: ProcessedOpResponse | null = input.resolveOpId
+      ? {
+          op_id: input.resolveOpId,
+          status: 'applied',
+          body: { ok: true, choice: input.choice, opId },
+        }
+      : null
 
-    if (input.resolveOpId) {
-      const response: ProcessedOpResponse = {
-        op_id: input.resolveOpId,
-        status: 'applied',
-        body: { ok: true, choice: input.choice, opId },
+    if (this.prisma) {
+      // Production path: all three writes commit atomically.
+      // Phase-09 BLOCKER-6 — a network drop between the resolve and the
+      // audit-row insert MUST NOT leave the conflict marked resolved
+      // without the audit trail row that documents how it was resolved.
+      const prisma = this.prisma
+      const conflictsTx = new PrismaConflictParkedRepo(prisma)
+      const auditTx = new PrismaAuditLogRepo(prisma, null as unknown as never)
+      const processedTx = new PrismaProcessedOpRepo(prisma)
+      await prisma.$transaction(async (tx) => {
+        await conflictsTx.resolveTx(tx, opId, tenantId, userId)
+        await auditTx.insertManyTx(tx, [auditRow])
+        if (input.resolveOpId && response) {
+          await processedTx.rememberTx(tx, input.resolveOpId, tenantId, response)
+        }
+      })
+    } else {
+      // Memory / test path: sequential is sufficient (single-threaded).
+      await this.conflicts.resolve(opId, tenantId, userId)
+      await this.audit.insertMany([auditRow])
+      if (input.resolveOpId && response) {
+        await this.processed.remember(input.resolveOpId, tenantId, response)
       }
-      await this.processed.remember(input.resolveOpId, tenantId, response)
     }
 
     return { status: 'applied' }

@@ -40,8 +40,23 @@ export class PrismaProcessedOpRepo implements ProcessedOpRepository {
     tenantId: string,
     response: ProcessedOpResponse
   ): Promise<void> {
+    await this.rememberTx(this.prisma, opId, tenantId, response)
+  }
+
+  /**
+   * Same as `remember` but accepts an interactive Prisma transaction client
+   * so callers (notably `ConflictResolveService`) can compose the
+   * ProcessedOp write with sibling writes in one atomic `$transaction`.
+   * Phase-09 BLOCKER-6.
+   */
+  async rememberTx (
+    tx: Pick<PrismaClient, 'processedOp'>,
+    opId: string,
+    tenantId: string,
+    response: ProcessedOpResponse
+  ): Promise<void> {
     const encoded = encodeResponseHash(response)
-    await this.prisma.processedOp.upsert({
+    await tx.processedOp.upsert({
       where: { opId },
       create: {
         opId,
