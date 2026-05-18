@@ -534,11 +534,12 @@ mod tests {
         );
         match result {
             Err(AppError::Internal(msg)) => assert_eq!(
-                msg, "ConsumeVisit reached construction switch after early-return guard",
+                msg,
+                "ConsumeVisit reached construction switch after early-return guard",
             ),
-            other => panic!(
-                "expected AppError::Internal with the documented message, got {other:?}"
-            ),
+            other => {
+                panic!("expected AppError::Internal with the documented message, got {other:?}")
+            }
         }
     }
 

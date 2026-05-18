@@ -465,6 +465,103 @@ async fn users_create_returns_user_response_and_persists_under_actor_tenant() {
     assert_eq!(users.len(), 2);
 }
 
+// DEF-006 (P02-G29) fix: a non-superadmin caller MUST NOT receive inactive
+// rows back even when they pass `include_inactive=true`. The IPC layer
+// `users_list_impl` forces the flag off based on the caller's role.
+#[tokio::test]
+async fn users_list_receptionist_caller_never_sees_inactive_rows_def_006_fixed() {
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let receptionist = users_create_impl(
+        &rig.state,
+        UserCreateArgs {
+            email: "receptionist@idc.io".into(),
+            name: "Mehdi".into(),
+            role: UserRole::Receptionist,
+            password: "receptpass-1".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let inactive = users_create_impl(
+        &rig.state,
+        UserCreateArgs {
+            email: "ghost@idc.io".into(),
+            name: "Ghost".into(),
+            role: UserRole::Receptionist,
+            password: "ghostpass-1".into(),
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE users SET is_active = 0 WHERE id = ?")
+        .bind(inactive.id.to_string())
+        .execute(&rig.pool)
+        .await
+        .unwrap();
+
+    // Switch session to the receptionist.
+    auth_logout_impl(&rig.state).await.unwrap();
+    auth_login_impl(
+        &rig.state,
+        LoginArgs {
+            email: "receptionist@idc.io".into(),
+            password: "receptpass-1".into(),
+            entity_id_hint: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Even though include_inactive=true, the IPC must downgrade it for
+    // non-superadmins. The ghost row stays hidden.
+    let users = users_list_impl(
+        &rig.state,
+        UsersListArgs {
+            include_inactive: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        users.iter().all(|u| u.is_active),
+        "DEF-006: receptionist must not see inactive rows even with include_inactive=true"
+    );
+    assert!(
+        users.iter().any(|u| u.id == receptionist.id),
+        "active receptionist should still appear"
+    );
+    assert!(
+        users.iter().all(|u| u.id != inactive.id),
+        "inactive ghost row must be filtered out for non-superadmin"
+    );
+
+    // Sanity: switch back to the superadmin; with the flag set, ghost reappears.
+    auth_logout_impl(&rig.state).await.unwrap();
+    auth_login_impl(
+        &rig.state,
+        LoginArgs {
+            email: "admin@idc.io".into(),
+            password: "admin-pass".into(),
+            entity_id_hint: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap();
+    let users = users_list_impl(
+        &rig.state,
+        UsersListArgs {
+            include_inactive: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        users.iter().any(|u| u.id == inactive.id && !u.is_active),
+        "DEF-006: superadmin with include_inactive=true must see inactive rows"
+    );
+}
+
 #[tokio::test]
 async fn users_create_rejects_when_signed_out_with_not_authenticated() {
     let rig = rig(None).await;

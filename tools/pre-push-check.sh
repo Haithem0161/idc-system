@@ -47,5 +47,10 @@ else
   step "Sync server: skipped (not present)"
 fi
 
+# --- Phase-09 pre-ship guardrails --------------------------------------------
+step "Pre-ship guardrails (phase-09 SHIP-CONCERN regression checks)"
+./tools/preship-guardrails.sh || fail "preship-guardrails.sh"
+ok "preship guardrails"
+
 echo
 echo -e "${GREEN}All pre-push checks passed.${NC}"

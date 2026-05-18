@@ -126,9 +126,11 @@ fn p02_g14_audit_action_rejects_unknown_literal() {
 // fix lands, the test should be updated to assert action='login'.
 // =========================================================================
 
-#[allow(non_snake_case)]
+// DEF-005 FIX VERIFICATION (P02-G17): offline login MUST emit one audit row
+// with `action='login'`, `entity='users'`, and `delta.mode='offline'`. This
+// replaces the sentinel that pinned the bug.
 #[tokio::test]
-async fn p02_g17_offline_login_does_NOT_write_audit_row_today_defect_005() {
+async fn p02_g17_offline_login_writes_audit_row_def_005_fixed() {
     let pool = fresh_pool().await;
     let auth = make_auth(&pool);
     auth.create_first_admin("admin@idc.io", "Mariam", "admin-pw-12345", "tenant-1")
@@ -146,13 +148,22 @@ async fn p02_g17_offline_login_does_NOT_write_audit_row_today_defect_005() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    // CURRENT behaviour: no new audit row on offline login. This pins the
-    // observation that DEF-005 captures. Change to `assert_eq!(after, before + 1)`
-    // once the audit-on-login wiring lands.
     assert_eq!(
-        before, after,
-        "DEF-005 regression sentinel: login should write an audit row"
+        before + 1,
+        after,
+        "DEF-005 fix: login should write exactly one audit row"
     );
+
+    // Pin the action + delta shape so future regressions surface here.
+    let (action, delta): (String, String) =
+        sqlx::query_as("SELECT action, delta FROM audit_log ORDER BY at DESC LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(action, "login");
+    let parsed: serde_json::Value = serde_json::from_str(&delta).unwrap();
+    assert_eq!(parsed["method"], "password");
+    assert_eq!(parsed["mode"], "offline");
 }
 
 // =========================================================================

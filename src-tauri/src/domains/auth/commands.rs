@@ -212,9 +212,15 @@ pub async fn users_list_impl(
     let repo = state
         .user_repo()
         .ok_or_else(|| AppError::Configuration("user repo unavailable".into()))?;
+    // DEF-006 fix (P02-G29): the build spec §7.28 says `users::list` only
+    // exposes inactive rows to a Superadmin. The repo trusts the flag; the
+    // IPC layer is the role-gate. Force the flag off for any non-superadmin
+    // caller so a tampered frontend cannot widen the view.
+    let (_, actor_role, _) = current_actor(state).await?;
+    let include_inactive = matches!(actor_role, UserRole::Superadmin) && args.include_inactive;
     let users = repo
         .list(crate::domains::auth::domain::repositories::UserListFilter {
-            include_inactive: args.include_inactive,
+            include_inactive,
             entity_id: None,
         })
         .await?;

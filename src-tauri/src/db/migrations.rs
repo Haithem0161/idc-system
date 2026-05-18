@@ -44,6 +44,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "008_polish.sql",
         include_str!("../../migrations/008_polish.sql"),
     ),
+    (
+        "009_pre_ship.sql",
+        include_str!("../../migrations/009_pre_ship.sql"),
+    ),
 ];
 
 /// Apply every embedded migration that has not already run.

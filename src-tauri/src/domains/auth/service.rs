@@ -109,6 +109,40 @@ impl AuthService {
         self.offline_login(&email, password, entity_id_hint).await
     }
 
+    /// DEF-005 fix: emit a single `audit_log` row with `action='login'` and
+    /// `delta = { method: "password", mode: "online"|"offline" }` so the
+    /// audit log can reconstruct who logged in, when, and through which path.
+    /// Sibling outbox row pushes the same audit through the sync engine so the
+    /// server-side audit query (phase-08 §3) sees client logins.
+    async fn write_login_audit(
+        &self,
+        user_id: Uuid,
+        entity_id: &str,
+        mode: LoginMode,
+    ) -> AppResult<()> {
+        let mode_str = match mode {
+            LoginMode::Online => "online",
+            LoginMode::Offline => "offline",
+        };
+        let audit = AuditEntry::create(AuditCreateInput {
+            actor_user_id: user_id,
+            action: AuditAction::Login,
+            entity: "users".into(),
+            entity_id: user_id.to_string(),
+            delta: serde_json::json!({ "method": "password", "mode": mode_str }),
+            ip: None,
+            device_id: self.device_id.clone(),
+            entity_id_tenant: entity_id.to_string(),
+        });
+        let mut tx = self.pool.begin().await.map_err(AppError::from)?;
+        self.audit_repo.append(&mut tx, &audit).await?;
+        let audit_payload = rmp_serde::to_vec_named(&audit)?;
+        let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
+        self.outbox_repo.enqueue(&mut tx, &audit_outbox).await?;
+        tx.commit().await.map_err(AppError::from)?;
+        Ok(())
+    }
+
     async fn online_login(
         &self,
         server_url: &str,
@@ -159,7 +193,7 @@ impl AuthService {
             .await?;
         }
 
-        Ok(LoginResult {
+        let result = LoginResult {
             mode: LoginMode::Online,
             user_id: id,
             email: body.user.email,
@@ -169,7 +203,10 @@ impl AuthService {
             access_token: Some(body.access_token),
             refresh_token: Some(body.refresh_token),
             access_token_expires_at: Some(body.expires_at),
-        })
+        };
+        self.write_login_audit(result.user_id, &result.entity_id, LoginMode::Online)
+            .await?;
+        Ok(result)
     }
 
     async fn offline_login(
@@ -188,7 +225,7 @@ impl AuthService {
         }
         verify_password(password, &user.password_hash)?;
 
-        Ok(LoginResult {
+        let result = LoginResult {
             mode: LoginMode::Offline,
             user_id: user.id,
             email: user.email,
@@ -198,7 +235,10 @@ impl AuthService {
             access_token: None,
             refresh_token: None,
             access_token_expires_at: None,
-        })
+        };
+        self.write_login_audit(result.user_id, &result.entity_id, LoginMode::Offline)
+            .await?;
+        Ok(result)
     }
 
     async fn upsert_local_user(

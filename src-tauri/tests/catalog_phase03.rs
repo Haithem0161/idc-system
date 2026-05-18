@@ -619,15 +619,11 @@ async fn doctor_fts_reindexes_after_name_update() {
 }
 
 #[tokio::test]
-async fn doctor_fts_un_soft_delete_currently_corrupts_index_def_008_sentinel() {
-    // DEF-008 P3 sentinel: the migration-003 `doctors_au` trigger does an
-    // unconditional FTS5 delete using old.rowid. When a soft-deleted row is
-    // restored (deleted_at -> NULL), the trigger tries to delete a row that
-    // was never inserted (the soft-delete UPDATE had skipped the re-insert),
-    // and external-content FTS5 returns "database disk image is malformed".
-    // The product never restores soft-deleted doctors today, so this is
-    // deferred. This test pins the CURRENT broken behaviour; invert when
-    // DEF-008 lands.
+async fn doctor_fts_un_soft_delete_restores_index_def_008_fixed() {
+    // DEF-008 fix verification: migration 009 patches the `doctors_au`
+    // trigger to skip the FTS5 delete when old.deleted_at IS NOT NULL
+    // (the row was never indexed). Restoring a soft-deleted doctor now
+    // succeeds and re-indexes the row for FTS search.
     let pool = fresh_pool().await;
     let repo = SqliteDoctorRepo::new(pool.clone());
     let d = new_doctor("Restorable", None);
@@ -639,6 +635,15 @@ async fn doctor_fts_un_soft_delete_currently_corrupts_index_def_008_sentinel() {
     let mut tx = pool.begin().await.unwrap();
     repo.upsert(&mut tx, &gone).await.unwrap();
     tx.commit().await.unwrap();
+    // Soft-deleted row hidden from FTS.
+    let hits = repo
+        .search_fts(ENTITY_ID, "Restorable", false)
+        .await
+        .unwrap();
+    assert!(
+        hits.is_empty(),
+        "soft-deleted doctor must not appear in FTS"
+    );
 
     let mut restored = gone.clone();
     restored.deleted_at = None;
@@ -646,13 +651,16 @@ async fn doctor_fts_un_soft_delete_currently_corrupts_index_def_008_sentinel() {
     restored.version += 1;
     restored.dirty = true;
     let mut tx = pool.begin().await.unwrap();
-    let result = repo.upsert(&mut tx, &restored).await;
-    // Today the FTS5 trigger flow errors when the old row was already
-    // soft-deleted. When DEF-008 lands the assertion below MUST be inverted.
-    assert!(
-        result.is_err(),
-        "expected DEF-008 sentinel error; if this succeeds, invert the assertion"
-    );
+    repo.upsert(&mut tx, &restored)
+        .await
+        .expect("DEF-008 fix: un-soft-delete must succeed without FTS corruption");
+    tx.commit().await.unwrap();
+
+    let hits = repo
+        .search_fts(ENTITY_ID, "Restorable", false)
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1, "restored doctor should be searchable again");
 }
 
 #[tokio::test]
