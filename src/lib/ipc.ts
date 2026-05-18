@@ -57,6 +57,10 @@ export type CommandMap = {
     args: { args: { key: string; value: SettingValueWire } }
     result: SettingRecord
   }
+  settings_set_locale: {
+    args: { args: { locale: string } }
+    result: SettingRecord
+  }
 
   // Catalog: check_types
   check_types_list: {

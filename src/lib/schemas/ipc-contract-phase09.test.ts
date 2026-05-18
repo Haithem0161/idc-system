@@ -40,6 +40,7 @@ import {
 // test FILE discovery, not from import resolution.
 import rustErrorRs from "../../../src-tauri/src/error.rs?raw"
 import rustLibRs from "../../../src-tauri/src/lib.rs?raw"
+import ipcMapTs from "@/lib/ipc.ts?raw"
 
 describe("Phase-09 §3.2 FIXED final case -- AppError envelope shape", () => {
   // (1) Positive: each of the 10 codes is accepted.
@@ -216,6 +217,90 @@ describe("Phase-09 §3.2 inventory invariant -- generate_handler! command count"
     )
     const block = handlerMatch![1]
     expect(block).toMatch(/\bsettings_set_locale\b/)
+  })
+})
+
+describe("Phase-09 §3.2 cross-language drift -- generate_handler! <-> CommandMap", () => {
+  // The strongest drift gate: every command registered in
+  // `lib.rs::generate_handler!` MUST have a typed entry in
+  // `src/lib/ipc.ts::CommandMap`, and vice versa. Without this, a
+  // Rust-side command rename (or a hand-edited TS map drift) ships
+  // to runtime as a "Command not found" failure visible only when
+  // the user clicks the broken feature.
+  //
+  // Implementation: parse the generate_handler! block AND the
+  // CommandMap object literal from raw source. Compare the two
+  // identifier sets. Both directions checked.
+
+  function rustCommands (): Set<string> {
+    const handlerMatch = rustLibRs.match(
+      /generate_handler!\s*\[([\s\S]*?)\]\s*\)/,
+    )
+    const block = handlerMatch![1]
+    return new Set(
+      block
+        .split("\n")
+        .map((l: string) => l.trim())
+        .filter((l: string) => l.length > 0 && !l.startsWith("//"))
+        .map((l: string) => l.replace(/,$/, "").trim())
+        .filter((l: string) => /^[a-z][a-z0-9_]*$/.test(l)),
+    )
+  }
+
+  function tsCommandMapKeys (): Set<string> {
+    const ipcSource = ipcMapTs
+    // Match `export type CommandMap = {` block. Inside, each entry is
+    // `  command_name: { args: ...; result: ... }` on one or multiple
+    // lines. Extract the leading identifier of each entry.
+    const mapMatch = ipcSource.match(
+      /export type CommandMap = \{([\s\S]*?)\n\}/,
+    )
+    if (!mapMatch) return new Set()
+    const block = mapMatch[1]
+    // Match top-level keys (two-space-indented identifiers ending in
+    // `: {`). Nested keys are more deeply indented.
+    const keyRegex = /^ {2}([a-z][a-z0-9_]*): \{/gm
+    const keys = new Set<string>()
+    let m: RegExpExecArray | null
+    while ((m = keyRegex.exec(block)) !== null) {
+      keys.add(m[1])
+    }
+    return keys
+  }
+
+  it("every Rust generate_handler! command has a CommandMap entry in src/lib/ipc.ts", () => {
+    const rust = rustCommands()
+    const ts = tsCommandMapKeys()
+    expect(rust.size).toBeGreaterThan(0)
+    expect(ts.size).toBeGreaterThan(0)
+    const missing = [...rust].filter((cmd) => !ts.has(cmd))
+    expect(missing).toEqual([])
+  })
+
+  it("every CommandMap entry in src/lib/ipc.ts has a generate_handler! registration", () => {
+    const rust = rustCommands()
+    const ts = tsCommandMapKeys()
+    // The TS map may carry a few entries that aren't strictly
+    // registered (e.g. embedded-mode-only commands or compile-time
+    // helpers). We assert NO entry is missing the Rust registration
+    // unless explicitly allow-listed.
+    const ALLOWLIST = new Set<string>([
+      // No known exemptions today; if a future commit needs one, add
+      // it here with a comment explaining why.
+    ])
+    const orphans = [...ts].filter(
+      (cmd) => !rust.has(cmd) && !ALLOWLIST.has(cmd),
+    )
+    expect(orphans).toEqual([])
+  })
+
+  it("Rust + TS command counts agree (sanity bound)", () => {
+    const rust = rustCommands()
+    const ts = tsCommandMapKeys()
+    // Soft equality: the two sides should match in size after the
+    // orphan/missing checks above pass. This is a final sanity
+    // guard against a counting regression in either extractor.
+    expect(ts.size).toBe(rust.size)
   })
 })
 
