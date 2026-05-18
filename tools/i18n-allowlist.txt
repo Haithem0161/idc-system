@@ -58,3 +58,10 @@ ReturnType
 # Not user-facing -- assertion inputs only.
 موجات
 ت
+
+# Arabic fixture identifiers used by phase-09 §8 component-render tests
+# for InventoryItemsTable (alif-ba-ra / kaf-hah-waw-lam / kha-ya-waw-ta).
+# Not user-facing -- assertion inputs only.
+إبر
+كحول
+خيوط
