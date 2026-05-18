@@ -414,6 +414,39 @@ fn grep_no_dev_only_secret_fallback_in_sync_server() {
 }
 
 #[test]
+fn def_007_g19_tauri_plugin_os_registered_in_lib_rs() {
+    // DEF-007 G19: the phase-02 build spec required `tauri-plugin-os` to be
+    // registered in `lib.rs::run()` so the frontend can read `os::locale()`
+    // for the first-launch ar-forcing detector and for diagnostics. The
+    // plugin is declared in Cargo.toml AND wired into the Tauri Builder
+    // chain; this sentinel pins the registration so a future cleanup of
+    // the Builder chain cannot silently drop it.
+    let source = read_source("src/lib.rs");
+    assert!(
+        source.contains("tauri_plugin_os"),
+        "tauri-plugin-os import must remain in lib.rs",
+    );
+    assert!(
+        source.contains(".plugin(tauri_plugin_os::init())"),
+        "tauri-plugin-os MUST be wired into the Tauri Builder chain via .plugin(tauri_plugin_os::init())",
+    );
+}
+
+#[test]
+fn def_007_g19_jsonwebtoken_crate_available_for_rs256_verification() {
+    // DEF-007 G19 sibling: the phase-02 spec listed `jsonwebtoken` as a
+    // required dep for the future client-side RS256 verifier (G08). The
+    // crate is in Cargo.toml; this sentinel pins it so a future
+    // dep-cleanup pass cannot drop it before G08 lands.
+    let cargo_toml = read_source("Cargo.toml");
+    assert!(
+        cargo_toml.contains("jsonwebtoken"),
+        "jsonwebtoken crate MUST remain in Cargo.toml -- it gates the future \
+         client-side RS256 verifier (DEF-007 G08)",
+    );
+}
+
+#[test]
 fn grep_no_sync_store_env_var_comment_in_sync_server() {
     // Phase-09 §4 cleanup: the mentioned-but-never-implemented
     // `SYNC_STORE=memory|prisma` env var must not survive as a stale comment.
