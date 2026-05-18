@@ -22,6 +22,7 @@ import { invoke } from "@/lib/ipc"
 import type { UserAdminRecord, AuthLoginResult } from "@/lib/ipc"
 import {
   authKeys,
+  useCurrentUser,
   useFirstAdmin,
   useHasAnyUser,
   useLock,
@@ -311,5 +312,54 @@ describe.each(directions)("Phase-02 §2.4 auth feature hooks (dir=%s)", (dir) =>
     renderHook(() => useHasAnyUser(), { wrapper })
     await waitFor(() => expect(invoke).toHaveBeenCalled())
     expect(invoke).toHaveBeenCalledWith("users_list", { args: { include_inactive: true } })
+  })
+
+  // --- DEF-007 G30: useCurrentUser ---------------------------------------
+  //
+  // Phase-02 §7 advertised a `useCurrentUser` hook that wraps the
+  // `auth_current_user` IPC and caches under `authKeys.current` so
+  // every component reading the live actor shares a single fetch.
+  // The hook lands this slice; these tests pin the contract.
+
+  it("useCurrentUser dispatches `auth_current_user` and caches under authKeys.current", async () => {
+    mockOnce({
+      user_id: "0190a000-0000-7000-8000-000000000000",
+      email: "asma@idc.iq",
+      name: "Asma",
+      role: "accountant",
+      entity_id: "tenant-1",
+    })
+    const { wrapper, client } = makeWrapper()
+    const { result } = renderHook(() => useCurrentUser(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(vi.mocked(invoke).mock.calls[0][0]).toBe("auth_current_user")
+    expect(client.getQueryData(authKeys.current)).toBeTruthy()
+  })
+
+  it("useCurrentUser returns null when the IPC resolves to null (signed-out state)", async () => {
+    mockOnce(null)
+    const { wrapper } = makeWrapper()
+    const { result } = renderHook(() => useCurrentUser(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toBeNull()
+  })
+
+  it("useCurrentUser shares a single fetch across multiple subscribers", async () => {
+    mockOnce({
+      user_id: "0190a000-0000-7000-8000-000000000000",
+      email: "asma@idc.iq",
+      name: "Asma",
+      role: "accountant",
+      entity_id: "tenant-1",
+    })
+    const { wrapper } = makeWrapper()
+    const { result: a } = renderHook(() => useCurrentUser(), { wrapper })
+    const { result: b } = renderHook(() => useCurrentUser(), { wrapper })
+    await waitFor(() => expect(a.current.isSuccess).toBe(true))
+    await waitFor(() => expect(b.current.isSuccess).toBe(true))
+    // Only one IPC fired -- the second hook reads from cache.
+    expect(vi.mocked(invoke).mock.calls.length).toBe(1)
+    // Both hooks observe the same data (same query-key cache).
+    expect(a.current.data).toEqual(b.current.data)
   })
 })

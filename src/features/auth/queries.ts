@@ -101,6 +101,20 @@ export function useUser (id: string | null) {
   })
 }
 
+// DEF-007 G30: useCurrentUser -- React Query hook over the
+// `auth_current_user` IPC. Cached under `authKeys.current` so any
+// component that needs the live actor's id/email/role/entity can
+// subscribe without re-invoking the IPC each render. Returns null
+// when no user is signed in (the IPC resolves to `Option<UserContext>`
+// on the Rust side).
+export function useCurrentUser () {
+  return useQuery({
+    queryKey: authKeys.current,
+    enabled: isTauri(),
+    queryFn: () => invoke("auth_current_user"),
+  })
+}
+
 export function useUserCreate () {
   const qc = useQueryClient()
   return useMutation({
