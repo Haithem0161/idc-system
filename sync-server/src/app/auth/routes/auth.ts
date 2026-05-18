@@ -2,14 +2,17 @@ import { Type } from '@sinclair/typebox'
 import type { FastifyPluginAsync } from 'fastify'
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 
-const LoginBody = Type.Object({
+// Phase-09 §3.1 contract slice: schemas exported so the Ajv-equivalent
+// (`Value.Check`) harness can drift-test the wire shape without
+// re-declaring it. Mirror of the conflicts.ts / healthz.ts pattern.
+export const LoginBody = Type.Object({
   email: Type.String({ format: 'email' }),
   password: Type.String({ minLength: 8 }),
   entityId: Type.Optional(Type.String()),
   deviceId: Type.Optional(Type.String()),
 })
 
-const LoginResponse = Type.Object({
+export const LoginResponse = Type.Object({
   accessToken: Type.String(),
   refreshToken: Type.String(),
   expiresAt: Type.String(),
@@ -27,29 +30,29 @@ const LoginResponse = Type.Object({
   }),
 })
 
-const RefreshBody = Type.Object({
+export const RefreshBody = Type.Object({
   refreshToken: Type.String(),
 })
 
-const RefreshResponse = Type.Object({
+export const RefreshResponse = Type.Object({
   accessToken: Type.String(),
   refreshToken: Type.String(),
   expiresAt: Type.String(),
 })
 
-const ChangePasswordBody = Type.Object({
+export const ChangePasswordBody = Type.Object({
   oldPassword: Type.String({ minLength: 1 }),
   newPassword: Type.String({ minLength: 8 }),
 })
 
-const BootstrapBody = Type.Object({
+export const BootstrapBody = Type.Object({
   email: Type.String({ format: 'email' }),
   name: Type.String({ minLength: 1 }),
   password: Type.String({ minLength: 8 }),
   entityId: Type.String({ minLength: 1 }),
 })
 
-const BootstrapResponse = Type.Object({
+export const BootstrapResponse = Type.Object({
   id: Type.String(),
   email: Type.String(),
   name: Type.String(),
