@@ -119,6 +119,37 @@ Tests:
 - Receipt PDFs in `ar` + `true` render with Arabic-Indic digits.
 - CSV exports always use Western numerals regardless of setting (for spreadsheet compatibility) -- assert this is honoured.
 
+## First-Launch Locale Detection (DEF-007 G34)
+
+The phase-02 build spec advertised an `ar`-forcing first-launch flow: when the desktop app boots for the first time AND the OS locale resolves to Arabic (via `tauri-plugin-os::locale()`), the i18next runtime initializes with `ar` BEFORE the first paint so the user never sees an English flash. After the first launch, the user's explicit choice (via `settings::set_locale`) overrides OS detection on every subsequent boot.
+
+This is verified MANUALLY because the test path involves a clean app-data directory + an OS-level locale fixture, neither of which fits cleanly into the automated harness. The manual procedure:
+
+### Procedure (run once per supported OS x locale combination)
+
+| Step | Command | Expected outcome |
+|-|-|-|
+| 1 | Move or delete the app-data directory (`~/.local/share/com.idc.system/` on Linux, `~/Library/Application Support/com.idc.system/` on macOS, `%APPDATA%\com.idc.system\` on Windows) | Next launch behaves as first-run |
+| 2a | Set OS locale to Arabic (Iraq): macOS System Settings -> Language; Linux `LANG=ar_IQ.UTF-8`; Windows Settings -> Time & Language | OS reports `ar` locale |
+| 2b | Set OS locale to English (US) for the contrast run | OS reports `en` locale |
+| 3 | `pnpm tauri dev` | First paint renders in the locale matching OS (no English flash on Arabic, no Arabic flash on English) |
+| 4 | After login, open Settings; flip locale to the OPPOSITE of OS; restart | The settings-stored locale wins -- OS detection only applies on first launch |
+
+### Pass criteria
+
+- **Visual review** (G34 acceptance gate): no English string flashes on `ar` first launch (the loading splash + login form render in Arabic from frame zero).
+- **`<html dir="rtl">`** is applied before the React tree paints.
+- **Settings persistence wins on second launch**: the OS detection only fires when `settings.locale` is unset.
+
+### Why this isn't automated
+
+The detection runs INSIDE `tauri::run()` before the webview mounts. Driving it via WebdriverIO requires (a) controlling the OS locale per test (only feasible via container fixtures on Linux) and (b) wiping the app-data directory between runs without losing test state. Per phase-09 §10 testing.md anti-pattern row "Skipping the persona script", this is the LAST RESORT manual check and lives in `personas.md` P3 (Mariam superadmin) as step 0 of every first-run-related script.
+
+### Owners
+
+- Acceptance gate: **P3 Mariam the Superadmin** (`personas.md`) -- runs the manual procedure on the canonical OS (Linux x86_64) before flipping `phase-09-test.md` §8 DoD to complete.
+- Reinforcement gates: optional macOS x86_64 + Windows runs when the release pipeline ships matrix builds.
+
 ## Mixed-Script Input Drills
 
 Real users type mixed scripts. Tests:

@@ -7,10 +7,23 @@ The fixtures in this directory are the shared, realistic seed data used by E2E t
 | File | Purpose |
 |-|-|
 | `clinical-day.sql` | The canonical "Tuesday at IDC" seed. ONE realistic snapshot used by every E2E persona unless explicitly overridden. |
+| `scale-12-months.sql` | 12-month `audit_log` volume fixture for the perf drill (phase-09 §10). Generated from `scripts/regen-scale-12-months.ts`; committed at smoke size (30 days x 10 rows/day = 300 rows), full scale (365 days x 50 rows/day = 18,250 rows) runs locally via `SCALE_DAYS=365 SCALE_ROWS_PER_DAY=50 SCALE_OUT=/tmp/scale-full.sql npx tsx scripts/regen-scale-12-months.ts`. Audit-only -- the other scale targets (1k patients with FTS, 10k visits, 365 operator_shifts, catalog rows) need a full factory chain across FK boundaries; see the "Scaling beyond audit_log" section below. |
 | `scale-10k.sql` | (Future) 10k-visit scaled fixture for `/accounting/visits` 90-day report perf drill. |
 | `scale-fts.sql` | (Future) 1k-patient scaled fixture for `patients_fts` perf drill. |
 
 Only `clinical-day.sql` is mandatory and shipped from day one. Scale fixtures are added on demand when their owning perf drills are authored.
+
+## Scaling beyond audit_log
+
+`scale-12-months.sql` covers the audit volume half of the phase-09 §10 brief. To finish the other scale targets, future sessions need a TypeScript script that:
+
+1. Boots a clean migrated SQLite + Postgres pair (the existing `migrations::run` + `prisma db push` paths).
+2. Uses the factory functions from `src-tauri/tests/support/factories.rs` and `sync-server/test/support/factories.ts` to build the catalog chain (users -> doctors -> check_types -> inventory_items -> consumption maps -> operators).
+3. Walks 365 days of clock-in/clock-out for 4 operators (~1460 shift rows).
+4. Generates ~10k visits distributed across the year against the catalog rows, with realistic inventory consumption FK-linked to the consumption maps from step 2.
+5. Generates ~1k patients with Arabic + Latin names + FTS5 inserts.
+
+The FK coupling is the hard part -- the audit_log generator sidesteps it by emitting only audit rows (which have no FK constraints visible in the schema). A real visit/patient fixture has to honor every CHECK constraint and every FK declared in `migrations/005_patients_visits_adjustments.sql`.
 
 ## Rules
 
