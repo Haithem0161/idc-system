@@ -116,7 +116,14 @@ use crate::sync::{SyncEngine, SyncEngineHandle};
 
 /// Standalone-mode embedded flag (PRD §5.3 / phase-01 §7.35).
 fn embedded_mode_enabled() -> bool {
-    std::env::var("IDC_EMBEDDED_MODE").unwrap_or_else(|_| "0".into()) == "1"
+    embedded_mode_enabled_from_value(std::env::var("IDC_EMBEDDED_MODE").ok().as_deref())
+}
+
+/// Pure helper for `embedded_mode_enabled` — no env-var reads so it is unit-testable
+/// without process-global state (Rust tests run multi-threaded; setting
+/// `IDC_EMBEDDED_MODE` from a `#[test]` would race against parallel tests).
+fn embedded_mode_enabled_from_value(value: Option<&str>) -> bool {
+    matches!(value, Some("1"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -534,4 +541,39 @@ async fn resolve_device_id(
     let candidate = Uuid::now_v7().to_string();
     let device_id = repo.ensure_device_id(&candidate).await?;
     Ok(device_id)
+}
+
+#[cfg(test)]
+mod embedded_mode_flag_tests {
+    use super::embedded_mode_enabled_from_value;
+
+    #[test]
+    fn none_returns_false() {
+        assert!(!embedded_mode_enabled_from_value(None));
+    }
+
+    #[test]
+    fn empty_string_returns_false() {
+        assert!(!embedded_mode_enabled_from_value(Some("")));
+    }
+
+    #[test]
+    fn zero_returns_false() {
+        assert!(!embedded_mode_enabled_from_value(Some("0")));
+    }
+
+    #[test]
+    fn one_returns_true() {
+        assert!(embedded_mode_enabled_from_value(Some("1")));
+    }
+
+    #[test]
+    fn two_returns_false_strict_match() {
+        assert!(!embedded_mode_enabled_from_value(Some("2")));
+    }
+
+    #[test]
+    fn true_string_returns_false_strict_match() {
+        assert!(!embedded_mode_enabled_from_value(Some("true")));
+    }
 }
