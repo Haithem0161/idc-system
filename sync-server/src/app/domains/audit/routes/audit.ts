@@ -15,20 +15,22 @@ import { AuditQueryService } from '../service/audit-service'
  * `daily_close_run`.
  */
 
-const ACTION_VALUES = [
+// Phase-09 §3.1 contract slice: exported so the Ajv-equivalent
+// `Value.Check` harness can drift-test the audit query schemas.
+export const ACTION_VALUES = [
   'create', 'update', 'soft_delete', 'lock', 'void', 'discard',
   'clock_in', 'clock_out', 'password_change', 'login', 'logout',
   'conflict_resolve', 'vacuum', 'daily_close_run',
 ] as const
 
-const ENTITY_VALUES = [
+export const ENTITY_VALUES = [
   'users', 'settings', 'check_types', 'check_subtypes', 'doctors',
   'doctor_check_pricing', 'operators', 'operator_specialties',
   'operator_shifts', 'patients', 'visits', 'inventory_items',
   'inventory_consumption_map', 'inventory_adjustments', 'audit_log',
 ] as const
 
-const AuditQuerySchema = Type.Object({
+export const AuditQuerySchema = Type.Object({
   from: Type.String({ format: 'date-time' }),
   to: Type.String({ format: 'date-time' }),
   actor: Type.Optional(Type.String({ format: 'uuid' })),
@@ -40,7 +42,7 @@ const AuditQuerySchema = Type.Object({
   limit: Type.Optional(Type.String({ pattern: '^\\d+$' })),
 })
 
-const AuditRowSchema = Type.Object({
+export const AuditRowSchema = Type.Object({
   id: Type.String(),
   actor_user_id: Type.String(),
   action: Type.String(),
@@ -54,7 +56,7 @@ const AuditRowSchema = Type.Object({
   entity_id_tenant: Type.String(),
 })
 
-const AuditQueryResponseSchema = Type.Object({
+export const AuditQueryResponseSchema = Type.Object({
   rows: Type.Array(AuditRowSchema),
   next_cursor: Type.Union([Type.String(), Type.Null()]),
 })
