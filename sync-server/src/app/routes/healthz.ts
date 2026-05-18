@@ -16,7 +16,10 @@ import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
  * Returns 200 regardless; the body indicates degradation. Status widens to
  * `'ok' | 'fail'` (Phase-08 shipped `Type.Literal('ok')`).
  */
-const HealthSchema = Type.Object({
+// Phase-09 §3.1 contract slice: exported so the Ajv-equivalent
+// `Value.Check` harness can drift-test the response shape without
+// re-declaring it.
+export const HealthSchema = Type.Object({
   status: Type.Union([Type.Literal('ok'), Type.Literal('fail')]),
   db: Type.Union([Type.Literal('ok'), Type.Literal('fail')]),
   redis: Type.Union([Type.Literal('ok'), Type.Literal('fail')]),

@@ -2,7 +2,10 @@ import { Type } from '@sinclair/typebox'
 import type { FastifyPluginAsync } from 'fastify'
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 
-const ResolveBodySchema = Type.Object({
+// Phase-09 §3.1 contract slice: schemas exported so the Ajv-equivalent
+// `Value.Check` harness can drift-test the wire shape without re-declaring
+// the structure. Mirror of the push.ts / pull.ts pattern.
+export const ResolveBodySchema = Type.Object({
   choice: Type.Union([
     Type.Literal('local'),
     Type.Literal('server'),
@@ -12,16 +15,16 @@ const ResolveBodySchema = Type.Object({
   resolve_op_id: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 })
 
-const ResolveParamsSchema = Type.Object({
+export const ResolveParamsSchema = Type.Object({
   opId: Type.String({ minLength: 1 }),
 })
 
-const ResolveResponseSchema = Type.Object({
+export const ResolveResponseSchema = Type.Object({
   ok: Type.Literal(true),
   status: Type.Union([Type.Literal('applied'), Type.Literal('duplicate')]),
 })
 
-const ConflictRowSchema = Type.Object({
+export const ConflictRowSchema = Type.Object({
   op_id: Type.String(),
   entity: Type.String(),
   entity_id: Type.String(),
@@ -31,7 +34,7 @@ const ConflictRowSchema = Type.Object({
   resolved_at: Type.Union([Type.String(), Type.Null()]),
 })
 
-const ConflictsListResponseSchema = Type.Object({
+export const ConflictsListResponseSchema = Type.Object({
   conflicts: Type.Array(ConflictRowSchema),
 })
 
