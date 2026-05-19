@@ -65,3 +65,8 @@ ReturnType
 إبر
 كحول
 خيوط
+
+# Arabic regex literals used by phase-09 §8 ConflictResolverPanel test
+# (the assertions match resolved i18n copy from sync_conflicts.json/ar).
+# Not user-facing -- assertion regex inputs only.
+جارٍ الإرسال
