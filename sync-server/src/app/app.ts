@@ -15,42 +15,36 @@ const app: FastifyPluginAsync<AppOptions> = async (
   fastify.setValidatorCompiler(TypeBoxValidatorCompiler)
 
   // Shared plugins (auth, swagger, errors, service wiring).
-  // eslint-disable-next-line no-void
   void fastify.register(AutoLoad, {
     dir: join(__dirname, 'plugins'),
     options: opts,
   })
 
   // Global routes (/healthz, /).
-  // eslint-disable-next-line no-void
   void fastify.register(AutoLoad, {
     dir: join(__dirname, 'routes'),
     options: opts,
   })
 
   // Sync bounded context routes.
-  // eslint-disable-next-line no-void
   void fastify.register(AutoLoad, {
     dir: join(__dirname, 'sync', 'routes'),
     options: opts,
   })
 
   // Auth bounded context routes.
-  // eslint-disable-next-line no-void
   void fastify.register(AutoLoad, {
     dir: join(__dirname, 'auth', 'routes'),
     options: opts,
   })
 
   // Reports bounded context routes (phase-07).
-  // eslint-disable-next-line no-void
   void fastify.register(AutoLoad, {
     dir: join(__dirname, 'domains', 'reports', 'routes'),
     options: opts,
   })
 
   // Audit bounded context routes (phase-08).
-  // eslint-disable-next-line no-void
   void fastify.register(AutoLoad, {
     dir: join(__dirname, 'domains', 'audit', 'routes'),
     options: opts,

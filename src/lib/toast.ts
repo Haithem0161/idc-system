@@ -29,6 +29,5 @@ export function emitToast (
     return
   }
   // Phase-1: log only. Phase-2 wires a real toaster.
-  // eslint-disable-next-line no-console
   console.info(`[toast:${kind}] ${message}`)
 }

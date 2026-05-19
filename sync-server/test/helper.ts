@@ -45,7 +45,6 @@ async function build (t: TestContext): Promise<FastifyInstance> {
   await fastify.ready()
 
   // Tear down our app after we are done
-  // eslint-disable-next-line no-void
   t.after(() => void fastify.close())
 
   return fastify

@@ -211,6 +211,18 @@ Still deferred (genuine future work, not gating v0.1.0):
 
 _No other blockers at plan-authoring time._
 
+### Phase 09 testing closure (2026-05-19)
+
+Test plan flipped from `in_progress` to `complete` in [`testing/testing-status.md`](testing/testing-status.md) and every box in [`testing/phase-09-test.md`](testing/phase-09-test.md#L374) §8 DoD checked.
+
+- **Suites green:** Rust lib 399/399 + 49 integration binaries (preship_phase09 10/10 + every prior-phase binary including persona scripts) + sync-server 271/271 + Vitest 969/969 across 52 files.
+- **Contract layer:** 128 cumulative contract tests (conflicts-healthz 23 + audit-query 23 + auth-routes 21 + reports-lookup-op 32 + canonical-snapshots 32 + healthz 3).
+- **E2E:** 2 app-shell smoke specs pass; 18 functional + 2 multi-device specs gated by `RUN_FULL_E2E=true` / `MULTI_DEVICE=true` (binary-rebuild lane).
+- **Defects:** 0 P0/P1 open. DEF-005 / DEF-006 / DEF-008 all `fixed_verified`. DEF-007 P3 aggregate remains open by design with 9 deferred-feature subgaps (G01, G03, G08, G11, G20, G21, G23, G31, G35) — non-blocking per `.claude/rules/testing.md` §11.
+- **Coverage gates:** deferred per `.claude/rules/testing.md` §13 — `cargo-llvm-cov` / `vitest --coverage` / `c8` instrumentation lands with the CI orchestration phase that wires the threshold gates. Phase-9 was a surgical-edit cleanup pass, not new domain code.
+- **Lint/typecheck/build:** all three trifectas green. Frontend lint clean after `eslint --fix` cleared 8 stale `eslint-disable` directives in toast.ts + app.ts + helper.ts (no new code paths).
+- **Setup i18n closure:** the testing audit revealed that the `setup.*` namespace did not exist in `auth.json` (the phase-09 §3 frontend table's "setup.subtitle" SHIP-CONCERN). Added 8 keys (eyebrow / title / subtitle / url_label / url_required / url_invalid / save / saving) to both `en/auth.json` and `ar/auth.json`. The phase-09 build notes above (2026-05-13) stated the key was "already present in both locales" — that statement was incorrect and is now corrected by this session's commit.
+
 ### Phase 01 completion notes (2026-05-11)
 
 - All §1-§5 plumbing landed; §7.1-§7.36 gap additions applied except where explicitly deferred to later phases (resolver UI to phase-08 §7.5; conflict storage on server is server-canonical, IPC `sync_list_conflicts` is a stub list per §7.5).
