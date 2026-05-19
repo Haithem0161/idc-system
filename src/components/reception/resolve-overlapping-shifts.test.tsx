@@ -229,10 +229,10 @@ describe.each(directions)(
       expect(text).toContain(i18n.t("reception.shifts.overlap.modal_hint"))
       // X icon button carries the cancel aria-label.
       const cancelAria = i18n.t("admin.cancel") as string
-      const xBtn = container.querySelector(
-        `button[aria-label='${cancelAria}']`,
+      const xBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.getAttribute("aria-label") === cancelAria,
       )
-      expect(xBtn).not.toBeNull()
+      expect(xBtn).not.toBeUndefined()
       // Footer Close button: type=button + text content "admin.close".
       const closeText = i18n.t("admin.close") as string
       const footerCloseBtn = Array.from(
@@ -541,9 +541,10 @@ describe.each(directions)(
         { wrapper },
       )
       const cancelAria = i18n.t("admin.cancel") as string
-      const xBtn = container.querySelector(
-        `button[aria-label='${cancelAria}']`,
-      ) as HTMLButtonElement
+      const xBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.getAttribute("aria-label") === cancelAria,
+      )
+      if (!xBtn) throw new Error("X cancel button not found")
       fireEvent.click(xBtn)
       expect(onClose).toHaveBeenCalledTimes(1)
     })

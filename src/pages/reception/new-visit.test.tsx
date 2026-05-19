@@ -313,6 +313,22 @@ function installIpc(opts: IpcMockOpts = {}): void {
 
 const SLUG = CHECK_ID
 
+// Property-based input lookup -- avoids template-literal CSS selectors
+// like `input[placeholder='${arabicCopy}']` which trip the i18n lint's
+// embedded-string rule (Arabic copy in a template literal is flagged
+// as a potential user-facing literal even though it's a runtime CSS
+// attribute selector, not source text).
+function findInputByPlaceholder(
+  container: HTMLElement,
+  placeholder: string,
+): HTMLInputElement {
+  const input = Array.from(container.querySelectorAll("input")).find(
+    (i) => (i as HTMLInputElement).placeholder === placeholder,
+  ) as HTMLInputElement | undefined
+  if (!input) throw new Error(`input with placeholder "${placeholder}" not found`)
+  return input
+}
+
 function makeWrapper(): {
   wrapper: (props: { children: ReactNode }) => ReturnType<typeof createElement>
   client: QueryClient
@@ -410,10 +426,10 @@ describe.each(directions)(
       const placeholderCopy = i18n.t(
         "reception.new_visit.patient_placeholder",
       ) as string
-      const input = container.querySelector(
-        `input[placeholder='${placeholderCopy}']`,
+      const input = Array.from(container.querySelectorAll("input")).find(
+        (i) => (i as HTMLInputElement).placeholder === placeholderCopy,
       )
-      expect(input).not.toBeNull()
+      expect(input).not.toBeUndefined()
     })
 
     it("populates the patient-search datalist with one <option> per result", async () => {
@@ -613,9 +629,7 @@ describe.each(directions)(
       const placeholderCopy = i18n.t(
         "reception.new_visit.patient_placeholder",
       ) as string
-      const patientInput = container.querySelector(
-        `input[placeholder='${placeholderCopy}']`,
-      ) as HTMLInputElement
+      const patientInput = findInputByPlaceholder(container, placeholderCopy)
       fireEvent.change(patientInput, { target: { value: "Salma A." } })
       const saveCopy = i18n.t("reception.new_visit.save_draft") as string
       const saveBtn = Array.from(container.querySelectorAll("button")).find(
@@ -654,9 +668,7 @@ describe.each(directions)(
       const placeholderCopy = i18n.t(
         "reception.new_visit.patient_placeholder",
       ) as string
-      const patientInput = container.querySelector(
-        `input[placeholder='${placeholderCopy}']`,
-      ) as HTMLInputElement
+      const patientInput = findInputByPlaceholder(container, placeholderCopy)
       fireEvent.change(patientInput, { target: { value: "Salma A." } })
       // Step 2: click "Save draft" -- this resolves the patient match,
       // creates the draft visit, and seeds draft.patient + draft.visit
@@ -706,9 +718,7 @@ describe.each(directions)(
       const placeholderCopy = i18n.t(
         "reception.new_visit.patient_placeholder",
       ) as string
-      const patientInput = container.querySelector(
-        `input[placeholder='${placeholderCopy}']`,
-      ) as HTMLInputElement
+      const patientInput = findInputByPlaceholder(container, placeholderCopy)
       fireEvent.change(patientInput, { target: { value: "Salma A." } })
       // Step 1: save draft to seed draft.patient + draft.visit.
       const saveCopy = i18n.t("reception.new_visit.save_draft") as string

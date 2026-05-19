@@ -264,9 +264,10 @@ describe.each(directions)(
       expect(text).toContain(i18n.t("admin.save"))
       expect(text).toContain(i18n.t("admin.cancel"))
       const cancelAria = i18n.t("admin.cancel") as string
-      expect(
-        container.querySelector(`button[aria-label='${cancelAria}']`),
-      ).not.toBeNull()
+      const xBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.getAttribute("aria-label") === cancelAria,
+      )
+      expect(xBtn).not.toBeUndefined()
     })
 
     it("check_in input seeds from shift.check_in_at via toLocalInput()", async () => {
@@ -482,9 +483,10 @@ describe.each(directions)(
         expect(container.querySelector("form")).not.toBeNull()
       })
       const cancelAria = i18n.t("admin.cancel") as string
-      const xBtn = container.querySelector(
-        `button[aria-label='${cancelAria}']`,
-      ) as HTMLButtonElement
+      const xBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.getAttribute("aria-label") === cancelAria,
+      )
+      if (!xBtn) throw new Error("X cancel button not found")
       fireEvent.click(xBtn)
       expect(onClose).toHaveBeenCalledTimes(1)
       const editCalls = vi
