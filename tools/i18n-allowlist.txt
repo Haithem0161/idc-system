@@ -70,3 +70,8 @@ ReturnType
 # (the assertions match resolved i18n copy from sync_conflicts.json/ar).
 # Not user-facing -- assertion regex inputs only.
 جارٍ الإرسال
+
+# Arabic regex literal used by phase-09 §8 OpenShiftConflictBanner test
+# (matches the localized "Resolve" button copy from reception/overlap/ar).
+# Not user-facing -- assertion regex input only.
+حلّ
