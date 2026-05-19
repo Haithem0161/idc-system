@@ -37,6 +37,25 @@ export function useSettingUpdate () {
   })
 }
 
+// DEF-007 G23: atomic multi-key save. One IPC call mutates N keys in
+// a single SQLite transaction; if any (key, value) fails validation,
+// the entire batch rolls back and the user observes the pre-batch
+// state for every key. The IPC emits a single `settings:changed` event
+// with `{ keys: [...] }` so subscribers can invalidate caches in bulk.
+export function useSettingsUpdateBatch () {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { entries: Array<{ key: string; value: SettingValueWire }> }) =>
+      invoke("settings_update_batch", { args: input }),
+    onSuccess: (updated: SettingRecord[]) => {
+      void qc.invalidateQueries({ queryKey: settingsKeys.all })
+      for (const s of updated) {
+        void qc.invalidateQueries({ queryKey: settingsKeys.key(s.key) })
+      }
+    },
+  })
+}
+
 export function getSettingByKey (
   settings: SettingRecord[] | undefined,
   key: string

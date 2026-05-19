@@ -19,13 +19,20 @@ export function useSyncEvents (): void {
   const setStatus = useSyncStatusStore((s) => s.setStatus)
   const setError = useSyncStatusStore((s) => s.setError)
   const addConflict = useSyncStatusStore((s) => s.addConflict)
+  const setLastPushedAt = useSyncStatusStore((s) => s.setLastPushedAt)
 
   useEffect(() => {
     const unsubs: Array<() => void> = []
 
     listenEvent<SyncStatus>(SYNC_EVENTS.STATUS, (payload) => {
       const parsed = SyncStatusSchema.safeParse(payload)
-      if (parsed.success) setStatus(parsed.data)
+      if (parsed.success) {
+        setStatus(parsed.data)
+        // DEF-007 G11: a transition to `idle` after a `pushing` phase
+        // signals a successful push. The store's `lastPushedAt`
+        // timestamp drives the `<UserMenu>` red dot threshold.
+        if (parsed.data === "idle") setLastPushedAt(Date.now())
+      }
       if (parsed.success && parsed.data !== "error") setError(null)
     })
       .then((unlisten) => unsubs.push(unlisten))
@@ -53,5 +60,5 @@ export function useSyncEvents (): void {
         }
       }
     }
-  }, [setStatus, setError, addConflict])
+  }, [setStatus, setError, addConflict, setLastPushedAt])
 }

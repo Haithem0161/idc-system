@@ -60,6 +60,7 @@ pub struct AppState {
     app_version: String,
     token: RwLock<Option<String>>,
     expires_at: RwLock<Option<i64>>,
+    refresh_token: RwLock<Option<String>>,
     sync_server_url: RwLock<Option<String>>,
 }
 
@@ -109,6 +110,7 @@ impl AppState {
             app_version: cfg.app_version,
             token: RwLock::new(None),
             expires_at: RwLock::new(None),
+            refresh_token: RwLock::new(None),
             sync_server_url: RwLock::new(cfg.sync_server_url),
         }
     }
@@ -147,6 +149,7 @@ impl AppState {
             app_version,
             token: RwLock::new(None),
             expires_at: RwLock::new(None),
+            refresh_token: RwLock::new(None),
             sync_server_url: RwLock::new(sync_server_url),
         }
     }
@@ -190,6 +193,7 @@ impl AppState {
             app_version,
             token: RwLock::new(None),
             expires_at: RwLock::new(None),
+            refresh_token: RwLock::new(None),
             sync_server_url: RwLock::new(sync_server_url),
         }
     }
@@ -233,6 +237,7 @@ impl AppState {
             app_version,
             token: RwLock::new(None),
             expires_at: RwLock::new(None),
+            refresh_token: RwLock::new(None),
             sync_server_url: RwLock::new(sync_server_url),
         }
     }
@@ -261,6 +266,7 @@ impl AppState {
             app_version: env!("CARGO_PKG_VERSION").to_string(),
             token: RwLock::new(None),
             expires_at: RwLock::new(None),
+            refresh_token: RwLock::new(None),
             sync_server_url: RwLock::new(None),
         }
     }
@@ -355,6 +361,19 @@ impl AppState {
         *self.expires_at.read().await
     }
 
+    /// DEF-007 G01: cache the refresh token returned by `/auth/login` so
+    /// `auth_refresh` can rotate it later. Stored in memory only -- a
+    /// future hardening phase will persist it via the Tauri stronghold
+    /// plugin (see G08/G20/G21 for the public-key pin lifecycle that
+    /// shares the same secure-storage surface).
+    pub async fn set_refresh_token(&self, token: Option<String>) {
+        *self.refresh_token.write().await = token;
+    }
+
+    pub async fn get_refresh_token(&self) -> Option<String> {
+        self.refresh_token.read().await.clone()
+    }
+
     pub async fn set_current_user(&self, user: UserContext) {
         *self.user_context.write().await = Some(user);
     }
@@ -366,6 +385,7 @@ impl AppState {
     pub async fn clear_auth(&self) {
         *self.token.write().await = None;
         *self.expires_at.write().await = None;
+        *self.refresh_token.write().await = None;
         *self.user_context.write().await = None;
         *self.locked.write().await = false;
         if let Some(engine) = &self.sync_engine {

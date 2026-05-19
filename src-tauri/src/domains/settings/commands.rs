@@ -187,3 +187,62 @@ pub async fn settings_set_locale(
     );
     Ok(updated)
 }
+
+// ---- DEF-007 G23: atomic multi-key settings save -------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct SettingBatchEntry {
+    pub key: String,
+    pub value: SettingValue,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SettingsUpdateBatchArgs {
+    pub entries: Vec<SettingBatchEntry>,
+}
+
+pub async fn settings_update_batch_impl(
+    state: &AppState,
+    args: SettingsUpdateBatchArgs,
+) -> AppResult<Vec<SettingResponse>> {
+    let ctx = state
+        .get_current_user()
+        .await
+        .ok_or(AppError::NotAuthenticated)?;
+    let actor_id = Uuid::parse_str(&ctx.user_id)?;
+    let role = UserRole::parse(&ctx.role)
+        .ok_or_else(|| AppError::Validation("invalid actor role".into()))?;
+
+    let svc = state
+        .settings_service()
+        .ok_or_else(|| AppError::Configuration("settings service unavailable".into()))?;
+
+    let entries: Vec<_> = args.entries.into_iter().map(|e| (e.key, e.value)).collect();
+    let updated = svc
+        .update_batch(actor_id, role, &ctx.entity_id, entries)
+        .await?;
+
+    // Refresh the in-memory settings_cache for every key that landed.
+    for setting in &updated {
+        state
+            .set_setting(setting.key.clone(), serde_json::to_value(&setting.value)?)
+            .await;
+    }
+
+    Ok(updated.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
+#[instrument(skip(state, app, args))]
+pub async fn settings_update_batch(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    args: SettingsUpdateBatchArgs,
+) -> AppResult<Vec<SettingResponse>> {
+    let updated = settings_update_batch_impl(&state, args).await?;
+    // Single composite `settings:changed` event whose `keys` array lets
+    // subscribers know which entries to invalidate.
+    let keys: Vec<&String> = updated.iter().map(|s| &s.key).collect();
+    let _ = app.emit("settings:changed", serde_json::json!({ "keys": keys }));
+    Ok(updated)
+}

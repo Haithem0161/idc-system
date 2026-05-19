@@ -32,6 +32,15 @@ pub enum AppError {
     #[error("sync server unavailable: {0}")]
     SyncUnavailable(String),
 
+    /// DEF-007 G31: an operation that REQUIRES online connectivity
+    /// (e.g. `auth::change_password`) was invoked while the device is
+    /// offline. Distinct from `Network` (which means the call was attempted
+    /// and the server was unreachable) -- `OfflineNotAllowed` means the
+    /// caller decided the call MUST NOT be attempted at all because we
+    /// already know we are offline. No HTTP round-trip is made.
+    #[error("operation requires online connectivity")]
+    OfflineNotAllowed,
+
     #[error("database error: {0}")]
     Database(String),
 
@@ -54,6 +63,7 @@ impl AppError {
             Self::NotFound(_) => "NOT_FOUND",
             Self::Network(_) => "NETWORK_OFFLINE",
             Self::SyncUnavailable(_) => "SERVER_UNAVAILABLE",
+            Self::OfflineNotAllowed => "OFFLINE_NOT_ALLOWED",
             Self::Database(_) => "DATABASE_ERROR",
             Self::Configuration(_) => "CONFIGURATION_ERROR",
             Self::Internal(_) => "INTERNAL_ERROR",

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { LogOut, Lock, ChevronDown } from "lucide-react"
 
 import { useAuthStore } from "@/stores/auth-store"
+import { isUserMenuStale, useSyncStatusStore } from "@/stores/sync-status-store"
 import { useLock, useLogout } from "@/features/auth/queries"
 import { cn } from "@/lib/utils"
 
@@ -25,6 +26,16 @@ export function UserMenu() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  // DEF-007 G11: red-dot indicator when outbox non-empty AND last
+  // successful push older than 5 minutes (or no push yet this session).
+  const pendingOps = useSyncStatusStore((s) => s.pendingOps)
+  const lastPushedAt = useSyncStatusStore((s) => s.lastPushedAt)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
+  const stale = isUserMenuStale({ pendingOps, lastPushedAt, now })
 
   useEffect(() => {
     if (!open) return
@@ -56,8 +67,16 @@ export function UserMenu() {
         aria-expanded={open}
         className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line-2 bg-paper pe-2 ps-0.5 text-ink-2 transition-colors hover:bg-paper-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
       >
-        <span className={cn("flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-semibold", roleTone)}>
+        <span className={cn("relative flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-semibold", roleTone)}>
           {initial}
+          {stale ? (
+            <span
+              data-testid="user-menu-stale-dot"
+              aria-label={t("auth.stale_push_warning", { defaultValue: "Pending sync older than 5 minutes" })}
+              className="absolute -end-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-crimson ring-1 ring-paper"
+              style={{ width: "6px", height: "6px" }}
+            />
+          ) : null}
         </span>
         <ChevronDown className="h-3 w-3 text-ink-3" strokeWidth={1.8} />
       </button>

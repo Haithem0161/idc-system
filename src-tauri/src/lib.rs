@@ -29,7 +29,8 @@ use crate::domains::audit::service::{
     DiagnosticsService as DiagnosticsSvc,
 };
 use crate::domains::auth::commands::{
-    auth_current_user, auth_is_locked, auth_lock, auth_login, auth_logout, auth_unlock,
+    auth_bootstrap_jwt_key, auth_change_password, auth_current_user, auth_is_locked,
+    auth_jwt_pinned_sha256, auth_lock, auth_login, auth_logout, auth_refresh, auth_unlock,
     users_create, users_create_first_admin, users_get, users_list, users_reset_password,
     users_soft_delete, users_update,
 };
@@ -83,7 +84,7 @@ use crate::domains::reports::infrastructure::SqliteReportsReadModel;
 use crate::domains::reports::service::ReportsServiceConfig;
 use crate::domains::reports::ReportsService;
 use crate::domains::settings::commands::{
-    settings_get, settings_list, settings_set_locale, settings_update,
+    settings_get, settings_list, settings_set_locale, settings_update, settings_update_batch,
 };
 use crate::domains::settings::domain::repositories::SettingRepo;
 use crate::domains::settings::infrastructure::SqliteSettingRepo;
@@ -197,6 +198,10 @@ pub fn run() {
             // auth
             auth_login,
             auth_logout,
+            auth_refresh,
+            auth_change_password,
+            auth_bootstrap_jwt_key,
+            auth_jwt_pinned_sha256,
             auth_current_user,
             auth_lock,
             auth_unlock,
@@ -213,6 +218,7 @@ pub fn run() {
             settings_list,
             settings_get,
             settings_update,
+            settings_update_batch,
             settings_set_locale,
             // catalog: check_types
             check_types_list,

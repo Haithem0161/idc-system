@@ -33,6 +33,23 @@ export type CommandMap = {
   auth_lock: { args: void; result: null }
   auth_unlock: { args: { args: { password: string } }; result: null }
   auth_is_locked: { args: void; result: boolean }
+  // DEF-007 G01: client-side token rotation. Reads the cached refresh
+  // token from AppState, calls `/auth/refresh`, writes the new pair, and
+  // fires the `auth:refreshed` Tauri event.
+  auth_refresh: { args: void; result: { refreshed_at: string } }
+  // DEF-007 G31: online-required password change.
+  auth_change_password: {
+    args: { args: { current_password: string; new_password: string } }
+    result: null
+  }
+  // DEF-007 G08 / G21: pin the JWT public key in stronghold-equivalent
+  // OS-secure storage. Returns the bootstrap outcome + pinned bytes
+  // SHA-256 (the PEM never crosses the IPC boundary).
+  auth_bootstrap_jwt_key: {
+    args: { args: { server_url?: string } }
+    result: { outcome: { status: "bootstrapped" | "already_pinned" | "pin_mismatch" }; pinned_sha256: string }
+  }
+  auth_jwt_pinned_sha256: { args: void; result: string | null }
   // Users
   users_list: { args: { args: { include_inactive?: boolean } }; result: UserAdminRecord[] }
   users_get: { args: { args: { id: string } }; result: UserAdminRecord }
@@ -60,6 +77,12 @@ export type CommandMap = {
   settings_set_locale: {
     args: { args: { locale: string } }
     result: SettingRecord
+  }
+  // DEF-007 G23: atomic multi-key save. Validates every (key, value)
+  // pair up front; either all writes commit or none do.
+  settings_update_batch: {
+    args: { args: { entries: Array<{ key: string; value: SettingValueWire }> } }
+    result: SettingRecord[]
   }
 
   // Catalog: check_types

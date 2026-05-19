@@ -548,3 +548,231 @@ async fn puller_advances_cursor_on_successful_apply() {
         );
     }
 }
+
+// =========================================================================
+// DEF-007 G35: users pull-apply preserves local password_hash byte-for-byte
+// =========================================================================
+
+#[tokio::test]
+async fn def_007_g35_users_pull_apply_preserves_local_password_hash_byte_for_byte() {
+    // Seed a local user with a known Argon2 hash; the server's pull
+    // payload omits `password_hash` per phase-02 §7.24. After applying,
+    // the local row's hash bytes MUST be identical to what we seeded.
+    use app_lib::domains::auth::domain::entities::User;
+    use app_lib::domains::auth::domain::repositories::UserRepo;
+    use app_lib::domains::auth::domain::value_objects::UserRole;
+    use app_lib::domains::auth::infrastructure::SqliteUserRepo;
+
+    let pool = fresh_pool().await;
+    let user_repo = SqliteUserRepo::new(pool.clone());
+    let original_hash =
+        "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0$ORIGINAL_BYTES".to_string();
+    let user_id = uuid::Uuid::now_v7();
+    let user = User {
+        id: user_id,
+        email: "alice@idc.io".into(),
+        name: "Alice".into(),
+        password_hash: original_hash.clone(),
+        role: UserRole::Receptionist,
+        is_active: true,
+        last_login_at: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        deleted_at: None,
+        version: 1,
+        dirty: false,
+        last_synced_at: None,
+        origin_device_id: Some("dev-A".into()),
+        entity_id: "tenant-x".into(),
+    };
+    let mut tx = pool.begin().await.unwrap();
+    user_repo.upsert(&mut tx, &user).await.unwrap();
+    tx.commit().await.unwrap();
+
+    // Server emits an updated `users` row (renamed to Alice Smith, version
+    // bumped) with NO `password_hash` field.
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "entity": "users",
+                "entity_id": user_id.to_string(),
+                "payload": {
+                    "id": user_id.to_string(),
+                    "email": "alice@idc.io",
+                    "name": "Alice Smith",
+                    "role": "receptionist",
+                    "is_active": true,
+                    "created_at": "2026-05-13T10:00:00Z",
+                    "updated_at": "2026-05-13T11:00:00Z",
+                    "entity_id": "tenant-x",
+                    // explicitly NO password_hash field
+                },
+                "updated_at": "2026-05-13T11:00:00Z",
+                "version": 2,
+            }],
+            "next_cursor": "2026-05-13T11:00:00Z|users"
+        })))
+        .mount(&server)
+        .await;
+    let outcome = puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("pull ok");
+    assert_eq!(outcome.applied, 1);
+
+    // Re-read the local user row; assert ONLY the password_hash matches
+    // the pre-pull seed (other fields may legitimately have changed).
+    let after = user_repo
+        .get_by_id(user_id)
+        .await
+        .unwrap()
+        .expect("user row still exists");
+    assert_eq!(
+        after.password_hash, original_hash,
+        "DEF-007 G35: pull-apply must NOT touch password_hash"
+    );
+    assert_eq!(after.name, "Alice Smith", "name must update from pull");
+    assert_eq!(after.version, 2, "version must advance to incoming");
+}
+
+#[tokio::test]
+async fn def_007_g35_users_pull_apply_inserts_new_row_with_empty_password_hash() {
+    // When the pulled user does NOT exist locally, we insert with an
+    // empty password_hash. The user must complete an online login to
+    // populate it before offline login can succeed.
+    use app_lib::domains::auth::domain::repositories::UserRepo;
+    use app_lib::domains::auth::infrastructure::SqliteUserRepo;
+
+    let pool = fresh_pool().await;
+    let user_repo = SqliteUserRepo::new(pool.clone());
+    let new_user_id = uuid::Uuid::now_v7();
+
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "entity": "users",
+                "entity_id": new_user_id.to_string(),
+                "payload": {
+                    "id": new_user_id.to_string(),
+                    "email": "bob@idc.io",
+                    "name": "Bob",
+                    "role": "accountant",
+                    "is_active": true,
+                    "created_at": "2026-05-13T10:00:00Z",
+                    "updated_at": "2026-05-13T10:00:00Z",
+                    "entity_id": "tenant-x",
+                },
+                "updated_at": "2026-05-13T10:00:00Z",
+                "version": 1,
+            }],
+            "next_cursor": "2026-05-13T10:00:00Z|users-bob"
+        })))
+        .mount(&server)
+        .await;
+    puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("pull ok");
+
+    let inserted = user_repo
+        .get_by_id(new_user_id)
+        .await
+        .unwrap()
+        .expect("new user inserted");
+    assert_eq!(inserted.password_hash, "");
+    assert_eq!(inserted.email, "bob@idc.io");
+}
+
+#[tokio::test]
+async fn def_007_g35_users_pull_apply_with_stale_version_does_not_touch_existing_row() {
+    // LWW gate: incoming version <= existing version is a no-op. We seed
+    // version=5 locally and try to apply a version=2 server payload.
+    use app_lib::domains::auth::domain::entities::User;
+    use app_lib::domains::auth::domain::repositories::UserRepo;
+    use app_lib::domains::auth::domain::value_objects::UserRole;
+    use app_lib::domains::auth::infrastructure::SqliteUserRepo;
+
+    let pool = fresh_pool().await;
+    let user_repo = SqliteUserRepo::new(pool.clone());
+    let original_hash = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0$LOCAL_v5".to_string();
+    let user_id = uuid::Uuid::now_v7();
+    let user = User {
+        id: user_id,
+        email: "carol@idc.io".into(),
+        name: "Carol Local v5".into(),
+        password_hash: original_hash.clone(),
+        role: UserRole::Receptionist,
+        is_active: true,
+        last_login_at: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        deleted_at: None,
+        version: 5,
+        dirty: false,
+        last_synced_at: None,
+        origin_device_id: Some("dev-A".into()),
+        entity_id: "tenant-x".into(),
+    };
+    let mut tx = pool.begin().await.unwrap();
+    user_repo.upsert(&mut tx, &user).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "entity": "users",
+                "entity_id": user_id.to_string(),
+                "payload": {
+                    "id": user_id.to_string(),
+                    "email": "carol@idc.io",
+                    "name": "Carol Server v2",
+                    "role": "accountant",
+                    "is_active": true,
+                    "created_at": "2026-05-13T09:00:00Z",
+                    "updated_at": "2026-05-13T09:00:00Z",
+                    "entity_id": "tenant-x",
+                },
+                "updated_at": "2026-05-13T09:00:00Z",
+                "version": 2,
+            }],
+            "next_cursor": "2026-05-13T09:00:00Z|carol"
+        })))
+        .mount(&server)
+        .await;
+    puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("pull ok");
+
+    let after = user_repo.get_by_id(user_id).await.unwrap().unwrap();
+    assert_eq!(
+        after.name, "Carol Local v5",
+        "stale pull must not overwrite"
+    );
+    assert_eq!(after.version, 5, "stale pull must not bump version");
+    assert_eq!(after.password_hash, original_hash);
+}

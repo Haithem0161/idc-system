@@ -15,14 +15,16 @@ use std::sync::Arc;
 
 use app_lib::db::migrations;
 use app_lib::domains::auth::commands::{
-    auth_current_user_impl, auth_is_locked_impl, auth_lock_impl, auth_login_impl, auth_logout_impl,
+    auth_bootstrap_jwt_key_with_pem, auth_change_password_impl, auth_current_user_impl,
+    auth_is_locked_impl, auth_lock_impl, auth_login_impl, auth_logout_impl, auth_refresh_impl,
     auth_unlock_impl, current_actor, users_create_first_admin_impl, users_create_impl,
     users_get_impl, users_list_impl, users_reset_password_impl, users_soft_delete_impl,
-    users_update_impl, FirstAdminArgs, LoginArgs, UnlockArgs, UserCreateArgs, UserIdArgs,
-    UserResetPasswordArgs, UserUpdateArgs, UsersListArgs,
+    users_update_impl, ChangePasswordArgs, FirstAdminArgs, LoginArgs, UnlockArgs, UserCreateArgs,
+    UserIdArgs, UserResetPasswordArgs, UserUpdateArgs, UsersListArgs,
 };
 use app_lib::domains::auth::domain::value_objects::{LoginMode, UserRole};
 use app_lib::domains::auth::infrastructure::SqliteUserRepo;
+use app_lib::domains::auth::infrastructure::{BootstrapOutcome, JwtVerifier};
 use app_lib::domains::auth::AuthService;
 use app_lib::domains::auth::UserService;
 use app_lib::domains::settings::commands::{
@@ -1338,6 +1340,554 @@ async fn def_007_g16_settings_update_direct_with_int_locale_rejected_type_check(
         SettingUpdateArgs {
             key: "locale".into(),
             value: SettingValue::Int(1),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+}
+
+// =========================================================================
+// DEF-007 G01: auth::refresh IPC + RefreshResult shape
+// =========================================================================
+
+#[tokio::test]
+async fn def_007_g01_auth_refresh_200_rotates_tokens_and_returns_refreshed_at() {
+    let server = MockServer::start().await;
+    let rig = rig(Some(&server.uri())).await;
+    bootstrap_superadmin(&rig).await;
+    rig.state.set_refresh_token(Some("rt-v1".into())).await;
+    let new_exp = chrono::Utc::now() + chrono::Duration::minutes(15);
+    Mock::given(method("POST"))
+        .and(path("/auth/refresh"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "accessToken": "access-v2",
+            "refreshToken": "rt-v2",
+            "expiresAt": new_exp.to_rfc3339(),
+        })))
+        .mount(&server)
+        .await;
+
+    let before = chrono::Utc::now();
+    let event = auth_refresh_impl(&rig.state).await.unwrap();
+    let after = chrono::Utc::now();
+    assert!(
+        event.refreshed_at >= before && event.refreshed_at <= after,
+        "refreshed_at must reflect when the rotation completed locally"
+    );
+    assert_eq!(
+        rig.state.get_current_token().await.as_deref(),
+        Some("access-v2")
+    );
+    assert_eq!(
+        rig.state.get_refresh_token().await.as_deref(),
+        Some("rt-v2")
+    );
+}
+
+#[tokio::test]
+async fn def_007_g01_auth_refresh_401_returns_not_authenticated_and_leaves_state_intact() {
+    let server = MockServer::start().await;
+    let rig = rig(Some(&server.uri())).await;
+    bootstrap_superadmin(&rig).await;
+    rig.state.set_refresh_token(Some("rt-v1".into())).await;
+    rig.state.set_current_token("access-v1".into(), 0).await;
+    Mock::given(method("POST"))
+        .and(path("/auth/refresh"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "code": "SESSION_EXPIRED",
+            "message": "refresh token expired"
+        })))
+        .mount(&server)
+        .await;
+    let err = auth_refresh_impl(&rig.state).await.unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+    // No mutation on failure.
+    assert_eq!(
+        rig.state.get_current_token().await.as_deref(),
+        Some("access-v1")
+    );
+    assert_eq!(
+        rig.state.get_refresh_token().await.as_deref(),
+        Some("rt-v1")
+    );
+}
+
+#[tokio::test]
+async fn def_007_g01_auth_refresh_without_cached_refresh_token_returns_not_authenticated() {
+    let rig = rig(Some("http://127.0.0.1:1")).await; // unreachable URL is fine; we should never call it.
+    bootstrap_superadmin(&rig).await;
+    // No set_refresh_token call.
+    let err = auth_refresh_impl(&rig.state).await.unwrap_err();
+    assert!(matches!(err, AppError::NotAuthenticated));
+}
+
+#[tokio::test]
+async fn def_007_g01_auth_login_caches_refresh_token_into_app_state() {
+    // Sibling sentinel: the new `set_refresh_token` write inside
+    // `auth_login_impl` must actually fire on the online path. Without it,
+    // `auth_refresh_impl` has no token to rotate.
+    let server = MockServer::start().await;
+    let rig = rig(Some(&server.uri())).await;
+    let phc = app_lib::domains::auth::domain::services::hash_password("admin-pass").unwrap();
+    let user_id = uuid::Uuid::now_v7();
+    Mock::given(method("POST"))
+        .and(path("/auth/login"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "accessToken": "access.v1",
+            "refreshToken": "rt.v1",
+            "expiresAt": chrono::Utc::now().to_rfc3339(),
+            "user": {
+                "id": user_id.to_string(),
+                "email": "admin@idc.io",
+                "name": "Mariam",
+                "role": "superadmin",
+                "entityId": "tenant-1",
+                "passwordHash": phc,
+            }
+        })))
+        .mount(&server)
+        .await;
+    auth_login_impl(
+        &rig.state,
+        LoginArgs {
+            email: "admin@idc.io".into(),
+            password: "admin-pass".into(),
+            entity_id_hint: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        rig.state.get_refresh_token().await.as_deref(),
+        Some("rt.v1"),
+        "auth_login must cache the refresh token so auth_refresh can rotate it"
+    );
+}
+
+// =========================================================================
+// DEF-007 G31: auth::change_password offline-required + online success
+// =========================================================================
+
+#[tokio::test]
+async fn def_007_g31_change_password_returns_offline_not_allowed_when_no_server_url() {
+    let rig = rig(None).await; // no server_url == offline
+    let admin_id = bootstrap_superadmin(&rig).await;
+    rig.state
+        .set_current_token("access-v1".into(), chrono::Utc::now().timestamp() + 900)
+        .await;
+    // Capture password hash BEFORE the call.
+    use app_lib::domains::auth::domain::repositories::UserRepo;
+    let admin = rig
+        .user_repo
+        .get_by_id(uuid::Uuid::from_str(&admin_id).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let phc_before = admin.password_hash.clone();
+    // No audit row yet beyond bootstrap's `create`.
+    let (audit_before,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM audit_log")
+        .fetch_one(&rig.pool)
+        .await
+        .unwrap();
+    let err = auth_change_password_impl(
+        &rig.state,
+        ChangePasswordArgs {
+            current_password: "admin-pass".into(),
+            new_password: "new-pass-with-12-chars".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::OfflineNotAllowed));
+    // Hash unchanged.
+    let admin_after = rig
+        .user_repo
+        .get_by_id(uuid::Uuid::from_str(&admin_id).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(admin_after.password_hash, phc_before);
+    let (audit_after,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM audit_log")
+        .fetch_one(&rig.pool)
+        .await
+        .unwrap();
+    assert_eq!(audit_before, audit_after, "no audit row on offline branch");
+}
+
+#[tokio::test]
+async fn def_007_g31_change_password_returns_offline_not_allowed_when_server_unreachable() {
+    // Server URL points at a port that nothing listens on. The HTTP call
+    // fails with a connection error; `change_password` MUST surface that
+    // as OfflineNotAllowed (not Network) per §4 step 1.
+    let rig = rig(Some("http://127.0.0.1:1")).await;
+    let admin_id = bootstrap_superadmin(&rig).await;
+    rig.state
+        .set_current_token("access-v1".into(), chrono::Utc::now().timestamp() + 900)
+        .await;
+    use app_lib::domains::auth::domain::repositories::UserRepo;
+    let admin = rig
+        .user_repo
+        .get_by_id(uuid::Uuid::from_str(&admin_id).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let phc_before = admin.password_hash.clone();
+    let err = auth_change_password_impl(
+        &rig.state,
+        ChangePasswordArgs {
+            current_password: "admin-pass".into(),
+            new_password: "new-pass-with-12-chars".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::OfflineNotAllowed));
+    let admin_after = rig
+        .user_repo
+        .get_by_id(uuid::Uuid::from_str(&admin_id).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(admin_after.password_hash, phc_before);
+}
+
+#[tokio::test]
+async fn def_007_g31_change_password_204_rotates_local_hash_and_writes_audit() {
+    let server = MockServer::start().await;
+    let rig = rig(Some(&server.uri())).await;
+    let admin_id = bootstrap_superadmin(&rig).await;
+    rig.state
+        .set_current_token("access-v1".into(), chrono::Utc::now().timestamp() + 900)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/auth/change-password"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    use app_lib::domains::auth::domain::repositories::UserRepo;
+    let admin = rig
+        .user_repo
+        .get_by_id(uuid::Uuid::from_str(&admin_id).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let phc_before = admin.password_hash.clone();
+    let (audit_before,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM audit_log")
+        .fetch_one(&rig.pool)
+        .await
+        .unwrap();
+    auth_change_password_impl(
+        &rig.state,
+        ChangePasswordArgs {
+            current_password: "admin-pass".into(),
+            new_password: "new-pass-12-chars-12".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let admin_after = rig
+        .user_repo
+        .get_by_id(uuid::Uuid::from_str(&admin_id).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(admin_after.password_hash, phc_before, "hash must rotate");
+    // Verify the new hash actually validates the new password.
+    app_lib::domains::auth::domain::services::verify_password(
+        "new-pass-12-chars-12",
+        &admin_after.password_hash,
+    )
+    .unwrap();
+    let (audit_after,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM audit_log")
+        .fetch_one(&rig.pool)
+        .await
+        .unwrap();
+    assert_eq!(audit_before + 1, audit_after);
+    let (action,): (String,) =
+        sqlx::query_as("SELECT action FROM audit_log ORDER BY at DESC LIMIT 1")
+            .fetch_one(&rig.pool)
+            .await
+            .unwrap();
+    assert_eq!(action, "password_change");
+}
+
+#[tokio::test]
+async fn def_007_g31_change_password_rejects_short_new_password() {
+    let rig = rig(Some("http://127.0.0.1:1")).await;
+    bootstrap_superadmin(&rig).await;
+    rig.state
+        .set_current_token("access-v1".into(), chrono::Utc::now().timestamp() + 900)
+        .await;
+    let err = auth_change_password_impl(
+        &rig.state,
+        ChangePasswordArgs {
+            current_password: "admin-pass".into(),
+            new_password: "short".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+}
+
+// =========================================================================
+// DEF-007 G08 / G21: bootstrap_jwt_key pin lifecycle
+// =========================================================================
+
+fn test_pubkey_pem() -> Vec<u8> {
+    // Reuse the test fixture from the verifier module.
+    include_bytes!("../src/domains/auth/infrastructure/test_data/jwt_test_public.pem").to_vec()
+}
+fn other_pubkey_pem() -> Vec<u8> {
+    include_bytes!("../src/domains/auth/infrastructure/test_data/jwt_other_public.pem").to_vec()
+}
+
+#[tokio::test]
+async fn def_007_g08_bootstrap_jwt_key_writes_pem_and_exposes_sha256() {
+    let dir = tempfile::tempdir().unwrap();
+    let pem = test_pubkey_pem();
+    let result = auth_bootstrap_jwt_key_with_pem(dir.path(), &pem)
+        .await
+        .unwrap();
+    assert_eq!(result.outcome, BootstrapOutcome::Bootstrapped);
+    assert_eq!(result.pinned_sha256.len(), 64);
+    // Pinned file exists at the documented path.
+    let bytes = std::fs::read(dir.path().join("jwt_public_key.pem")).unwrap();
+    assert_eq!(bytes, pem);
+    // Verifier loads from the pinned file.
+    let v = JwtVerifier::from_pinned_file(dir.path()).unwrap();
+    assert_eq!(v.pinned_bytes_sha256_hex(), result.pinned_sha256);
+}
+
+#[tokio::test]
+async fn def_007_g21_login_does_not_overwrite_pinned_jwt_public_key() {
+    // The auth_login flow MUST NOT touch the pinned PEM. This test
+    // demonstrates the architectural invariant: a separate IPC
+    // (`auth_bootstrap_jwt_key`) is the SOLE writer of the pinned file,
+    // and `auth_login_impl` is structurally incapable of writing to it
+    // (it has no app_data_dir parameter, no path I/O).
+    let dir = tempfile::tempdir().unwrap();
+    let pem = test_pubkey_pem();
+    auth_bootstrap_jwt_key_with_pem(dir.path(), &pem)
+        .await
+        .unwrap();
+    let pinned_before = std::fs::read(dir.path().join("jwt_public_key.pem")).unwrap();
+
+    // Drive a complete online auth_login_impl call.
+    let server = MockServer::start().await;
+    let rig = rig(Some(&server.uri())).await;
+    let phc = app_lib::domains::auth::domain::services::hash_password("admin-pass").unwrap();
+    let user_id = uuid::Uuid::now_v7();
+    Mock::given(method("POST"))
+        .and(path("/auth/login"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "accessToken": "access.v1",
+            "refreshToken": "rt.v1",
+            "expiresAt": chrono::Utc::now().to_rfc3339(),
+            "user": {
+                "id": user_id.to_string(),
+                "email": "admin@idc.io",
+                "name": "Mariam",
+                "role": "superadmin",
+                "entityId": "tenant-1",
+                "passwordHash": phc,
+            }
+        })))
+        .mount(&server)
+        .await;
+    auth_login_impl(
+        &rig.state,
+        LoginArgs {
+            email: "admin@idc.io".into(),
+            password: "admin-pass".into(),
+            entity_id_hint: Some("tenant-1".into()),
+        },
+    )
+    .await
+    .unwrap();
+    // Pinned file unchanged.
+    let pinned_after = std::fs::read(dir.path().join("jwt_public_key.pem")).unwrap();
+    assert_eq!(pinned_before, pinned_after, "login must not mutate pin");
+}
+
+#[tokio::test]
+async fn def_007_g21_bootstrap_jwt_key_refuses_to_overwrite_when_bytes_differ() {
+    let dir = tempfile::tempdir().unwrap();
+    let pem_a = test_pubkey_pem();
+    let pem_b = other_pubkey_pem();
+    auth_bootstrap_jwt_key_with_pem(dir.path(), &pem_a)
+        .await
+        .unwrap();
+    let result = auth_bootstrap_jwt_key_with_pem(dir.path(), &pem_b)
+        .await
+        .unwrap();
+    assert_eq!(result.outcome, BootstrapOutcome::PinMismatch);
+    // Pin unchanged.
+    let stored = std::fs::read(dir.path().join("jwt_public_key.pem")).unwrap();
+    assert_eq!(stored, pem_a);
+}
+
+#[tokio::test]
+async fn def_007_g21_bootstrap_jwt_key_replay_with_same_bytes_is_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let pem = test_pubkey_pem();
+    auth_bootstrap_jwt_key_with_pem(dir.path(), &pem)
+        .await
+        .unwrap();
+    let result = auth_bootstrap_jwt_key_with_pem(dir.path(), &pem)
+        .await
+        .unwrap();
+    assert_eq!(result.outcome, BootstrapOutcome::AlreadyPinned);
+}
+
+// =========================================================================
+// DEF-007 G23: settings_update_batch atomic multi-key save
+// =========================================================================
+
+#[tokio::test]
+async fn def_007_g23_settings_update_batch_persists_all_keys_atomically() {
+    use app_lib::domains::settings::commands::{
+        settings_update_batch_impl, SettingBatchEntry, SettingsUpdateBatchArgs,
+    };
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    let updated = settings_update_batch_impl(
+        &rig.state,
+        SettingsUpdateBatchArgs {
+            entries: vec![
+                SettingBatchEntry {
+                    key: "arabic_numerals".into(),
+                    value: SettingValue::Bool(true),
+                },
+                SettingBatchEntry {
+                    key: "currency_symbol".into(),
+                    value: SettingValue::Text("IQD".into()),
+                },
+                SettingBatchEntry {
+                    key: "idle_lock_minutes".into(),
+                    value: SettingValue::Int(20),
+                },
+            ],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.len(), 3);
+    assert_eq!(updated[0].key, "arabic_numerals");
+    assert_eq!(updated[1].key, "currency_symbol");
+    assert_eq!(updated[2].key, "idle_lock_minutes");
+
+    // All three persisted.
+    let list = settings_list_impl(&rig.state).await.unwrap();
+    let by_key: std::collections::HashMap<_, _> = list.iter().map(|s| (&s.key, s)).collect();
+    assert_eq!(
+        by_key.get(&"arabic_numerals".to_string()).unwrap().value,
+        SettingValue::Bool(true)
+    );
+    assert_eq!(
+        by_key.get(&"currency_symbol".to_string()).unwrap().value,
+        SettingValue::Text("IQD".into())
+    );
+    assert_eq!(
+        by_key.get(&"idle_lock_minutes".to_string()).unwrap().value,
+        SettingValue::Int(20)
+    );
+}
+
+#[tokio::test]
+async fn def_007_g23_settings_update_batch_rolls_back_all_keys_on_validation_failure() {
+    // The third entry has an invalid value; the entire batch must fail
+    // and no DB row should mutate.
+    use app_lib::domains::settings::commands::{
+        settings_update_batch_impl, SettingBatchEntry, SettingsUpdateBatchArgs,
+    };
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    // Capture before-state.
+    let before = settings_list_impl(&rig.state).await.unwrap();
+    let before_arabic = before
+        .iter()
+        .find(|s| s.key == "arabic_numerals")
+        .map(|s| s.value.clone());
+    let before_currency = before
+        .iter()
+        .find(|s| s.key == "currency_symbol")
+        .map(|s| s.value.clone());
+    let before_idle = before
+        .iter()
+        .find(|s| s.key == "idle_lock_minutes")
+        .map(|s| s.value.clone());
+
+    let err = settings_update_batch_impl(
+        &rig.state,
+        SettingsUpdateBatchArgs {
+            entries: vec![
+                SettingBatchEntry {
+                    key: "arabic_numerals".into(),
+                    value: SettingValue::Bool(true),
+                },
+                SettingBatchEntry {
+                    key: "currency_symbol".into(),
+                    value: SettingValue::Text("IQD".into()),
+                },
+                SettingBatchEntry {
+                    key: "idle_lock_minutes".into(),
+                    value: SettingValue::Int(-1), // INVALID -- must be positive.
+                },
+            ],
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)));
+
+    // Every key must read back as it was before the failed batch.
+    let after = settings_list_impl(&rig.state).await.unwrap();
+    let after_arabic = after
+        .iter()
+        .find(|s| s.key == "arabic_numerals")
+        .map(|s| s.value.clone());
+    let after_currency = after
+        .iter()
+        .find(|s| s.key == "currency_symbol")
+        .map(|s| s.value.clone());
+    let after_idle = after
+        .iter()
+        .find(|s| s.key == "idle_lock_minutes")
+        .map(|s| s.value.clone());
+    assert_eq!(before_arabic, after_arabic, "arabic_numerals rolled back");
+    assert_eq!(
+        before_currency, after_currency,
+        "currency_symbol rolled back"
+    );
+    assert_eq!(before_idle, after_idle, "idle_lock_minutes rolled back");
+}
+
+#[tokio::test]
+async fn def_007_g23_settings_update_batch_rejects_non_superadmin_caller() {
+    use app_lib::domains::settings::commands::{
+        settings_update_batch_impl, SettingBatchEntry, SettingsUpdateBatchArgs,
+    };
+    let rig = rig(None).await;
+    bootstrap_superadmin(&rig).await;
+    // Flip the current user to receptionist.
+    rig.state
+        .set_current_user(UserContext {
+            user_id: uuid::Uuid::now_v7().to_string(),
+            entity_id: "tenant-1".into(),
+            email: "rec@idc.io".into(),
+            name: Some("Mehdi".into()),
+            role: "receptionist".into(),
+        })
+        .await;
+    let err = settings_update_batch_impl(
+        &rig.state,
+        SettingsUpdateBatchArgs {
+            entries: vec![SettingBatchEntry {
+                key: "arabic_numerals".into(),
+                value: SettingValue::Bool(true),
+            }],
         },
     )
     .await

@@ -12,9 +12,10 @@ use crate::domains::auth::domain::value_objects::UserRole;
 use crate::domains::settings::domain::entities::Setting;
 use crate::domains::settings::domain::repositories::SettingRepo;
 use crate::domains::settings::domain::value_objects::{is_required_key, SettingValue};
-use crate::domains::sync::domain::entities::OutboxOp;
+use crate::domains::sync::domain::entities::audit_entry::AuditCreateInput;
+use crate::domains::sync::domain::entities::{AuditEntry, OutboxOp};
 use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo};
-use crate::domains::sync::domain::services::{AuditWriter, BusinessWrite};
+use crate::domains::sync::domain::services::{compute_delta, AuditWriter, BusinessWrite};
 use crate::domains::sync::domain::value_objects::AuditAction;
 use crate::error::{AppError, AppResult};
 
@@ -22,6 +23,9 @@ use crate::error::{AppError, AppResult};
 pub struct SettingsService {
     pool: sqlx::SqlitePool,
     setting_repo: Arc<dyn SettingRepo>,
+    audit_repo: Arc<dyn AuditRepo>,
+    outbox_repo: Arc<dyn OutboxRepo>,
+    device_id: String,
     writer: AuditWriter,
 }
 
@@ -36,6 +40,9 @@ impl SettingsService {
         Self {
             pool,
             setting_repo,
+            audit_repo: audit_repo.clone(),
+            outbox_repo: outbox_repo.clone(),
+            device_id: device_id.clone(),
             writer: AuditWriter::new(audit_repo, outbox_repo, device_id),
         }
     }
@@ -97,6 +104,98 @@ impl SettingsService {
             .get_by_key(&key_owned, &entity_id_owned)
             .await?
             .ok_or_else(|| AppError::Internal("setting vanished post-write".into()))
+    }
+
+    /// DEF-007 G23: atomic multi-key save.
+    ///
+    /// Validates every (key, value) pair up front (failing fast WITHOUT
+    /// any DB writes), then applies all writes inside a single SQLite
+    /// transaction. If any per-key validation fails or any write errors,
+    /// the entire batch rolls back -- the caller observes the pre-batch
+    /// state for every key.
+    ///
+    /// Audit + outbox are emitted per-key inside the same tx, audit-first
+    /// per `AuditWriter` canonical ordering (phase-01 §7.7). The returned
+    /// `Vec<Setting>` lists the post-write rows in the SAME ORDER as
+    /// `entries`, so the caller can replay them onto the in-memory
+    /// `settings_cache`.
+    pub async fn update_batch(
+        &self,
+        actor_user_id: Uuid,
+        actor_role: UserRole,
+        entity_id: &str,
+        entries: Vec<(String, SettingValue)>,
+    ) -> AppResult<Vec<Setting>> {
+        if actor_role != UserRole::Superadmin {
+            return Err(AppError::Validation(
+                "settings update is superadmin-only".into(),
+            ));
+        }
+        if entries.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Validate every pair before any DB I/O so the batch is rejected
+        // intact when any single key is malformed.
+        for (key, value) in &entries {
+            validate_value_for_key(key, value)?;
+        }
+
+        let mut existing: Vec<Option<Setting>> = Vec::with_capacity(entries.len());
+        for (key, _) in &entries {
+            existing.push(self.setting_repo.get_by_key(key, entity_id).await?);
+        }
+
+        let mut tx = self.pool.begin().await.map_err(AppError::from)?;
+        let mut after_rows: Vec<Setting> = Vec::with_capacity(entries.len());
+
+        for ((key, value), prior) in entries.into_iter().zip(existing.into_iter()) {
+            let before = match &prior {
+                Some(s) => serde_json::json!({
+                    "key": s.key,
+                    "value": s.value.as_storage(),
+                    "valueType": s.value.value_type(),
+                    "version": s.version,
+                }),
+                None => Value::Null,
+            };
+            let setting = match prior.clone() {
+                Some(s) => s.updated_with(value.clone()),
+                None => Setting::new_local(&key, value.clone(), entity_id, None)?,
+            };
+            self.setting_repo.upsert(&mut tx, &setting).await?;
+
+            let after = serde_json::json!({
+                "key": setting.key,
+                "value": setting.value.as_storage(),
+                "valueType": setting.value.value_type(),
+                "version": setting.version,
+            });
+            let delta = compute_delta(&before, &after);
+
+            let audit = AuditEntry::create(AuditCreateInput {
+                actor_user_id,
+                action: AuditAction::Update,
+                entity: "settings".into(),
+                entity_id: prior.as_ref().map(|s| s.id.to_string()).unwrap_or_default(),
+                delta,
+                ip: None,
+                device_id: self.device_id.clone(),
+                entity_id_tenant: entity_id.to_string(),
+            });
+            self.audit_repo.append(&mut tx, &audit).await?;
+            let audit_payload = rmp_serde::to_vec_named(&audit)?;
+            let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
+            self.outbox_repo.enqueue(&mut tx, &audit_outbox).await?;
+
+            let payload = serde_json::to_vec(&SettingPushPayload::from(&setting))?;
+            let outbox = OutboxOp::new("settings", setting.id.to_string(), payload);
+            self.outbox_repo.enqueue(&mut tx, &outbox).await?;
+
+            after_rows.push(setting);
+        }
+
+        tx.commit().await.map_err(AppError::from)?;
+        Ok(after_rows)
     }
 }
 

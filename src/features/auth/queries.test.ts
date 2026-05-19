@@ -22,12 +22,16 @@ import { invoke } from "@/lib/ipc"
 import type { UserAdminRecord, AuthLoginResult } from "@/lib/ipc"
 import {
   authKeys,
+  useAuthRefresh,
+  useBootstrapJwtKey,
+  useChangePassword,
   useCurrentUser,
   useFirstAdmin,
   useHasAnyUser,
   useLock,
   useLogin,
   useLogout,
+  usePinnedJwtKeySha256,
   useUnlock,
   useUser,
   useUserCreate,
@@ -361,5 +365,113 @@ describe.each(directions)("Phase-02 §2.4 auth feature hooks (dir=%s)", (dir) =>
     expect(vi.mocked(invoke).mock.calls.length).toBe(1)
     // Both hooks observe the same data (same query-key cache).
     expect(a.current.data).toEqual(b.current.data)
+  })
+
+  // -----------------------------------------------------------------
+  // DEF-007 G01: useAuthRefresh
+  // -----------------------------------------------------------------
+
+  it("DEF-007 G01: useAuthRefresh dispatches `auth_refresh` and returns refreshed_at", async () => {
+    const refreshed = "2026-05-19T10:00:00.000Z"
+    mockOnce({ refreshed_at: refreshed })
+    const { wrapper, client } = makeWrapper()
+    // Seed authKeys.current so we can assert invalidation flips its
+    // staleness flag.
+    client.setQueryData(authKeys.current, { user_id: "u", email: "e", entity_id: "t", role: "superadmin" })
+    const { result } = renderHook(() => useAuthRefresh(), { wrapper })
+    const ret = await result.current.mutateAsync(undefined)
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("auth_refresh")
+    expect(ret).toEqual({ refreshed_at: refreshed })
+    const stateAfter = client.getQueryState(authKeys.current)
+    expect(stateAfter?.isInvalidated).toBe(true)
+  })
+
+  it("DEF-007 G01: useAuthRefresh surfaces 401 from the IPC as a mutation error", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce({ code: "NOT_AUTHENTICATED", message: "expired" })
+    const { wrapper } = makeWrapper()
+    const { result } = renderHook(() => useAuthRefresh(), { wrapper })
+    await expect(result.current.mutateAsync(undefined)).rejects.toMatchObject({
+      code: "NOT_AUTHENTICATED",
+    })
+  })
+
+  // -----------------------------------------------------------------
+  // DEF-007 G31: useChangePassword
+  // -----------------------------------------------------------------
+
+  it("DEF-007 G31: useChangePassword dispatches `auth_change_password` with current+new password args", async () => {
+    mockOnce(null)
+    const { wrapper } = makeWrapper()
+    const { result } = renderHook(() => useChangePassword(), { wrapper })
+    await result.current.mutateAsync({
+      current_password: "old-pass",
+      new_password: "new-pass-12-chars",
+    })
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("auth_change_password", {
+      args: { current_password: "old-pass", new_password: "new-pass-12-chars" },
+    })
+  })
+
+  it("DEF-007 G31: useChangePassword surfaces OFFLINE_NOT_ALLOWED so the UI can render the right toast", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce({
+      code: "OFFLINE_NOT_ALLOWED",
+      message: "operation requires online connectivity",
+    })
+    const { wrapper } = makeWrapper()
+    const { result } = renderHook(() => useChangePassword(), { wrapper })
+    await expect(
+      result.current.mutateAsync({
+        current_password: "old-pass",
+        new_password: "new-pass-12-chars",
+      }),
+    ).rejects.toMatchObject({ code: "OFFLINE_NOT_ALLOWED" })
+  })
+
+  // -----------------------------------------------------------------
+  // DEF-007 G08 / G21: useBootstrapJwtKey + usePinnedJwtKeySha256
+  // -----------------------------------------------------------------
+
+  it("DEF-007 G08: useBootstrapJwtKey dispatches the IPC with no server_url by default", async () => {
+    mockOnce({ outcome: { status: "bootstrapped" }, pinned_sha256: "a".repeat(64) })
+    const { wrapper } = makeWrapper()
+    const { result } = renderHook(() => useBootstrapJwtKey(), { wrapper })
+    const ret = await result.current.mutateAsync(undefined)
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("auth_bootstrap_jwt_key", { args: {} })
+    expect(ret.outcome.status).toBe("bootstrapped")
+    expect(ret.pinned_sha256).toHaveLength(64)
+  })
+
+  it("DEF-007 G08: useBootstrapJwtKey passes server_url through when supplied", async () => {
+    mockOnce({ outcome: { status: "already_pinned" }, pinned_sha256: "b".repeat(64) })
+    const { wrapper } = makeWrapper()
+    const { result } = renderHook(() => useBootstrapJwtKey(), { wrapper })
+    await result.current.mutateAsync({ server_url: "https://sync.idc.io" })
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("auth_bootstrap_jwt_key", {
+      args: { server_url: "https://sync.idc.io" },
+    })
+  })
+
+  it("DEF-007 G21: useBootstrapJwtKey surfaces pin_mismatch outcome so the UI can render a hostile-rotation warning", async () => {
+    mockOnce({ outcome: { status: "pin_mismatch" }, pinned_sha256: "c".repeat(64) })
+    const { wrapper } = makeWrapper()
+    const { result } = renderHook(() => useBootstrapJwtKey(), { wrapper })
+    const ret = await result.current.mutateAsync(undefined)
+    expect(ret.outcome.status).toBe("pin_mismatch")
+  })
+
+  it("DEF-007 G08: usePinnedJwtKeySha256 returns the lowercase-hex pin digest", async () => {
+    mockOnce("a".repeat(64))
+    const { wrapper } = makeWrapper()
+    const { result } = renderHook(() => usePinnedJwtKeySha256(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toBe("a".repeat(64))
+  })
+
+  it("DEF-007 G08: usePinnedJwtKeySha256 returns null when no pin exists", async () => {
+    mockOnce(null)
+    const { wrapper } = makeWrapper()
+    const { result } = renderHook(() => usePinnedJwtKeySha256(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toBeNull()
   })
 })

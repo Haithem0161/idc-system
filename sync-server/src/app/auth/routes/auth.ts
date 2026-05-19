@@ -59,6 +59,12 @@ export const BootstrapResponse = Type.Object({
   role: Type.String(),
 })
 
+/// DEF-007 G08: client-side RS256 verifier reads this endpoint at boot
+/// to pin the public key in stronghold. Body is the PEM-encoded RSA
+/// public key. Returns 404 when `JWT_PUBLIC_KEY` is unset (HS256 dev
+/// mode; client must fall back to trusting the dev secret out-of-band).
+export const PublicKeyResponse = Type.String()
+
 const ErrorRef = Type.Ref('ErrorResponse')
 
 const routes: FastifyPluginAsync = async (fastify) => {
@@ -134,6 +140,26 @@ const routes: FastifyPluginAsync = async (fastify) => {
         request.body.newPassword
       )
       return reply.code(204).send(null)
+    },
+  })
+
+  app.get('/auth/public-key', {
+    schema: {
+      tags: ['auth'],
+      summary: 'Return the JWT signing public key (PEM)',
+      response: { 200: PublicKeyResponse, 404: ErrorRef },
+    },
+    handler: async (_request, reply) => {
+      const pem = process.env.JWT_PUBLIC_KEY ?? ''
+      if (pem.trim().length === 0) {
+        return reply.code(404).send({
+          code: 'NOT_FOUND',
+          message: 'JWT_PUBLIC_KEY not configured (HS256 dev mode)',
+          traceId: 'n/a',
+        })
+      }
+      reply.type('application/x-pem-file')
+      return pem
     },
   })
 

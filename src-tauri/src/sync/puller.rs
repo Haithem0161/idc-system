@@ -128,6 +128,17 @@ async fn apply_changes(tx: &mut crate::db::Tx<'_>, changes: &[PullChange]) -> Ap
                     applied += 1;
                 }
             }
+            "users" => {
+                // DEF-007 G35: users pull-apply MUST preserve the local
+                // `password_hash` byte-for-byte. The server's pull payload
+                // intentionally OMITS the hash (phase-02 §7.24); even if a
+                // future server regression starts sending it, the SQL
+                // below never touches the `password_hash` column on
+                // update.
+                if apply_users_change(tx, change).await? {
+                    applied += 1;
+                }
+            }
             _ => {
                 // Other entities are not yet pulled into local SQLite in this
                 // phase; skip defensively.
@@ -365,4 +376,87 @@ async fn apply_audit_change(tx: &mut crate::db::Tx<'_>, change: &PullChange) -> 
     .await?;
 
     Ok(())
+}
+
+/// DEF-007 G35: apply a pulled `users` row WITHOUT touching the local
+/// `password_hash` column.
+///
+/// - INSERT path: when the user does not exist locally yet, we insert with
+///   an empty `password_hash`. The user must log in once online to populate
+///   it (which is the documented bootstrap path -- offline login requires
+///   a prior online round-trip per `.claude/rules/auth.md`).
+/// - UPDATE path: `ON CONFLICT DO UPDATE SET ...` enumerates EVERY column
+///   except `password_hash`, so a regression that started sending the hash
+///   from the server (against §7.24) STILL cannot clobber the local one.
+///
+/// The standard LWW gate applies: stale `version` short-circuits the
+/// update.
+async fn apply_users_change(tx: &mut crate::db::Tx<'_>, change: &PullChange) -> AppResult<bool> {
+    let p = &change.payload;
+    let id = p.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+    if id.is_empty() {
+        return Ok(false);
+    }
+
+    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM users WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+    let incoming_version = change.version;
+    if let Some((existing,)) = row {
+        if incoming_version <= existing {
+            return Ok(false);
+        }
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO users ( \
+            id, email, name, password_hash, role, is_active, last_login_at, \
+            created_at, updated_at, deleted_at, version, dirty, \
+            last_synced_at, origin_device_id, entity_id \
+         ) VALUES (?,?,?,'',?,?,?,?,?,?,?,0,?,?,?) \
+         ON CONFLICT(id) DO UPDATE SET \
+            email = excluded.email, \
+            name = excluded.name, \
+            role = excluded.role, \
+            is_active = excluded.is_active, \
+            last_login_at = excluded.last_login_at, \
+            updated_at = excluded.updated_at, \
+            deleted_at = excluded.deleted_at, \
+            version = excluded.version, \
+            dirty = 0, \
+            last_synced_at = excluded.last_synced_at, \
+            origin_device_id = excluded.origin_device_id, \
+            entity_id = excluded.entity_id \
+         WHERE users.version < excluded.version",
+    )
+    .bind(id)
+    .bind(p.get("email").and_then(|v| v.as_str()).unwrap_or(""))
+    .bind(p.get("name").and_then(|v| v.as_str()).unwrap_or(""))
+    .bind(
+        p.get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("receptionist"),
+    )
+    .bind(p.get("is_active").and_then(|v| v.as_bool()).unwrap_or(true) as i64)
+    .bind(p.get("last_login_at").and_then(|v| v.as_str()))
+    .bind(
+        p.get("created_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&change.updated_at),
+    )
+    .bind(
+        p.get("updated_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&change.updated_at),
+    )
+    .bind(p.get("deleted_at").and_then(|v| v.as_str()))
+    .bind(incoming_version)
+    .bind(now)
+    .bind(p.get("origin_device_id").and_then(|v| v.as_str()))
+    .bind(p.get("entity_id").and_then(|v| v.as_str()).unwrap_or(""))
+    .execute(&mut **tx)
+    .await?;
+    Ok(true)
 }

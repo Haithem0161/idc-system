@@ -174,3 +174,53 @@ export function useHasAnyUser () {
     refetchOnMount: "always",
   })
 }
+
+// DEF-007 G01: rotate access + refresh tokens via the server's
+// /auth/refresh endpoint. The Rust side caches the new pair in AppState
+// and emits `auth:refreshed` so subscribers (`useCurrentUser`,
+// `<UserMenu>`'s last-pushed-at clock) can invalidate.
+//
+// Cache invalidation contract: on success we invalidate `authKeys.current`
+// so `useCurrentUser` refetches. We do NOT bust `usersList` -- a token
+// rotation has no effect on the admin users panel.
+export function useAuthRefresh () {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => invoke("auth_refresh"),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: authKeys.current })
+    },
+  })
+}
+
+// DEF-007 G31: online-required password change. The Rust side returns
+// `OFFLINE_NOT_ALLOWED` when no server URL is configured OR the call
+// fails to connect -- the UI MUST surface a "go online to change your
+// password" toast in that case. We do not invalidate any cache: the
+// server response is 204 with no body, and the local cached
+// password_hash is rotated by the Rust side directly.
+export function useChangePassword () {
+  return useMutation({
+    mutationFn: (input: { current_password: string; new_password: string }) =>
+      invoke("auth_change_password", { args: input }),
+  })
+}
+
+// DEF-007 G08 / G21: bootstrap the pinned JWT public key. The frontend
+// calls this once at first launch (after the user configures the sync
+// server URL). Subsequent boots use the pinned bytes directly via
+// `auth_jwt_pinned_sha256` for telemetry / drift detection.
+export function useBootstrapJwtKey () {
+  return useMutation({
+    mutationFn: (input?: { server_url?: string }) =>
+      invoke("auth_bootstrap_jwt_key", { args: input ?? {} }),
+  })
+}
+
+export function usePinnedJwtKeySha256 () {
+  return useQuery({
+    queryKey: ["auth", "jwt-pin"] as const,
+    enabled: isTauri(),
+    queryFn: () => invoke("auth_jwt_pinned_sha256"),
+  })
+}

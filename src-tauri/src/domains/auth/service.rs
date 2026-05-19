@@ -363,4 +363,185 @@ impl AuthService {
             .ok_or(AppError::NotAuthenticated)?;
         verify_password(password, &user.password_hash)
     }
+
+    /// DEF-007 G01: rotate access + refresh tokens against the server's
+    /// `/auth/refresh` endpoint. Returns the new pair so the IPC wrapper
+    /// can persist them in `AppState` and emit `auth:refreshed`. The
+    /// `device_id` header is sent so the server's per-device session
+    /// tracking (phase-02 §3 `RefreshToken.deviceId`) stays correct.
+    ///
+    /// Errors:
+    /// - `AppError::NotAuthenticated` when no `server_url` is set OR the
+    ///   server returns 401 (revoked or expired refresh token).
+    /// - `AppError::Network` on connection failure.
+    /// - `AppError::SyncUnavailable` on non-401 non-2xx responses.
+    pub async fn refresh(
+        &self,
+        server_url: Option<&str>,
+        refresh_token: &str,
+    ) -> AppResult<RefreshResult> {
+        let server_url = server_url
+            .filter(|u| !u.is_empty())
+            .ok_or(AppError::NotAuthenticated)?;
+        let url = format!("{}/auth/refresh", server_url.trim_end_matches('/'));
+
+        let resp = self
+            .http
+            .post(&url)
+            .header("X-Device-Id", &self.device_id)
+            .json(&ServerRefreshRequest {
+                refresh_token: refresh_token.to_string(),
+            })
+            .send()
+            .await
+            .map_err(AppError::from)?;
+
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::NotAuthenticated);
+        }
+        if !status.is_success() {
+            return Err(AppError::SyncUnavailable(format!(
+                "refresh {status}: {}",
+                resp.text().await.unwrap_or_default()
+            )));
+        }
+        let body: ServerRefreshResponse = resp.json().await.map_err(AppError::from)?;
+        Ok(RefreshResult {
+            access_token: body.access_token,
+            refresh_token: body.refresh_token,
+            access_token_expires_at: body.expires_at,
+            refreshed_at: Utc::now(),
+        })
+    }
+
+    /// DEF-007 G31: change the current user's password. ONLINE-REQUIRED.
+    ///
+    /// Per phase-02.md §4 Tauri `AuthService::change_password` step 1, this
+    /// operation MUST refuse to run when the device is offline -- the
+    /// server is the canonical password store and a local-only rotation
+    /// would leak through into a re-sync that overwrote the hash on the
+    /// next pull. The offline signal is "no `server_url` configured" (and
+    /// downstream HTTP failures translate to `AppError::OfflineNotAllowed`
+    /// rather than `Network` so the UI can render the right message).
+    ///
+    /// On success: server rotates the `passwordHash` and revokes existing
+    /// refresh tokens; we also rotate the local cached hash so the next
+    /// offline login uses the new password.
+    pub async fn change_password(
+        &self,
+        server_url: Option<&str>,
+        access_token: &str,
+        user_id: Uuid,
+        current_password: &str,
+        new_password: &str,
+    ) -> AppResult<()> {
+        let server_url = server_url
+            .filter(|u| !u.is_empty())
+            .ok_or(AppError::OfflineNotAllowed)?;
+        if new_password.len() < 8 {
+            return Err(AppError::Validation(
+                "new password must be at least 8 characters".into(),
+            ));
+        }
+
+        let url = format!("{}/auth/change-password", server_url.trim_end_matches('/'));
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(access_token)
+            .header("X-Device-Id", &self.device_id)
+            .json(&serde_json::json!({
+                "oldPassword": current_password,
+                "newPassword": new_password,
+            }))
+            .send()
+            .await
+            .map_err(|e| {
+                // Translate connection-level failures to OfflineNotAllowed
+                // per §4 step 1 -- the call MUST NOT half-succeed. We probe
+                // `is_timeout` / `is_connect` directly to avoid losing the
+                // distinction inside the broader `AppError::from` mapping.
+                if e.is_timeout() || e.is_connect() {
+                    AppError::OfflineNotAllowed
+                } else {
+                    AppError::from(e)
+                }
+            })?;
+
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::NotAuthenticated);
+        }
+        if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+            return Err(AppError::Validation(format!(
+                "change-password rejected: {}",
+                resp.text().await.unwrap_or_default()
+            )));
+        }
+        if !status.is_success() {
+            return Err(AppError::SyncUnavailable(format!(
+                "change-password {status}: {}",
+                resp.text().await.unwrap_or_default()
+            )));
+        }
+
+        // Rotate the local cached hash so offline login keeps working with
+        // the new password on the next session. We DO bump `version` and
+        // mark dirty -- a `password_change` audit row goes through the
+        // outbox so the audit query (phase-08 §3) sees the rotation.
+        let user = self
+            .user_repo
+            .get_by_id(user_id)
+            .await?
+            .ok_or(AppError::NotAuthenticated)?;
+        let new_hash = hash_password(new_password)?;
+        let updated = user.clone().with_new_password_hash(new_hash);
+
+        let mut tx = self.pool.begin().await.map_err(AppError::from)?;
+        self.user_repo.upsert(&mut tx, &updated).await?;
+        let audit = AuditEntry::create(AuditCreateInput {
+            actor_user_id: user_id,
+            action: AuditAction::PasswordChange,
+            entity: "users".into(),
+            entity_id: user_id.to_string(),
+            delta: serde_json::json!({ "method": "user", "mode": "online" }),
+            ip: None,
+            device_id: self.device_id.clone(),
+            entity_id_tenant: user.entity_id.clone(),
+        });
+        self.audit_repo.append(&mut tx, &audit).await?;
+        let audit_payload = rmp_serde::to_vec_named(&audit)?;
+        let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
+        self.outbox_repo.enqueue(&mut tx, &audit_outbox).await?;
+        tx.commit().await.map_err(AppError::from)?;
+        Ok(())
+    }
+}
+
+/// DEF-007 G01: result of a successful `/auth/refresh` rotation. The IPC
+/// wrapper persists the new tokens in `AppState` and emits
+/// `auth:refreshed` with `{ refreshed_at }`.
+#[derive(Debug, Clone, Serialize)]
+pub struct RefreshResult {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub access_token_expires_at: DateTime<Utc>,
+    pub refreshed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ServerRefreshRequest {
+    #[serde(rename = "refreshToken")]
+    refresh_token: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ServerRefreshResponse {
+    #[serde(rename = "accessToken")]
+    access_token: String,
+    #[serde(rename = "refreshToken")]
+    refresh_token: String,
+    #[serde(rename = "expiresAt")]
+    expires_at: DateTime<Utc>,
 }

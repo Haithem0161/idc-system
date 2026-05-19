@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -88,6 +88,10 @@ pub async fn auth_login_impl(state: &AppState, args: LoginArgs) -> AppResult<Log
     if let (Some(token), Some(exp)) = (result.access_token, result.access_token_expires_at) {
         state.set_current_token(token, exp.timestamp()).await;
     }
+    // DEF-007 G01: cache the refresh token in AppState so a later
+    // `auth_refresh` IPC can rotate it without the frontend touching
+    // the raw value.
+    state.set_refresh_token(result.refresh_token).await;
 
     Ok(LoginResult {
         mode: result.mode,
@@ -445,4 +449,186 @@ pub async fn users_create_first_admin(
     args: FirstAdminArgs,
 ) -> AppResult<UserResponse> {
     users_create_first_admin_impl(&state, args).await
+}
+
+// ---- DEF-007 G01: auth::refresh -------------------------------------------
+
+/// Payload emitted on the Tauri event `auth:refreshed` after a successful
+/// rotation. Subscribers (`useCurrentUser`, `<UserMenu>`, the sync engine
+/// token-bus) use the timestamp to invalidate caches.
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthRefreshedEvent {
+    pub refreshed_at: DateTime<Utc>,
+}
+
+pub async fn auth_refresh_impl(state: &AppState) -> AppResult<AuthRefreshedEvent> {
+    let svc = state
+        .auth_service()
+        .ok_or_else(|| AppError::Configuration("auth service unavailable".into()))?;
+    let refresh_token = state
+        .get_refresh_token()
+        .await
+        .ok_or(AppError::NotAuthenticated)?;
+    let server_url = state.sync_server_url().await;
+    let result = svc.refresh(server_url.as_deref(), &refresh_token).await?;
+    state
+        .set_current_token(
+            result.access_token,
+            result.access_token_expires_at.timestamp(),
+        )
+        .await;
+    state.set_refresh_token(Some(result.refresh_token)).await;
+    Ok(AuthRefreshedEvent {
+        refreshed_at: result.refreshed_at,
+    })
+}
+
+#[tauri::command]
+#[instrument(skip(state, app))]
+pub async fn auth_refresh(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<AuthRefreshedEvent> {
+    let event = auth_refresh_impl(&state).await?;
+    let _ = app.emit("auth:refreshed", &event);
+    Ok(event)
+}
+
+// ---- DEF-007 G31: auth::change_password (online-required) -----------------
+
+#[derive(Debug, Deserialize)]
+pub struct ChangePasswordArgs {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+pub async fn auth_change_password_impl(
+    state: &AppState,
+    args: ChangePasswordArgs,
+) -> AppResult<()> {
+    let ctx = state
+        .get_current_user()
+        .await
+        .ok_or(AppError::NotAuthenticated)?;
+    let user_id = Uuid::parse_str(&ctx.user_id)?;
+    let svc = state
+        .auth_service()
+        .ok_or_else(|| AppError::Configuration("auth service unavailable".into()))?;
+    let access_token = state
+        .get_current_token()
+        .await
+        .ok_or(AppError::NotAuthenticated)?;
+    let server_url = state.sync_server_url().await;
+    svc.change_password(
+        server_url.as_deref(),
+        &access_token,
+        user_id,
+        &args.current_password,
+        &args.new_password,
+    )
+    .await
+}
+
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn auth_change_password(
+    state: State<'_, AppState>,
+    args: ChangePasswordArgs,
+) -> AppResult<()> {
+    auth_change_password_impl(&state, args).await
+}
+
+// ---- DEF-007 G08 / G21: bootstrap + verify pinned JWT public key --------
+
+use crate::domains::auth::infrastructure::{
+    pin_public_key, read_pinned_pem, BootstrapOutcome, JwtVerifier,
+};
+
+#[derive(Debug, Deserialize)]
+pub struct BootstrapJwtKeyArgs {
+    /// Server URL to fetch the PEM from. Falls back to
+    /// `state.sync_server_url()` when omitted.
+    #[serde(default)]
+    pub server_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BootstrapJwtKeyResult {
+    pub outcome: BootstrapOutcome,
+    /// SHA-256 of the pinned bytes (lowercase hex). Surfaced for
+    /// telemetry + audit -- the actual PEM never crosses the IPC
+    /// boundary.
+    pub pinned_sha256: String,
+}
+
+/// Test-friendly impl that accepts an already-fetched PEM. Production
+/// `auth_bootstrap_jwt_key` IPC pulls the PEM from the server.
+pub async fn auth_bootstrap_jwt_key_with_pem(
+    app_data_dir: &std::path::Path,
+    pem_bytes: &[u8],
+) -> AppResult<BootstrapJwtKeyResult> {
+    let outcome = pin_public_key(app_data_dir, pem_bytes)?;
+    let verifier = JwtVerifier::from_pinned_file(app_data_dir)?;
+    Ok(BootstrapJwtKeyResult {
+        outcome,
+        pinned_sha256: verifier.pinned_bytes_sha256_hex(),
+    })
+}
+
+/// Read the SHA-256 of the currently-pinned key WITHOUT exposing the
+/// bytes. Returns `None` when no pin exists -- the caller is expected
+/// to invoke `auth_bootstrap_jwt_key` to remediate.
+pub fn auth_pinned_jwt_key_sha256(app_data_dir: &std::path::Path) -> AppResult<Option<String>> {
+    let bytes = match read_pinned_pem(app_data_dir)? {
+        Some(b) => b,
+        None => return Ok(None),
+    };
+    let verifier = JwtVerifier::from_pem_bytes(&bytes)?;
+    Ok(Some(verifier.pinned_bytes_sha256_hex()))
+}
+
+#[tauri::command]
+#[instrument(skip(app, state, args))]
+pub async fn auth_bootstrap_jwt_key(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    args: BootstrapJwtKeyArgs,
+) -> AppResult<BootstrapJwtKeyResult> {
+    let server_url = match args.server_url {
+        Some(u) => u,
+        None => state.sync_server_url().await.ok_or_else(|| {
+            AppError::Configuration(
+                "sync server URL not configured -- run first-launch setup".into(),
+            )
+        })?,
+    };
+    let url = format!("{}/auth/public-key", server_url.trim_end_matches('/'));
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .send()
+        .await
+        .map_err(AppError::from)?;
+    if !resp.status().is_success() {
+        return Err(AppError::SyncUnavailable(format!(
+            "bootstrap_jwt_key {}: {}",
+            resp.status(),
+            resp.text().await.unwrap_or_default()
+        )));
+    }
+    let pem_bytes = resp.bytes().await.map_err(AppError::from)?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Internal(format!("app_data_dir: {e}")))?;
+    auth_bootstrap_jwt_key_with_pem(&app_data_dir, &pem_bytes).await
+}
+
+#[tauri::command]
+#[instrument(skip(app))]
+pub async fn auth_jwt_pinned_sha256(app: AppHandle) -> AppResult<Option<String>> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Internal(format!("app_data_dir: {e}")))?;
+    auth_pinned_jwt_key_sha256(&app_data_dir)
 }

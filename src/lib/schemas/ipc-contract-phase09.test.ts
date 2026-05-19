@@ -100,15 +100,17 @@ describe("Phase-09 §3.2 FIXED final case -- AppError envelope shape", () => {
 
   // (1c) Convenience: AppErrorCodeSchema is the closed enum that the
   // discriminator type derives from.
-  it("AppErrorCodeSchema lists exactly 10 codes (matches the Rust enum arms)", () => {
-    expect(APP_ERROR_CODES.length).toBe(10)
+  it("AppErrorCodeSchema lists exactly 11 codes (matches the Rust enum arms; DEF-007 G31 added OFFLINE_NOT_ALLOWED)", () => {
+    expect(APP_ERROR_CODES.length).toBe(11)
     // No duplicates.
-    expect(new Set(APP_ERROR_CODES).size).toBe(10)
+    expect(new Set(APP_ERROR_CODES).size).toBe(11)
     // The enum schema rejects anything outside the closed set.
     expect(AppErrorCodeSchema.safeParse("TEAPOT").success).toBe(false)
     for (const code of APP_ERROR_CODES) {
       expect(AppErrorCodeSchema.safeParse(code).success).toBe(true)
     }
+    // The new OFFLINE_NOT_ALLOWED variant for DEF-007 G31 must be present.
+    expect(AppErrorCodeSchema.safeParse("OFFLINE_NOT_ALLOWED").success).toBe(true)
   })
 })
 
