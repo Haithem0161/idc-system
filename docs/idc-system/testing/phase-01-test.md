@@ -900,17 +900,13 @@ Tracking entry. Pass 1 §9.7 originally asserted `SyncCursor` declared `@@id([en
 |-|-|
 | `pull_response_omits_pulled_at_field_on_every_row_and_envelope` | Seed the server with 50 `audit_log` rows. POST `/sync/pull` with a valid cursor; receive the response. Assert (a) the top-level envelope object has no `pulledAt` key, (b) every row in `rows[]` has no `pulledAt` key, (c) the response validates against the declared TypeBox `SyncPullResponseSchema` via Ajv in `strict` mode (additional-properties false), so an injected `pulledAt` would fail validation. Per §7.32 + PRD §9. |
 
-### §10.10 P01-G28 -- tauri.conf.json bundle env IDC_EMBEDDED_MODE=0 (MEDIUM)
+### §10.10 P01-G28 -- Reserved (formerly embedded-mode env gating)
 
-- **Source:** phase-01.md §7.35 `tauri.conf.json` bundle env
-- **Target test section:** §2.1
-- **Category:** Missing Integration Test
+- **Source:** phase-01.md §7.35 (now retired)
+- **Target test section:** N/A
+- **Category:** N/A -- the IDC system ships as a standalone Tauri app; no embedded-mode gating is wired, so no integration test is required.
 
-§7.35 declares that shipped builds (`bundle.windows.env` and `bundle.macOS.env` in `tauri.conf.json`) MUST set `IDC_EMBEDDED_MODE=0` so the desktop binary boots in standalone mode rather than Business OS embedded mode. A bundle config that forgot this key, or set it to `1`, would ship a binary that polls for a non-existent BOS parent and never advances past the splash screen -- a fatal regression that no integration or E2E test currently guards.
-
-| Scenario | Asserts |
-|-|-|
-| `tauri_conf_bundle_env_declares_idc_embedded_mode_zero_for_all_platforms` | Read `src-tauri/tauri.conf.json` via `serde_json`. Assert `bundle.windows.env.IDC_EMBEDDED_MODE === "0"` and `bundle.macOS.env.IDC_EMBEDDED_MODE === "0"` (string `"0"`, not the integer `0`, per Tauri env conventions). Negative: temporarily flip one to `"1"` in a fixture copy and assert the test fails. Per §7.35. |
+Section retained as a numbering placeholder so downstream §10.x cross-references remain stable.
 
 ### §10.11 P01-G29 -- axe-core on /login and /no-access routes (MEDIUM)
 

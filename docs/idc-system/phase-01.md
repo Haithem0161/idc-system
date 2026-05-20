@@ -776,10 +776,9 @@ _Pass 1 completed 2026-05-11. 14 gaps incorporated below._
   - On parked-conflict response (server returns conflict envelope), write `kind:'sync_conflict', payload:{ op_id, entity, auto_resolved:false }`.
   Inserts are non-syncable (no `dirty=1`) and use the same WAL pool. Same retention semantics as phase-08 §7.21 metrics vacuum.
 
-### 7.35 Embedded-mode env-flag gating
-- **Gap:** LOW | Missing Setup | PRD §5.3 lines 268-271; Pass-3 GAP-F-3
-- PRD §5.3 mandates the embedded/BOS module is "gated by an env flag and never activated in shipped IDC builds". No phase declared the flag, the gate, or how shipped builds suppress activation.
-- **Resolution:** Append to §4 Tauri `lib.rs::run` boot sequence: read `std::env::var("IDC_EMBEDDED_MODE").unwrap_or_else(|_| "0".into())`. Mount the BOS embedded HTTP server / IPC client only when value is `"1"`; otherwise log `embedded_mode=disabled` at INFO and skip mounting. `tauri.conf.json` `bundle.windows.env` and `bundle.macOS.env` set `IDC_EMBEDDED_MODE=0` for shipped builds. Add §6 verification step asserting the boot path logs `embedded_mode=disabled` when the env var is unset.
+### 7.35 Reserved (formerly embedded-mode env-flag gating)
+- **Gap:** N/A -- the IDC system ships as a standalone Tauri app; no embedded-mode gating required.
+- Section retained as a numbering placeholder so downstream §7.x cross-references remain stable.
 
 ### 7.36 `audit_log.action` enum + `daily_close_run`
 - **Gap:** MEDIUM | Missing Enum Value | Pass-3 GAP-D-1; phase-07 §7.18

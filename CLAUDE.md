@@ -1,6 +1,6 @@
 # IDC System
 
-**Offline-first desktop app** built on a Torch Tauri v2 template, paired with a **Fastify sync/backup server**.
+**Offline-first desktop app** paired with a **Fastify sync/backup server**.
 Tech Stack: Tauri v2 | React 19 | TypeScript | Rust | SQLite | Fastify | Prisma | PostgreSQL | Tailwind v4 | shadcn/ui | Vite | pnpm
 
 ## Surfaces
@@ -9,8 +9,8 @@ This repo is two surfaces planned and reasoned about together:
 
 | Surface | Where | Purpose |
 |-|-|-|
-| **Frontend** | [src/](src/) | React 19 UI -- runs inside the Tauri webview (and inside Business OS embedded mode). |
-| **Tauri / Rust** | [src-tauri/](src-tauri/) | Local runtime, SQLite persistence, IPC commands, sync engine, embedded HTTP server. |
+| **Frontend** | [src/](src/) | React 19 UI -- runs inside the Tauri webview. |
+| **Tauri / Rust** | [src-tauri/](src-tauri/) | Local runtime, SQLite persistence, IPC commands, sync engine. |
 | **Sync Server** | `sync-server/` (when introduced) | Fastify + Prisma + Postgres. Sync push/pull, backups, exports. **Not** a general-purpose API for the frontend. |
 
 The desktop app is the source of truth for the user's day-to-day workflow. The server exists for sync, backup, and cross-device collaboration.
@@ -95,11 +95,10 @@ Detailed conventions: [`.claude/rules/frontend.md`](.claude/rules/frontend.md).
 |-|-|-|
 | Commands | `#[tauri::command]` async fns | [`src-tauri/TAURI.md`](src-tauri/TAURI.md) |
 | Async runtime | Tokio | [`src-tauri/TOKIO.md`](src-tauri/TOKIO.md) |
-| Embedded HTTP | Axum 0.8 | [`src-tauri/AXUM.md`](src-tauri/AXUM.md) |
+| HTTP (Axum) | Axum 0.8 | [`src-tauri/AXUM.md`](src-tauri/AXUM.md) |
 | Serialization | serde + serde_json + rmp-serde | [`src-tauri/SERDE.md`](src-tauri/SERDE.md) |
 | Errors | thiserror | [`src-tauri/THISERROR.md`](src-tauri/THISERROR.md) |
 | Logging | tracing + tracing-subscriber | [`src-tauri/TRACING.md`](src-tauri/TRACING.md) |
-| Business OS | embedded mode IPC | [`src-tauri/BUSINESS-OS-INTEGRATION.md`](src-tauri/BUSINESS-OS-INTEGRATION.md) |
 
 Detailed conventions: [`.claude/rules/tauri.md`](.claude/rules/tauri.md), [`.claude/rules/rust.md`](.claude/rules/rust.md).
 
@@ -142,7 +141,7 @@ Architecture details, patterns, and conventions live in `.claude/rules/`:
 - [`planning.md`](.claude/rules/planning.md) -- Plan structure, phase template, gap analysis methodology.
 - [`prd-writing.md`](.claude/rules/prd-writing.md) -- PRD section template, file naming, quality bar, anti-patterns.
 - [`offline-first.md`](.claude/rules/offline-first.md) -- Sync engine, conflict resolution, local-schema invariants.
-- [`tauri.md`](.claude/rules/tauri.md) -- Tauri v2 commands, capabilities, dual-mode, build/release.
+- [`tauri.md`](.claude/rules/tauri.md) -- Tauri v2 commands, capabilities, build/release.
 - [`frontend.md`](.claude/rules/frontend.md) -- React 19, Vite, Tailwind v4, state architecture.
 - [`design-system.md`](.claude/rules/design-system.md) -- Editorial visual language: color tokens, typography, components, motion, RTL conventions.
 - [`rust.md`](.claude/rules/rust.md) -- Rust conventions for the Tauri backend.
@@ -171,7 +170,7 @@ When launching subagents (Agent tool), include relevant rule content directly in
 <!-- MEMORY:START -->
 # Menu
 
-_Last updated: 2026-05-19 | 0 active memories, 0 total_
+_Last updated: 2026-05-20 | 0 active memories, 0 total_
 
 _For deeper context, use memory_search, memory_related, or memory_ask tools._
 <!-- MEMORY:END -->

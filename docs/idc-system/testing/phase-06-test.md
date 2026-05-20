@@ -484,7 +484,7 @@ Perf tests run in `cargo test --test inventory_perf_phase06 --release` + `vitest
 
 Phase row in `testing-status.md` flips to `complete` only when EVERY box below is checked.
 
-- [x] All §1 unit tests green (28 inventory.test.ts schema cases via `pnpm vitest run` + 29 inline `visits::InventoryAdjustment` entity tests reused via `cargo test --lib --package torch-app-template inventory`). Phase-06 reuses the `visits::InventoryAdjustment` entity rather than re-declaring it; new audit-payload / role-gate assertions live in the integration binaries to keep the `with_audit` writer wiring under tx scope.
+- [x] All §1 unit tests green (28 inventory.test.ts schema cases via `pnpm vitest run` + 29 inline `visits::InventoryAdjustment` entity tests reused via `cargo test --lib --package idc-system inventory`). Phase-06 reuses the `visits::InventoryAdjustment` entity rather than re-declaring it; new audit-payload / role-gate assertions live in the integration binaries to keep the `with_audit` writer wiring under tx scope.
 - [x] All §2 integration tests green:
   - `cargo test --test inventory_phase06` -- 41/41
   - IPC handler / wire-shape tests `cargo test --test inventory_ipc_phase06` -- 16/16 (one happy + one error path for each of the 5 phase-06 commands + AppError envelope sanity)
@@ -507,7 +507,7 @@ Phase row in `testing-status.md` flips to `complete` only when EVERY box below i
 - [x] No open P0 or P1 defects against this phase in `defects.md`.
 - [x] Snapshot files committed -- `none -- phase adds no snapshot artifacts`. The structural invariants those snapshots will hash (IPC DTO serialization + canonical reason strings + `is_reversal` flag) are pinned at runtime by `inventory_ipc_phase06.rs`. The sync-envelope snapshot files (`adjustment-push-count-correction-canonical.json.sha256` + the carried phase-05 trio) land with the phase-08 sync-server hardening surface.
 - [x] `testing-status.md` row updated (Unit / Integration / Contract / E2E / Manual counts, Coverage %, Started / Completed dates, Open Defects).
-- [x] Lint, typecheck, build all green: `pnpm lint` (0 errors, 8 pre-existing warnings inherited from sync-server), `pnpm build` clean (793 kB minified JS), `cargo fmt --check` clean (post `cargo fmt`), `cargo clippy --all-targets -- -D warnings` clean across the workspace. The full src-tauri `cargo test` workspace run is not executed on this machine (crashes the IDE -- documented in user-memory `feedback_no_full_cargo_test`); the 5 phase-06 binaries are run individually + the inline inventory unit tests via `cargo test --lib --package torch-app-template inventory`.
+- [x] Lint, typecheck, build all green: `pnpm lint` (0 errors, 8 pre-existing warnings inherited from sync-server), `pnpm build` clean (793 kB minified JS), `cargo fmt --check` clean (post `cargo fmt`), `cargo clippy --all-targets -- -D warnings` clean across the workspace. The full src-tauri `cargo test` workspace run is not executed on this machine (crashes the IDE -- documented in user-memory `feedback_no_full_cargo_test`); the 5 phase-06 binaries are run individually + the inline inventory unit tests via `cargo test --lib --package idc-system inventory`.
 
 **Persona run record:**
 

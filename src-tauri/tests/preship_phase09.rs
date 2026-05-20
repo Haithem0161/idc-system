@@ -292,42 +292,13 @@ fn grep_no_phase04_forward_reference_in_operator_service_rs() {
 }
 
 #[test]
-fn grep_no_eprintln_for_embedded_mode_banner_in_lib_rs() {
+fn grep_no_eprintln_in_lib_rs() {
     // Phase-09 §1.1 surgical edit #4: `eprintln!` banner lines swapped for
-    // `tracing::info!`. CI gate that no `eprintln!` referencing the banner
-    // strings is reintroduced.
+    // `tracing::info!`. CI gate that `eprintln!` is not reintroduced.
     let source = read_source("src/lib.rs");
     assert!(
         !source.contains("eprintln!"),
         "lib.rs must not use eprintln! -- use tracing macros instead",
-    );
-    // The banner strings themselves still appear, but only as tracing::info!
-    // arguments. Pin the wiring.
-    for banner in [
-        "embedded_mode=disabled",
-        "startup: embedded mode detected",
-        "startup: running in standalone mode",
-    ] {
-        assert!(
-            source.contains(banner),
-            "banner string {banner:?} must still be emitted (via tracing)",
-        );
-    }
-}
-
-#[test]
-fn grep_embedded_mode_enabled_uses_pure_helper_for_testability() {
-    // Phase-09 §1.1 surgical edit #4 follow-up: `embedded_mode_enabled` is
-    // split into an impure env-reader and a pure helper so unit tests can
-    // cover the predicate without env-var races. Sentinel pins the wiring.
-    let source = read_source("src/lib.rs");
-    assert!(
-        source.contains("fn embedded_mode_enabled_from_value"),
-        "pure helper embedded_mode_enabled_from_value must exist for unit-testability",
-    );
-    assert!(
-        source.contains("embedded_mode_enabled_from_value(std::env::var(\"IDC_EMBEDDED_MODE\")"),
-        "the impure wrapper must delegate to the pure helper",
     );
 }
 

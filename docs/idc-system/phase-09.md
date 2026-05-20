@@ -435,7 +435,7 @@ These do not block the phase but should be answered during planning:
 - Schema changes (the schema is complete).
 - BullMQ / Redis introduction.
 - Multi-tenant deployment topology beyond `entityId` scoping that already exists.
-- Self-updater wiring (Business OS owns child-app updates per [.claude/rules/tauri.md](../../.claude/rules/tauri.md)).
+- Self-updater wiring (no updater wired in v1).
 - Performance tuning beyond what naturally happens when the in-memory store is replaced by Postgres with the existing indexes.
 
 ## §9 Audit Provenance

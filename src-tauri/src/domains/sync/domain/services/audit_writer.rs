@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::db::Tx;
@@ -19,6 +20,23 @@ use crate::domains::sync::domain::entities::{AuditEntry, OutboxOp};
 use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo};
 use crate::domains::sync::domain::value_objects::AuditAction;
 use crate::error::{AppError, AppResult};
+
+/// MessagePack-encode an `AuditEntry` for the sync wire format.
+///
+/// Uses `with_struct_map` so fields are keyed by name (matches the server's
+/// `@msgpack/msgpack` field-name decode) and `with_human_readable` so `Uuid`
+/// values serialize as their hyphenated string form. Without the latter,
+/// `Uuid` becomes 16 raw bytes (a msgpack `bin`), which JS decodes as a
+/// `Uint8Array` and `decodeAuditPayload` rejects with 422 "audit payload
+/// missing field: id".
+pub fn encode_audit_payload(audit: &AuditEntry) -> AppResult<Vec<u8>> {
+    let mut buf = Vec::new();
+    let mut ser = rmp_serde::Serializer::new(&mut buf)
+        .with_struct_map()
+        .with_human_readable();
+    audit.serialize(&mut ser)?;
+    Ok(buf)
+}
 
 /// The ordered set of write steps inside `with_audit`. Audit-first is the
 /// load-bearing invariant (phase-01 §7.7): the audit row commits before any
@@ -124,7 +142,7 @@ impl AuditWriter {
         self.audit_repo.append(&mut tx, &audit).await?;
 
         // Enqueue the audit row's own outbox push (additive-only entity).
-        let audit_payload = rmp_serde::to_vec_named(&audit)?;
+        let audit_payload = encode_audit_payload(&audit)?;
         let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
         self.outbox_repo.enqueue(&mut tx, &audit_outbox).await?;
 
@@ -194,5 +212,42 @@ mod tests {
         // call -- writer short-circuits.
         let null = json!(null);
         assert!(skip_if_no_change(&null, &null));
+    }
+
+    #[test]
+    fn encode_audit_payload_writes_uuid_id_as_msgpack_string() {
+        // Regression: the sync server's `decodeAuditPayload` checks
+        // `typeof obj.id === 'string'`. The default `rmp_serde::to_vec_named`
+        // serializes `Uuid` as 16 raw bytes (msgpack `bin`), which the JS
+        // decoder reads as a `Uint8Array`, failing the typeof check with
+        // 422 "audit payload missing field: id". The encoder must use
+        // human-readable mode so `Uuid` wires as a hyphenated string.
+        use crate::domains::sync::domain::entities::audit_entry::AuditCreateInput;
+        let audit = AuditEntry::create(AuditCreateInput {
+            actor_user_id: Uuid::now_v7(),
+            action: AuditAction::Create,
+            entity: "users".into(),
+            entity_id: "u1".into(),
+            delta: json!({}),
+            ip: None,
+            device_id: "dev-1".into(),
+            entity_id_tenant: "tenant-x".into(),
+        });
+
+        let bytes = encode_audit_payload(&audit).expect("encode succeeds");
+        let decoded: serde_json::Value =
+            rmp_serde::from_slice(&bytes).expect("decodes via dynamic deserializer");
+
+        assert!(
+            decoded["id"].is_string(),
+            "audit id must encode as a msgpack str (got {:?})",
+            decoded["id"]
+        );
+        assert_eq!(decoded["id"].as_str().unwrap(), audit.id.to_string());
+        assert!(
+            decoded["actor_user_id"].is_string(),
+            "actor_user_id must encode as a msgpack str (got {:?})",
+            decoded["actor_user_id"]
+        );
     }
 }

@@ -10,7 +10,7 @@ paths:
 
 A PRD (Product Requirements Document) is the source of truth for **what** an app or major surface delivers, **why**, and **for whom**. Engineering plans (`docs/<plan-name>/phase-XX.md` per [`planning.md`](./planning.md)) tell us **how**. Never duplicate -- a phase file references the PRD; a PRD never tells engineers which migrations to write.
 
-This rule codifies the structure used across the Torch Business OS PRDs (Chat, Contact Center, Finance, Organization Setup, Import Engine, E-Commerce) and adapts it for the IDC system's offline-first reality.
+This rule codifies the PRD structure used for the IDC system's offline-first reality.
 
 ## When to Write a PRD vs. Just a Plan
 
@@ -66,7 +66,7 @@ Plus `### Precedent Documents` listing other PRDs / code references this PRD bor
 
 ### §2 Module Packaging & Entitlements
 
-For IDC, this is simpler than Torch (no module marketplace), but still required:
+For IDC, this is simple (no module marketplace), but still required:
 
 | Subsection | Content |
 |-|-|
@@ -88,15 +88,14 @@ App-specific patterns. Examples: "macOS System Settings pattern" (Org Setup), "E
 
 ### §5 Surface Integration
 
-For IDC, replace the Torch "Platform Service Integration" with surface-specific integration:
+For IDC, document surface-specific integration:
 
 | Integration | Cover |
 |-|-|
 | §5.1 Tauri / Rust | Required IPC commands, capabilities, plugins, secure-storage usage. |
 | §5.2 Sync Server | Which sync endpoints this surface uses; backup contracts. |
-| §5.3 Embedded Mode (Business OS) | If the surface ships in BOS mode, what hooks it exposes. Otherwise: "N/A". |
-| §5.4 Document Center / Storage | If the surface produces or consumes files. |
-| §5.5 Auth | Which JWT claims it relies on, RBAC requirements, offline auth behavior. |
+| §5.3 Document Center / Storage | If the surface produces or consumes files. |
+| §5.4 Auth | Which JWT claims it relies on, RBAC requirements, offline auth behavior. |
 
 Each subsection lists the **contract** (what the surface needs from the integration) and the **boundary** (what the surface does NOT do, deferring to the other side).
 
@@ -161,7 +160,7 @@ If the workflow is offline-aware, list:
 
 ### §9 Multi-User & Multi-Tenant Support
 
-Where Torch had "Multi-Branch", IDC has "Multi-User on a Single Device" and "Multi-Tenant on the Sync Server" (when a tenant equals a customer's organization). Cover:
+IDC has "Multi-User on a Single Device" and "Multi-Tenant on the Sync Server" (when a tenant equals a customer's organization). Cover:
 
 | Subsection | Content |
 |-|-|

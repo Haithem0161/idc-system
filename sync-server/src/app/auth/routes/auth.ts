@@ -46,6 +46,7 @@ export const ChangePasswordBody = Type.Object({
 })
 
 export const BootstrapBody = Type.Object({
+  id: Type.Optional(Type.String({ format: 'uuid' })),
   email: Type.String({ format: 'email' }),
   name: Type.String({ minLength: 1 }),
   password: Type.String({ minLength: 8 }),
@@ -175,7 +176,8 @@ const routes: FastifyPluginAsync = async (fastify) => {
         request.body.email,
         request.body.name,
         request.body.password,
-        request.body.entityId
+        request.body.entityId,
+        request.body.id
       )
       return {
         id: created.id,

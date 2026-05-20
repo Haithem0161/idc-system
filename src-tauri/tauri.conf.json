@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Torch App Template",
+  "productName": "IDC System",
   "version": "0.1.0",
-  "identifier": "com.torch.template",
+  "identifier": "com.idc.system",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Torch App Template",
+        "title": "IDC System",
         "width": 1400,
         "height": 900,
         "minWidth": 900,

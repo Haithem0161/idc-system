@@ -24,7 +24,7 @@
 - Audit conflict-resolution audit row content variants beyond what phase-08 already verified -- phase-09 verifies only that the row IS written server-side in the same Prisma tx, not the contents.
 - Performance tuning -- per §8 phase-09 scope: "Performance tuning beyond what naturally happens when the in-memory store is replaced by Postgres with the existing indexes." Phase-09 verifies NO regression from in-memory baseline, not absolute targets (those are owned by `performance-soak.md` + each phase plan).
 - Multi-tenant deployment topology -- per §8.
-- Self-updater wiring -- Business OS owns child-app updates.
+- Self-updater wiring -- no updater wired in v1.
 - BullMQ / Redis introduction -- §8 deferral. Phase-09's healthz probe reports `redis: 'ok'` when `REDIS_URL` unset.
 - New schema / entities / IPC commands -- §8 + §1/§2 NO changes.
 

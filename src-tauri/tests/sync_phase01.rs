@@ -393,9 +393,52 @@ async fn audit_writer_emits_audit_outbox_row_with_audit_log_entity_name() {
         "outbox row.entity_id must reference the audit row id"
     );
 
+    // Audit payloads are encoded with `with_human_readable()` so `Uuid`
+    // fields wire as strings (the sync server's JS decoder requires it).
+    // Matching deserializer config is required to round-trip back to
+    // `AuditEntry` here.
+    let mut deser = rmp_serde::Deserializer::new(&batch[0].payload[..]).with_human_readable();
     let decoded: AuditEntry =
-        rmp_serde::from_slice(&batch[0].payload).expect("payload decodes as AuditEntry");
+        serde::Deserialize::deserialize(&mut deser).expect("payload decodes as AuditEntry");
     assert_eq!(decoded.id, audits[0].id);
     assert_eq!(decoded.entity, "user");
     assert_eq!(decoded.entity_id, "u1");
+}
+
+#[tokio::test]
+async fn sync_state_server_url_persists_across_repo_instances() {
+    // Migration 010 + `config_set_sync_server_url_impl` write-through: the
+    // URL must survive an app restart so the first-launch modal does not
+    // reopen after the user finishes setup.
+    let pool = fresh_pool().await;
+    let writer = SqliteSyncStateRepo::new(pool.clone());
+    writer.ensure_device_id("dev-1").await.unwrap();
+
+    assert_eq!(
+        writer.get_server_url().await.unwrap(),
+        None,
+        "fresh row starts with no URL"
+    );
+
+    writer
+        .put_server_url("http://localhost:3161")
+        .await
+        .unwrap();
+
+    let reader = SqliteSyncStateRepo::new(pool.clone());
+    assert_eq!(
+        reader.get_server_url().await.unwrap().as_deref(),
+        Some("http://localhost:3161"),
+        "URL must round-trip via SQLite, not just an in-memory cache"
+    );
+
+    writer
+        .put_server_url("https://sync.example.com")
+        .await
+        .unwrap();
+    assert_eq!(
+        reader.get_server_url().await.unwrap().as_deref(),
+        Some("https://sync.example.com"),
+        "update overwrites the previously stored URL"
+    );
 }

@@ -49,6 +49,7 @@ pub struct SyncEngineHandle {
     tx: mpsc::Sender<Cmd>,
     status: Arc<RwLock<SyncStatus>>,
     outbox_repo: Arc<dyn OutboxRepo>,
+    state_repo: Arc<dyn SyncStateRepo>,
 }
 
 impl SyncEngineHandle {
@@ -74,6 +75,10 @@ impl SyncEngineHandle {
 
     pub fn outbox_repo(&self) -> Arc<dyn OutboxRepo> {
         self.outbox_repo.clone()
+    }
+
+    pub fn state_repo(&self) -> Arc<dyn SyncStateRepo> {
+        self.state_repo.clone()
     }
 
     pub async fn resolve_conflict(
@@ -161,7 +166,7 @@ impl SyncEngine {
             pool: config.pool,
             outbox_repo: config.outbox_repo.clone(),
             audit_repo: config.audit_repo,
-            state_repo: config.state_repo,
+            state_repo: config.state_repo.clone(),
             http: Arc::new(Mutex::new(http)),
             device_id: config.device_id,
             app_version: config.app_version,
@@ -174,6 +179,7 @@ impl SyncEngine {
             tx,
             status: status.clone(),
             outbox_repo: config.outbox_repo,
+            state_repo: config.state_repo,
         };
 
         tokio::spawn(async move {

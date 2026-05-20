@@ -30,6 +30,7 @@ use crate::domains::sync::domain::entities::{AuditEntry, OutboxOp};
 use crate::domains::sync::domain::repositories::{
     AuditFilter, AuditRepo, OutboxRepo, SyncStateRepo,
 };
+use crate::domains::sync::domain::services::encode_audit_payload;
 use crate::domains::sync::domain::value_objects::AuditAction;
 use crate::error::{AppError, AppResult};
 
@@ -204,9 +205,17 @@ impl AuditVacuumJob {
 
         let mut tx = self.pool.begin().await?;
         self.audit_repo.append(&mut tx, &entry).await?;
-        let payload = rmp_serde::to_vec_named(&entry)?;
-        let outbox_op = OutboxOp::new("audit_log", entry.id.to_string(), payload);
-        self.outbox_repo.enqueue(&mut tx, &outbox_op).await?;
+        // Only enqueue an outbox push when a human triggered the vacuum.
+        // The daily scheduler uses `SYSTEM_ACTOR_ID` (zero UUID) which has no
+        // matching row in the server's `users` table, so the audit_log FK
+        // (`audit_log_actor_user_id_fkey`) would reject the push and the
+        // failed row would block every later push behind it. Local audit
+        // visibility is preserved by the `append` above.
+        if actor != Uuid::parse_str(SYSTEM_ACTOR_ID).expect("valid uuid") {
+            let payload = encode_audit_payload(&entry)?;
+            let outbox_op = OutboxOp::new("audit_log", entry.id.to_string(), payload);
+            self.outbox_repo.enqueue(&mut tx, &outbox_op).await?;
+        }
         tx.commit().await?;
 
         self.state_repo.mark_audit_vacuumed(now).await?;

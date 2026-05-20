@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const repoRoot = path.resolve(__dirname, '..')
-const application = path.resolve(repoRoot, 'src-tauri', 'target', 'debug', 'torch-app-template')
+const application = path.resolve(repoRoot, 'src-tauri', 'target', 'debug', 'idc-system')
 
 let tauriDriver: ChildProcess | undefined
 let exiting = false

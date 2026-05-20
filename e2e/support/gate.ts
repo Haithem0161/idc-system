@@ -1,7 +1,7 @@
 // Phase-09 §4 WebdriverIO E2E gate.
 //
 // The base wdio.conf.ts boots a single tauri-driver against the
-// existing debug binary at src-tauri/target/debug/torch-app-template
+// existing debug binary at src-tauri/target/debug/idc-system
 // (`pnpm tauri build --no-bundle` rebuilds it). The phase-01 smoke
 // spec (`app-shell.spec.ts`) runs unconditionally and is the "the
 // binary boots and renders a webview" gate that the rest of the

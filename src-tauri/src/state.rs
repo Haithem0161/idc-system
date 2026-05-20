@@ -23,8 +23,7 @@ use crate::domains::shifts::ShiftService;
 use crate::domains::visits::VisitService;
 use crate::sync::SyncEngineHandle;
 
-/// User context received from Business OS (embedded mode) or the auth flow
-/// (Phase 2 standalone mode).
+/// User context populated by the auth flow (Phase 2).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserContext {
     pub user_id: String,
@@ -242,35 +241,6 @@ impl AppState {
         }
     }
 
-    pub fn for_embedded() -> Self {
-        Self {
-            db_pool: None,
-            sync_engine: None,
-            auth_service: None,
-            user_service: None,
-            settings_service: None,
-            catalog_services: None,
-            shift_service: None,
-            patient_service: None,
-            visit_service: None,
-            inventory_adjustment_service: None,
-            reports_service: None,
-            audit_query_service: None,
-            audit_vacuum_job: None,
-            diagnostics_service: None,
-            user_repo: None,
-            user_context: RwLock::new(None),
-            settings_cache: RwLock::new(HashMap::new()),
-            locked: RwLock::new(false),
-            device_id: String::new(),
-            app_version: env!("CARGO_PKG_VERSION").to_string(),
-            token: RwLock::new(None),
-            expires_at: RwLock::new(None),
-            refresh_token: RwLock::new(None),
-            sync_server_url: RwLock::new(None),
-        }
-    }
-
     pub fn db_pool(&self) -> Option<&SqlitePool> {
         self.db_pool.as_ref()
     }
@@ -278,7 +248,7 @@ impl AppState {
     pub fn sync_engine(&self) -> &SyncEngineHandle {
         self.sync_engine
             .as_ref()
-            .expect("sync engine not available (embedded mode)")
+            .expect("sync engine not initialised")
     }
 
     pub fn try_sync_engine(&self) -> Option<&SyncEngineHandle> {

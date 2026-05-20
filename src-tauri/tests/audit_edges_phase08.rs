@@ -267,7 +267,10 @@ async fn crash_recovery_partial_vacuum_run_leaves_consistent_state() {
     )
     .await;
     let job = build_vacuum_job(&pool);
-    job.run(None, TENANT).await.unwrap();
+    // Use a human actor so the vacuum enqueues an outbox push (system-actor
+    // runs intentionally skip the enqueue -- see audit/service.rs).
+    let human_actor = Uuid::parse_str(ACTOR).unwrap();
+    job.run(Some(human_actor), TENANT).await.unwrap();
 
     let audit_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM audit_log")
         .fetch_one(&pool)
@@ -480,7 +483,11 @@ async fn data_integrity_metrics_events_hard_delete_emits_no_audit_or_outbox_for_
     }
 
     let job = build_vacuum_job(&pool);
-    let out = job.run(None, TENANT).await.unwrap();
+    // Human actor so the vacuum enqueues an outbox push (verifying the
+    // "one push, never per-pruned-row" invariant). System-actor runs skip
+    // the enqueue and are covered by a separate test.
+    let human_actor = Uuid::parse_str(ACTOR).unwrap();
+    let out = job.run(Some(human_actor), TENANT).await.unwrap();
     assert_eq!(out.metrics_purged, 20);
 
     let (remaining,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM metrics_events")

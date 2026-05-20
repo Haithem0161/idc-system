@@ -1,27 +1,22 @@
 // Phase-09 §1.2 + §2.4 -- frontend cleanup pyramid slice.
 //
-// The phase-09 pre-ship audit landed 4 frontend cleanups:
+// The phase-09 pre-ship audit landed 3 frontend cleanups:
 //
-//  1. `auth-provider.tsx` -- the chatty `console.log("[AuthProvider]
-//     /api/auth not reachable...")` was removed (it fired on every
-//     standalone-browser fallback, which is the normal case in dev).
-//     Legitimate `console.error` / `console.warn` lines are preserved.
-//  2. `admin/inventory/detail.tsx` -- the `consumption_subtype_picker`
+//  1. `admin/inventory/detail.tsx` -- the `consumption_subtype_picker`
 //     and `consumption_dye_unsupported` error messages route through
 //     i18n keys (with `defaultValue` as the standard i18next fallback
 //     pattern, not a stand-in for missing-locale work).
-//  3. `setup/first-launch-setup.tsx` -- the subtitle resolves through
+//  2. `setup/first-launch-setup.tsx` -- the subtitle resolves through
 //     `t("setup.subtitle")`; both `en` and `ar` locales carry the key.
-//  4. `shell/sidebar.tsx` -- the "Coming soon" disabled item is wired
+//  3. `shell/sidebar.tsx` -- the "Coming soon" disabled item is wired
 //     with `aria-disabled="true"` + a proper i18n key, not a hardcoded
 //     English string.
 //
 // These tests are static-source assertions: they read the relevant
 // source / locale files via Vite's `?raw` and JSON imports, then pin
-// the contracts. A regression (re-introducing `console.log`, replacing
-// the i18n key with an inline string, dropping the locale key, or
-// breaking the a11y attribute on the disabled nav item) fails the
-// test before it reaches review.
+// the contracts. A regression (replacing the i18n key with an inline
+// string, dropping the locale key, or breaking the a11y attribute on
+// the disabled nav item) fails the test before it reaches review.
 
 import { describe, expect, it } from "vitest"
 
@@ -30,7 +25,6 @@ import { describe, expect, it } from "vitest"
 // normal module-evaluation path. Perfect for source-file assertions
 // because the file never has to be syntactically valid TypeScript
 // from vitest's perspective -- it's just bytes.
-import authProviderSource from "@/providers/auth-provider.tsx?raw"
 import adminInventoryDetailSource from "@/pages/admin/inventory/detail.tsx?raw"
 import firstLaunchSetupSource from "@/components/setup/first-launch-setup.tsx?raw"
 import sidebarSource from "@/components/shell/sidebar.tsx?raw"
@@ -48,29 +42,6 @@ function dig(obj: unknown, path: string): unknown {
     return (acc as Record<string, unknown>)[key]
   }, obj)
 }
-
-describe("phase-09 §1.2 -- auth-provider chatty console.log removed", () => {
-  it("does not emit console.log anywhere in auth-provider", () => {
-    // The full ban on `console.log` is the SHIP-CONCERN cleanup. Anything
-    // that needs to log to dev-tools must go through `console.error` (for
-    // genuine failure paths) or `console.warn` (for noteworthy-but-handled
-    // state changes).
-    expect(authProviderSource).not.toMatch(/console\.log\(/)
-  })
-
-  it("still emits console.error on legitimate failure paths", () => {
-    // Regression guard: the cleanup must not have removed the genuine
-    // error logging. Two known error paths must still log:
-    //   - Embedded auth timeout after 60s
-    //   - Auth initialization failure
-    expect(authProviderSource).toMatch(/console\.error.*Embedded auth timed out/)
-    expect(authProviderSource).toMatch(/console\.error.*Auth initialization failed/)
-  })
-
-  it("still emits console.warn on embedded session expiry", () => {
-    expect(authProviderSource).toMatch(/console\.warn.*Embedded session expired/)
-  })
-})
 
 describe("phase-09 §1.2 -- admin/inventory/detail i18n keys present in both locales", () => {
   it("admin.inventory.consumption_subtype_picker resolves in en", () => {

@@ -33,6 +33,7 @@ export type CommandMap = {
   auth_lock: { args: void; result: null }
   auth_unlock: { args: { args: { password: string } }; result: null }
   auth_is_locked: { args: void; result: boolean }
+  auth_has_any_user: { args: void; result: boolean }
   // DEF-007 G01: client-side token rotation. Reads the cached refresh
   // token from AppState, calls `/auth/refresh`, writes the new pair, and
   // fires the `auth:refreshed` Tauri event.

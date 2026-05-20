@@ -8,7 +8,7 @@ paths:
 
 # Tauri v2 Rules
 
-The desktop app is **Tauri v2** with dual-mode execution: standalone window app and embedded Business OS child app. The Rust side owns local persistence (SQLite), background sync, and the IPC surface to the frontend.
+The desktop app is **Tauri v2**, running as a standalone window app. The Rust side owns local persistence (SQLite), background sync, and the IPC surface to the frontend.
 
 ## Core Principles
 
@@ -30,7 +30,7 @@ src-tauri/
 ├── icons/
 └── src/
     ├── main.rs               # thin entry: lib::run()
-    ├── lib.rs                # mode dispatch (standalone vs embedded)
+    ├── lib.rs                # Tauri builder setup, command registration
     ├── state.rs              # AppState (RwLock auth + Arc<Db>)
     ├── error.rs              # AppError + IntoResponse + Tauri error mapping
     ├── config.rs             # typed config from env / app data dir
@@ -39,8 +39,7 @@ src-tauri/
     │   ├── domain/           # entities, services, repository traits
     │   ├── infrastructure/   # SQLite repos, sync adapters
     │   └── commands.rs       # #[tauri::command] handlers
-    ├── sync/                 # sync engine: queue, pusher, puller, conflict resolver
-    └── embedded/             # Business OS HTTP + IPC (existing template code)
+    └── sync/                 # sync engine: queue, pusher, puller, conflict resolver
 ```
 
 Each domain mirrors the DDD layout in `ddd.md` -- domain layer is dependency-free, infrastructure implements the traits, presentation here means Tauri commands.
@@ -84,12 +83,7 @@ Each domain mirrors the DDD layout in `ddd.md` -- domain layer is dependency-fre
 
 - Dev: `pnpm tauri dev` (starts Vite + Rust). Use `cargo check` from `src-tauri/` for fast Rust feedback during dev.
 - Release: `pnpm tauri build`. Verify the bundle starts on a clean profile (no leftover `app.db`).
-- Release pipeline lives in `.github/workflows/` (multi-platform: linux-x86_64, windows-x86_64, macos-x86_64, macos-aarch64). Use the `torch-app-release` skill to scaffold or update it.
-- Updater: handled by Business OS for child apps. Do NOT wire `tauri-plugin-updater` unless the app ships standalone outside Business OS.
-
-## Embedded Mode (Existing)
-
-The template already supports `TORCH_EMBEDDED_MODE=true` via `embedded/`. When adding new IPC commands, also expose any equivalent surface the embedded HTTP server needs (e.g., auth refresh hooks). See `BUSINESS-OS-INTEGRATION.md`.
+- Release pipeline lives in `.github/workflows/` (multi-platform: linux-x86_64, windows-x86_64, macos-x86_64, macos-aarch64).
 
 ## Common Pitfalls
 

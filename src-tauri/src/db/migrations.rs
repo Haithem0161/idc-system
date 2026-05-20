@@ -48,6 +48,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "009_pre_ship.sql",
         include_str!("../../migrations/009_pre_ship.sql"),
     ),
+    (
+        "010_sync_server_url.sql",
+        include_str!("../../migrations/010_sync_server_url.sql"),
+    ),
+    (
+        "011_purge_system_vacuum_outbox.sql",
+        include_str!("../../migrations/011_purge_system_vacuum_outbox.sql"),
+    ),
 ];
 
 /// Apply every embedded migration that has not already run.

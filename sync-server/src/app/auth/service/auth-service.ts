@@ -114,7 +114,8 @@ export class AuthService {
     email: string,
     name: string,
     password: string,
-    entityId: string
+    entityId: string,
+    id?: string
   ): Promise<UserRecord> {
     if ((await this.users.count()) > 0) {
       throw new DomainError(
@@ -132,7 +133,7 @@ export class AuthService {
     }
     const hashStr = await argonHash(password)
     return this.users.create({
-      id: randomUUID(),
+      id: id ?? randomUUID(),
       email,
       name,
       passwordHash: hashStr,

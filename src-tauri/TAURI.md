@@ -1059,9 +1059,9 @@ pub fn run() {
 ```json
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Torch Document Center",
+  "productName": "My Application",
   "version": "1.0.0",
-  "identifier": "com.torch.document-center",
+  "identifier": "com.example.myapp",
 
   "build": {
     "frontendDist": "../dist",
@@ -1075,7 +1075,7 @@ pub fn run() {
     "windows": [
       {
         "label": "main",
-        "title": "Torch Document Center",
+        "title": "My Application",
         "width": 1400,
         "height": 900,
         "minWidth": 900,
@@ -1091,7 +1091,7 @@ pub fn run() {
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https: blob:; connect-src 'self' http://localhost:* ws://localhost:* https://api.torch.com",
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https: blob:; connect-src 'self' http://localhost:* ws://localhost:* https://api.example.com",
       "dangerousDisableAssetCspModification": false,
       "freezePrototype": false
     }
@@ -1111,9 +1111,9 @@ pub fn run() {
       "icons/icon.ico"
     ],
     "category": "Productivity",
-    "shortDescription": "Torch Document Center",
-    "longDescription": "Enterprise document management for Torch platform",
-    "copyright": "Copyright (c) Torch Corp",
+    "shortDescription": "My Application",
+    "longDescription": "Enterprise application",
+    "copyright": "Copyright (c) My Company",
     "linux": {
       "deb": {
         "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]

@@ -75,3 +75,7 @@ ReturnType
 # (matches the localized "Resolve" button copy from reception/overlap/ar).
 # Not user-facing -- assertion regex input only.
 حلّ
+
+# Default dev-mode sync server URL shown as input placeholder on first-run
+# bootstrap. Locale-invariant by design (URLs aren't translated).
+http://localhost:3161

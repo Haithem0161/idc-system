@@ -98,7 +98,7 @@ RUST_LOG=info cargo run
 RUST_LOG=my_app=debug,info cargo run
 
 # Show trace for a specific module
-RUST_LOG=my_app::embedded::ipc_client=trace cargo run
+RUST_LOG=my_app::services::sync=trace cargo run
 
 # Multiple targets
 RUST_LOG=my_app=debug,axum=info,tower_http=debug cargo run
@@ -234,57 +234,19 @@ pub fn run() {
 }
 ```
 
-### Dual-Mode Logging
-
-```rust
-pub fn run() {
-    // Use tracing for embedded mode (independent of Tauri)
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
-    if is_embedded_mode() {
-        // tracing works here — no Tauri runtime needed
-        tracing::info!("Starting in embedded mode");
-        run_embedded();
-    } else {
-        // Tauri plugin log adds to the existing tracing setup
-        tauri::Builder::default()
-            .setup(|app| {
-                if cfg!(debug_assertions) {
-                    app.handle().plugin(
-                        tauri_plugin_log::Builder::default()
-                            .level(log::LevelFilter::Info)
-                            .build(),
-                    )?;
-                }
-                Ok(())
-            })
-            .run(tauri::generate_context!())
-            .expect("error while running tauri application");
-    }
-}
-```
-
 ## Logging Patterns
 
 ### Startup Logging
 
 ```rust
-tracing::info!("Starting app in embedded mode");
-tracing::info!("  Run ID: {}", config.run_id);
-tracing::info!("  IPC Port: {}", config.ipc_port);
+tracing::info!("Starting app");
+tracing::info!("  Version: {}", env!("CARGO_PKG_VERSION"));
 tracing::info!("  Install Path: {:?}", config.install_path);
 ```
 
 ### Connection Logging
 
 ```rust
-tracing::info!("Connecting to Business OS IPC at {}", addr);
-tracing::info!("Connected to Business OS IPC");
 tracing::info!("HTTP server listening on http://{}", addr);
 tracing::info!("Frontend available at http://127.0.0.1:{}", port);
 ```
@@ -304,7 +266,7 @@ tracing::info!("IPC message received: {}", match &msg.payload {
 tracing::info!(
     token_len = token.len(),
     expires_at = expires_at,
-    "Auth token stored from Business OS"
+    "Auth token stored"
 );
 ```
 
@@ -316,7 +278,7 @@ tracing::error!("HTTP server error: {}", e);
 tracing::error!(
     code = %code,
     message = %message,
-    "Error from Business OS"
+    "Error from upstream"
 );
 
 tracing::warn!(
@@ -331,8 +293,7 @@ tracing::warn!(
 tracing::info!("Received SIGINT (Ctrl+C), initiating shutdown");
 tracing::info!("Received SIGTERM, initiating shutdown");
 tracing::info!("HTTP server shutting down");
-tracing::info!("IPC client received shutdown signal");
-tracing::info!("Embedded mode shutdown complete");
+tracing::info!("Shutdown complete");
 ```
 
 ## Compatibility with `log` Crate
@@ -350,10 +311,8 @@ tracing::info!("From tracing crate");
 ```
 src/
 ├── lib.rs              # Initialize tracing_subscriber in run()
-├── embedded/
-│   ├── runner.rs       # Startup + shutdown logging
-│   ├── ipc_client.rs   # Message + connection logging
-│   └── http_server.rs  # Server + request logging
+├── commands/           # Command logging with #[instrument]
+└── services/           # Service logging with #[instrument]
 ```
 
 ## Best Practices

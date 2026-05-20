@@ -419,6 +419,19 @@ pub struct FirstAdminArgs {
     pub entity_id: Option<String>,
 }
 
+pub async fn auth_has_any_user_impl(state: &AppState) -> AppResult<bool> {
+    let repo = state
+        .user_repo()
+        .ok_or_else(|| AppError::Configuration("user repo unavailable".into()))?;
+    Ok(repo.count().await? > 0)
+}
+
+#[tauri::command]
+#[instrument(skip(state))]
+pub async fn auth_has_any_user(state: State<'_, AppState>) -> AppResult<bool> {
+    auth_has_any_user_impl(&state).await
+}
+
 pub async fn users_create_first_admin_impl(
     state: &AppState,
     args: FirstAdminArgs,
@@ -430,7 +443,7 @@ pub async fn users_create_first_admin_impl(
     let user = svc
         .create_first_admin(&args.email, &args.name, &args.password, &entity_id)
         .await?;
-    // Auto-login the user post-bootstrap.
+
     let ctx = UserContext {
         user_id: user.id.to_string(),
         entity_id: user.entity_id.clone(),
@@ -439,6 +452,40 @@ pub async fn users_create_first_admin_impl(
         role: user.role.to_string(),
     };
     state.set_current_user(ctx).await;
+
+    // Mirror the superadmin to the sync server (best-effort) and cache the
+    // JWT so the sync engine can authenticate. Failures here are non-fatal --
+    // the local bootstrap already succeeded.
+    if let Some(server_url) = state.sync_server_url().await {
+        if !server_url.is_empty() {
+            svc.bootstrap_remote_superadmin(
+                &server_url,
+                user.id,
+                &args.email,
+                &args.name,
+                &args.password,
+                &entity_id,
+            )
+            .await?;
+            match svc
+                .login(Some(&server_url), &args.email, &args.password, &entity_id)
+                .await
+            {
+                Ok(result) => {
+                    if let (Some(token), Some(exp)) =
+                        (result.access_token, result.access_token_expires_at)
+                    {
+                        state.set_current_token(token, exp.timestamp()).await;
+                    }
+                    state.set_refresh_token(result.refresh_token).await;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "online login after bootstrap failed; sync will retry");
+                }
+            }
+        }
+    }
+
     Ok(user.into())
 }
 

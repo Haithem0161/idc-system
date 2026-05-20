@@ -120,7 +120,7 @@ IDC-specific deviations from the platform stack: none in v1. The app embraces th
 
 ### §2.1 Package Definitions
 
-Single bundled IDC desktop app, single license per center. No paid/free tiers, no module marketplace, no per-seat licensing in v1. The sync server is a single instance per center, deployed by Torch operations or self-hosted.
+Single bundled IDC desktop app, single license per center. No paid/free tiers, no module marketplace, no per-seat licensing in v1. The sync server is a single instance per center, self-hosted by the operator.
 
 ### §2.2 Entitlement Behavior
 
@@ -265,9 +265,9 @@ All routes carry full TypeBox schemas and Swagger metadata per `.claude/rules/sy
 
 Boundary: the server does NOT generate IDs for syncable entities — all IDs are client-supplied UUID v7. The server validates the ID format and rejects collisions across tenants. Server-only IDs (e.g., refresh-token rows) live in their own non-syncable tables.
 
-### §5.3 Embedded Mode (Business OS)
+### §5.3 Reserved
 
-Not used in v1. The Tauri scaffold supports embedded mode but IDC ships standalone to its customer center. The `embedded/` Rust module remains in the binary but is gated by an env flag and never activated in shipped IDC builds.
+Reserved. (Former content removed; the IDC system ships as a standalone Tauri app.)
 
 ### §5.4 Document Center / Storage
 

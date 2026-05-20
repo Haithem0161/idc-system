@@ -14,6 +14,7 @@ use crate::domains::auth::domain::value_objects::{LoginMode, UserRole};
 use crate::domains::sync::domain::entities::audit_entry::AuditCreateInput;
 use crate::domains::sync::domain::entities::{AuditEntry, OutboxOp};
 use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo};
+use crate::domains::sync::domain::services::encode_audit_payload;
 use crate::domains::sync::domain::value_objects::AuditAction;
 use crate::error::{AppError, AppResult};
 
@@ -136,7 +137,7 @@ impl AuthService {
         });
         let mut tx = self.pool.begin().await.map_err(AppError::from)?;
         self.audit_repo.append(&mut tx, &audit).await?;
-        let audit_payload = rmp_serde::to_vec_named(&audit)?;
+        let audit_payload = encode_audit_payload(&audit)?;
         let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
         self.outbox_repo.enqueue(&mut tx, &audit_outbox).await?;
         tx.commit().await.map_err(AppError::from)?;
@@ -164,7 +165,7 @@ impl AuthService {
         });
         let mut tx = self.pool.begin().await.map_err(AppError::from)?;
         self.audit_repo.append(&mut tx, &audit).await?;
-        let audit_payload = rmp_serde::to_vec_named(&audit)?;
+        let audit_payload = encode_audit_payload(&audit)?;
         let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
         self.outbox_repo.enqueue(&mut tx, &audit_outbox).await?;
         tx.commit().await.map_err(AppError::from)?;
@@ -302,6 +303,57 @@ impl AuthService {
         Ok(())
     }
 
+    /// Best-effort: register the same superadmin on the sync server so the
+    /// sync engine can authenticate. Returns `Ok(())` when the server already
+    /// has users (409) or is unreachable -- the local bootstrap stands on its
+    /// own; remote registration is an enhancement, not a precondition.
+    pub async fn bootstrap_remote_superadmin(
+        &self,
+        server_url: &str,
+        id: Uuid,
+        email: &str,
+        name: &str,
+        password: &str,
+        entity_id: &str,
+    ) -> AppResult<()> {
+        let url = format!(
+            "{}/auth/bootstrap-superadmin",
+            server_url.trim_end_matches('/')
+        );
+        let resp = self
+            .http
+            .post(&url)
+            .json(&serde_json::json!({
+                "id": id.to_string(),
+                "email": email,
+                "name": name,
+                "password": password,
+                "entityId": entity_id,
+            }))
+            .send()
+            .await;
+        match resp {
+            Ok(r) if r.status().is_success() => Ok(()),
+            Ok(r) if r.status() == reqwest::StatusCode::CONFLICT => {
+                tracing::info!(
+                    "sync server already has users; skipping remote bootstrap"
+                );
+                Ok(())
+            }
+            Ok(r) => {
+                tracing::warn!(
+                    status = %r.status(),
+                    "remote bootstrap returned non-success; continuing offline"
+                );
+                Ok(())
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "remote bootstrap unreachable; continuing offline");
+                Ok(())
+            }
+        }
+    }
+
     /// Bootstrap a first superadmin when the local user table is empty.
     /// Idempotent: returns the existing first user if any user exists.
     pub async fn create_first_admin(
@@ -342,7 +394,7 @@ impl AuthService {
         });
         self.audit_repo.append(&mut tx, &audit).await?;
 
-        let audit_payload = rmp_serde::to_vec_named(&audit)?;
+        let audit_payload = encode_audit_payload(&audit)?;
         let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
         self.outbox_repo.enqueue(&mut tx, &audit_outbox).await?;
 
@@ -511,7 +563,7 @@ impl AuthService {
             entity_id_tenant: user.entity_id.clone(),
         });
         self.audit_repo.append(&mut tx, &audit).await?;
-        let audit_payload = rmp_serde::to_vec_named(&audit)?;
+        let audit_payload = encode_audit_payload(&audit)?;
         let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
         self.outbox_repo.enqueue(&mut tx, &audit_outbox).await?;
         tx.commit().await.map_err(AppError::from)?;

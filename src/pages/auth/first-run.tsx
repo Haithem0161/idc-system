@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 
 import { Logo } from "@/components/shell/logo"
+import { invoke } from "@/lib/ipc"
 import { useFirstAdmin, useHasAnyUser } from "@/features/auth/queries"
 
 export default function FirstRunPage () {
@@ -14,6 +15,7 @@ export default function FirstRunPage () {
   const [name, setName] = useState("")
   const [password, setPassword] = useState("")
   const [entityId, setEntityId] = useState("")
+  const [syncUrl, setSyncUrl] = useState("http://localhost:3161")
   const [error, setError] = useState<string | null>(null)
 
   if (hasAnyUser.data === true) {
@@ -24,6 +26,10 @@ export default function FirstRunPage () {
     e.preventDefault()
     setError(null)
     try {
+      const trimmedUrl = syncUrl.trim()
+      if (trimmedUrl) {
+        await invoke("config_set_sync_server_url", { url: trimmedUrl })
+      }
       await firstAdmin.mutateAsync({
         email,
         name,
@@ -96,6 +102,17 @@ export default function FirstRunPage () {
                   className="input"
                 />
               </Field>
+              <div className="sm:col-span-2">
+                <Field label={t("auth.sync_url_label", { defaultValue: "Sync server URL" })}>
+                  <input
+                    type="url"
+                    value={syncUrl}
+                    onChange={(e) => setSyncUrl(e.target.value)}
+                    placeholder="http://localhost:3161"
+                    className="input"
+                  />
+                </Field>
+              </div>
             </div>
 
             {error ? (

@@ -1,7 +1,7 @@
 {
   "app": {
-    "title": "Torch App Template",
-    "description": "Welcome to your Torch Business OS app"
+    "title": "IDC System",
+    "description": "Welcome to IDC System"
   },
   "common": {
     "loading": "Loading...",

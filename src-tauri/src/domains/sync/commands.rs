@@ -89,11 +89,18 @@ pub async fn device_info_impl(state: &AppState) -> AppResult<DeviceInfo> {
 }
 
 pub async fn config_set_sync_server_url_impl(state: &AppState, url: String) -> AppResult<()> {
-    if url.trim().is_empty() {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
         return Err(crate::error::AppError::Validation(
             "sync server url required".into(),
         ));
     }
+    let url = trimmed.to_string();
+    // Persist FIRST so a crash between writes can never leave the engine
+    // pointing at a URL the DB has forgotten. The setter is also called by
+    // the first-launch modal and the superadmin first-run wizard; without
+    // persistence the modal reopened on every restart.
+    state.sync_engine().state_repo().put_server_url(&url).await?;
     state.set_sync_server_url(url.clone()).await;
     state.sync_engine().set_server_url(url).await;
     Ok(())

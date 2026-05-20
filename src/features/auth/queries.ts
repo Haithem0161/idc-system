@@ -167,10 +167,7 @@ export function useHasAnyUser () {
   return useQuery({
     queryKey: authKeys.hasAnyUser,
     enabled: isTauri(),
-    queryFn: async () => {
-      const list = await invoke("users_list", { args: { include_inactive: true } })
-      return list.length > 0
-    },
+    queryFn: () => invoke("auth_has_any_user"),
     refetchOnMount: "always",
   })
 }

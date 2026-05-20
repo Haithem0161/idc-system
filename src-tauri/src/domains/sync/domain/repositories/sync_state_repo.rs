@@ -34,4 +34,12 @@ pub trait SyncStateRepo: Send + Sync {
 
     /// Stamp `last_audit_vacuum_at = now` after a successful audit-vacuum run.
     async fn mark_audit_vacuumed(&self, at: chrono::DateTime<chrono::Utc>) -> AppResult<()>;
+
+    /// Read the persisted sync server URL (migration 010). `None` when the
+    /// user has not finished first-launch setup yet.
+    async fn get_server_url(&self) -> AppResult<Option<String>>;
+
+    /// Persist the sync server URL. Called by
+    /// `config_set_sync_server_url_impl` so the setting survives a restart.
+    async fn put_server_url(&self, url: &str) -> AppResult<()>;
 }

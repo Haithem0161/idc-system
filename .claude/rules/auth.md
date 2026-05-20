@@ -50,7 +50,7 @@ Auth must work **offline-first**. The user can be authenticated locally for the 
   - `auth_login(email, password) -> Result<UserProfile>` -- only available when online.
   - `auth_logout() -> Result<()>` -- clears tokens and closes session on the server (best-effort).
   - `auth_get_state() -> Result<AuthState>` -- current user, online/offline auth status.
-- The frontend NEVER stores or handles raw tokens. All requests go through Rust; embedded mode polls `/api/auth` from the bundled HTTP server.
+- The frontend NEVER stores or handles raw tokens. All requests go through Rust.
 
 ## Frontend Side
 

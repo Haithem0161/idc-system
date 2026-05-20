@@ -24,7 +24,7 @@ use crate::domains::catalog::domain::repositories::{
 use crate::domains::sync::domain::entities::audit_entry::AuditCreateInput;
 use crate::domains::sync::domain::entities::{AuditEntry, OutboxOp};
 use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo};
-use crate::domains::sync::domain::services::{AuditWriter, BusinessWrite};
+use crate::domains::sync::domain::services::{encode_audit_payload, AuditWriter, BusinessWrite};
 use crate::domains::sync::domain::value_objects::AuditAction;
 use crate::domains::visits::domain::entities::{AdjustmentReason, InventoryAdjustment};
 use crate::domains::visits::domain::repositories::InventoryAdjustmentRepo;
@@ -334,7 +334,7 @@ impl InventoryAdjustmentService {
             entity_id_tenant: entity_id.to_string(),
         });
         self.audit.append(&mut tx, &audit).await?;
-        let audit_payload = rmp_serde::to_vec_named(&audit)?;
+        let audit_payload = encode_audit_payload(&audit)?;
         let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
         self.outbox.enqueue(&mut tx, &audit_outbox).await?;
         tx.commit().await.map_err(AppError::from)?;
@@ -502,7 +502,7 @@ impl BusinessWrite for CreateAdjustmentWrite {
         // Also enqueue the inline item audit row so its outbox push runs in
         // this cycle. The primary `with_audit` row is enqueued by the
         // writer automatically; we only need the inline one here.
-        let item_audit_payload = rmp_serde::to_vec_named(&item_audit)?;
+        let item_audit_payload = encode_audit_payload(&item_audit)?;
         outbox.push(OutboxOp::new(
             "audit_log",
             item_audit.id.to_string(),

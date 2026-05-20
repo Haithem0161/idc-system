@@ -7,11 +7,11 @@ paths:
 
 # Rust Rules (Tauri Backend)
 
-This file covers Rust conventions for `src-tauri/`. Tauri-specific rules (capabilities, commands, dual-mode) live in `tauri.md`. Sync-engine rules live in `offline-first.md`.
+This file covers Rust conventions for `src-tauri/`. Tauri-specific rules (capabilities, commands) live in `tauri.md`. Sync-engine rules live in `offline-first.md`.
 
 ## Mandatory Rules
 
-1. **Context7 First.** Before writing implementation code with any crate -- `tokio`, `axum` (embedded mode only), `sqlx` / `rusqlite`, `serde`, `tracing`, `thiserror`, `reqwest`, `tauri`, etc. -- query Context7 (`resolve-library-id`, then `query-docs`) and base the code on the returned docs.
+1. **Context7 First.** Before writing implementation code with any crate -- `tokio`, `axum`, `sqlx` / `rusqlite`, `serde`, `tracing`, `thiserror`, `reqwest`, `tauri`, etc. -- query Context7 (`resolve-library-id`, then `query-docs`) and base the code on the returned docs.
 2. **Pre-commit Validation.** `cargo clippy -- -D warnings`, `cargo build`, `cargo test` MUST pass before every commit. There is no CI safety net for "clippy failures are fine".
 3. **Package management:** never hand-edit `Cargo.toml` `[dependencies]` -- use `cargo add <crate>` (with `--features` as needed). Hand-editing is OK only for `[workspace]`, `[profile]`, `[features]`, and `[patch]`.
 4. **No Claude authorship in commits.** Same as the rest of the project.
@@ -25,8 +25,8 @@ This file covers Rust conventions for `src-tauri/`. Tauri-specific rules (capabi
 | `tauri` | Desktop framework. |
 | `tauri-plugin-log` | Frontend-side log forwarding (paired with `tracing`). |
 | `tokio` | Async runtime (full features). |
-| `axum`, `tower-http` | HTTP server for embedded mode (Business OS integration). |
-| `serde`, `serde_json`, `rmp-serde` | Serialization (JSON for IPC, MessagePack for embedded IPC + outbox). |
+| `axum`, `tower-http` | HTTP server (when local HTTP is needed). |
+| `serde`, `serde_json`, `rmp-serde` | Serialization (JSON for IPC, MessagePack for outbox). |
 | `sqlx` (preferred) or `rusqlite` | Local SQLite. Pick one and stick to it -- do not mix. |
 | `tracing`, `tracing-subscriber` | Structured logging. |
 | `thiserror` | Typed errors at module boundaries. |

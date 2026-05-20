@@ -714,8 +714,16 @@ async fn vacuum_deletes_synced_rows_older_than_90d_and_preserves_dirty() {
         SYSTEM_ACTOR_ID.to_string()
     );
 
-    // Outbox now contains the vacuum row's push entry.
-    assert!(outbox_repo.pending_count().await.unwrap() >= 1);
+    // System-actor (None) vacuums must NOT enqueue an outbox push: the
+    // synthetic zero-UUID actor has no matching row in the server's `users`
+    // table, and the resulting FK violation parks every audit_log push
+    // behind it. Local audit visibility is preserved via `audit_repo.append`
+    // above (verified at line ~705).
+    assert_eq!(
+        outbox_repo.pending_count().await.unwrap(),
+        0,
+        "system-actor vacuum must not enqueue an outbox push"
+    );
 
     // sync_state.last_audit_vacuum_at stamped.
     let state = state_repo.get().await.unwrap();
@@ -826,8 +834,10 @@ async fn vacuum_also_purges_metrics_events_older_than_30d() {
 async fn vacuum_metrics_purge_makes_no_audit_or_outbox_writes_for_metrics() {
     // Per §7.21 step 3-4: `metrics_events` is local-only and hard-deleted.
     // The total audit-and-outbox writes during vacuum should equal exactly
-    // the one self-audit row + its outbox push -- never one per pruned
-    // metrics row.
+    // the one self-audit row + its outbox push (when triggered by a human
+    // actor) -- never one per pruned metrics row. Uses a real `Some(actor)`
+    // because system-actor (None) runs intentionally skip the outbox push
+    // (server FK on `actor_user_id` would reject the zero UUID).
     let pool = fresh_pool().await;
     let now = Utc::now();
     for _ in 0..25 {
@@ -849,7 +859,8 @@ async fn vacuum_metrics_purge_makes_no_audit_or_outbox_writes_for_metrics() {
         .unwrap();
 
     let VacuumDeps { job, .. } = build_vacuum_job(&pool);
-    job.run(None, TENANT).await.unwrap();
+    let human_actor = Uuid::parse_str(ACTOR).unwrap();
+    job.run(Some(human_actor), TENANT).await.unwrap();
 
     let outbox_after: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM outbox")
         .fetch_one(&pool)
@@ -869,6 +880,40 @@ async fn vacuum_metrics_purge_makes_no_audit_or_outbox_writes_for_metrics() {
         audit_after.0 - audit_before.0,
         1,
         "exactly one new audit row"
+    );
+}
+
+#[tokio::test]
+async fn vacuum_system_actor_skips_outbox_enqueue_but_keeps_local_audit() {
+    // Regression: the daily scheduler triggers vacuum with `actor = None`,
+    // which defaults to `SYSTEM_ACTOR_ID` (zero UUID). The server's
+    // `audit_log_actor_user_id_fkey` rejects this id because no matching
+    // user exists, and the failed batch blocks every later push for the
+    // device. The fix keeps the local audit row (for the audit-log UI) but
+    // does NOT enqueue an outbox push.
+    let pool = fresh_pool().await;
+    let VacuumDeps {
+        job,
+        audit_repo,
+        outbox_repo,
+        ..
+    } = build_vacuum_job(&pool);
+
+    job.run(None, TENANT).await.unwrap();
+
+    assert_eq!(
+        outbox_repo.pending_count().await.unwrap(),
+        0,
+        "system-actor vacuum must not enqueue an outbox push"
+    );
+    let rows = audit_repo.list_by_tenant(TENANT, 100, 0).await.unwrap();
+    let vacuum_row = rows
+        .iter()
+        .find(|r| matches!(r.action, AuditAction::Vacuum))
+        .expect("local audit row still written for forensic visibility");
+    assert_eq!(
+        vacuum_row.actor_user_id.to_string(),
+        SYSTEM_ACTOR_ID.to_string()
     );
 }
 
@@ -1109,7 +1154,9 @@ async fn diagnostics_summary_reads_outbox_depth_from_pending_count() {
     let state_repo: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
     let audit_repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
 
-    // Seed 3 outbox rows via a vacuum sweep + 2 manual inserts.
+    // Seed 3 outbox rows via a vacuum sweep + 2 manual inserts. Uses a
+    // real actor (`Some(human)`) so the vacuum enqueues -- system-actor
+    // (`None`) intentionally skips the outbox push.
     let job = AuditVacuumJob::new(
         pool.clone(),
         audit_repo.clone(),
@@ -1118,7 +1165,8 @@ async fn diagnostics_summary_reads_outbox_depth_from_pending_count() {
         state_repo.clone(),
         "dev-phase08".into(),
     );
-    job.run(None, TENANT).await.unwrap();
+    let human_actor = Uuid::parse_str(ACTOR).unwrap();
+    job.run(Some(human_actor), TENANT).await.unwrap();
     for _ in 0..2 {
         let op = app_lib::domains::sync::domain::entities::OutboxOp::new(
             "doctors",

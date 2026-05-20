@@ -39,16 +39,52 @@
   },
   "home": {
     "greeting": "صباح الخير، {{name}}.",
-    "subtitle": "عمليات العيادة دون اتصال. تُضاء بقية مساحة العمل مع شحن كل مرحلة.",
-    "phase_01_title": "الأساس والمزامنة",
-    "phase_01_body": "SQLite، صندوق الصادر، سجل التدقيق، محرك الدفع والسحب.",
-    "phase_02_title": "المصادقة والمستخدمون",
-    "phase_02_body": "JWT، الأدوار، الإعدادات، قفل الخمول، إعداد أول تشغيل.",
-    "phase_03_title": "الكتالوج والبيانات المرجعية",
-    "phase_03_body": "الأطباء، أنواع الفحوصات، التسعير، المشغّلون.",
-    "status_done": "تم الشحن",
-    "status_next": "التالي",
-    "status_later": "مخطط"
+    "subtitle": "نظرة على اليوم.",
+    "sync": {
+      "synced": "متزامن",
+      "syncing": "جاري مزامنة {{count}} تغيير",
+      "syncing_other": "جاري مزامنة {{count}} تغييرات",
+      "pending": "{{count}} تغيير قيد الانتظار",
+      "pending_other": "{{count}} تغييرات قيد الانتظار",
+      "offline": "غير متصل",
+      "error": "خطأ في المزامنة"
+    },
+    "day": {
+      "open": "اليوم مفتوح · {{count}} وردية",
+      "open_other": "اليوم مفتوح · {{count}} ورديات",
+      "open_simple": "اليوم مفتوح",
+      "closed": "اليوم مغلق",
+      "no_shifts": "لا توجد ورديات مفتوحة"
+    },
+    "tile": {
+      "visits_today": "زيارات اليوم",
+      "open_shifts": "الورديات المفتوحة",
+      "active_check_types": "أنواع الفحص النشطة"
+    },
+    "kpi": {
+      "revenue": "إيرادات اليوم",
+      "doctor_cuts": "حصص الأطباء",
+      "operator_cuts": "حصص المشغلين",
+      "inventory_value": "قيمة المخزون",
+      "net": "صافي اليوم"
+    },
+    "panel": {
+      "checks_today": "فحوصات اليوم",
+      "go_to_reception": "إلى الاستقبال",
+      "no_checks": "لا توجد أنواع فحص نشطة بعد.",
+      "top_doctors_today": "أفضل الأطباء اليوم",
+      "see_all": "عرض الكل",
+      "no_top_doctors": "لا توجد أرباح للأطباء اليوم.",
+      "visits_short": "ز"
+    },
+    "action": {
+      "new_visit": "زيارة جديدة",
+      "open_shifts": "افتح وردية",
+      "admin": "الإدارة",
+      "daily_close": "افتح الإقفال اليومي",
+      "full_dashboard": "لوحة المعلومات الكاملة",
+      "disabled_no_shift": "افتح وردية مشغل أولاً."
+    }
   },
   "not_found": {
     "eyebrow": "تائه",

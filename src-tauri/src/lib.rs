@@ -1,13 +1,8 @@
 //! IDC System -- Tauri application library.
-//!
-//! Modes:
-//! - **Standalone**: normal Tauri window app with full sync engine.
-//! - **Embedded**: headless mode for Business OS integration (auth only).
 
 pub mod config;
 pub mod db;
 pub mod domains;
-pub mod embedded;
 pub mod error;
 pub mod state;
 pub mod sync;
@@ -29,10 +24,10 @@ use crate::domains::audit::service::{
     DiagnosticsService as DiagnosticsSvc,
 };
 use crate::domains::auth::commands::{
-    auth_bootstrap_jwt_key, auth_change_password, auth_current_user, auth_is_locked,
-    auth_jwt_pinned_sha256, auth_lock, auth_login, auth_logout, auth_refresh, auth_unlock,
-    users_create, users_create_first_admin, users_get, users_list, users_reset_password,
-    users_soft_delete, users_update,
+    auth_bootstrap_jwt_key, auth_change_password, auth_current_user, auth_has_any_user,
+    auth_is_locked, auth_jwt_pinned_sha256, auth_lock, auth_login, auth_logout, auth_refresh,
+    auth_unlock, users_create, users_create_first_admin, users_get, users_list,
+    users_reset_password, users_soft_delete, users_update,
 };
 use crate::domains::auth::domain::repositories::UserRepo;
 use crate::domains::auth::infrastructure::SqliteUserRepo;
@@ -117,18 +112,6 @@ use crate::domains::visits::VisitService;
 use crate::state::{AppState, AppStateConfig};
 use crate::sync::{SyncEngine, SyncEngineHandle};
 
-/// Standalone-mode embedded flag (PRD §5.3 / phase-01 §7.35).
-fn embedded_mode_enabled() -> bool {
-    embedded_mode_enabled_from_value(std::env::var("IDC_EMBEDDED_MODE").ok().as_deref())
-}
-
-/// Pure helper for `embedded_mode_enabled` — no env-var reads so it is unit-testable
-/// without process-global state (Rust tests run multi-threaded; setting
-/// `IDC_EMBEDDED_MODE` from a `#[test]` would race against parallel tests).
-fn embedded_mode_enabled_from_value(value: Option<&str>) -> bool {
-    matches!(value, Some("1"))
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -138,31 +121,7 @@ pub fn run() {
         )
         .init();
 
-    if embedded::is_embedded_mode() {
-        if !embedded_mode_enabled() {
-            tracing::info!("embedded_mode=disabled (IDC_EMBEDDED_MODE != 1)");
-        }
-        tracing::info!("startup: embedded mode detected (TORCH_EMBEDDED_MODE=true)");
-        match embedded::EmbeddedConfig::from_env() {
-            Ok(embedded_config) => {
-                let rt = tokio::runtime::Runtime::new()
-                    .expect("Failed to create tokio runtime for embedded mode");
-                if let Err(e) = rt.block_on(embedded::run_embedded(embedded_config)) {
-                    tracing::error!(error = %e, "embedded mode failed");
-                    std::process::exit(1);
-                }
-                return;
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "invalid embedded mode configuration");
-                tracing::error!("required env vars: TORCH_IPC_PORT, TORCH_RUN_ID");
-                std::process::exit(1);
-            }
-        }
-    }
-
-    tracing::info!("embedded_mode=disabled");
-    tracing::info!("startup: running in standalone mode");
+    tracing::info!("startup: running");
 
     let cancel = CancellationToken::new();
 
@@ -203,6 +162,7 @@ pub fn run() {
             auth_bootstrap_jwt_key,
             auth_jwt_pinned_sha256,
             auth_current_user,
+            auth_has_any_user,
             auth_lock,
             auth_unlock,
             auth_is_locked,
@@ -332,11 +292,17 @@ async fn bootstrap(
     let device_id = resolve_device_id(&pool).await?;
     let app_version = app.package_info().version.to_string();
     let entity_id_tenant = "unscoped".to_string();
-    let initial_server_url = std::env::var("IDC_SYNC_SERVER_URL").ok();
 
     let outbox_repo: Arc<dyn OutboxRepo> = Arc::new(SqliteOutboxRepo::new(pool.clone()));
     let audit_repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
     let state_repo: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+
+    // Env var wins for dev / CI overrides; otherwise restore the value the
+    // user saved during first-launch setup (migration 010).
+    let initial_server_url = match std::env::var("IDC_SYNC_SERVER_URL").ok() {
+        Some(url) if !url.is_empty() => Some(url),
+        _ => state_repo.get_server_url().await?,
+    };
     let metrics_repo: Arc<dyn MetricsRepo> = Arc::new(SqliteMetricsRepo::new(pool.clone()));
     let user_repo: Arc<dyn UserRepo> = Arc::new(SqliteUserRepo::new(pool.clone()));
     let setting_repo: Arc<dyn SettingRepo> = Arc::new(SqliteSettingRepo::new(pool.clone()));
@@ -552,37 +518,3 @@ async fn resolve_device_id(
     Ok(device_id)
 }
 
-#[cfg(test)]
-mod embedded_mode_flag_tests {
-    use super::embedded_mode_enabled_from_value;
-
-    #[test]
-    fn none_returns_false() {
-        assert!(!embedded_mode_enabled_from_value(None));
-    }
-
-    #[test]
-    fn empty_string_returns_false() {
-        assert!(!embedded_mode_enabled_from_value(Some("")));
-    }
-
-    #[test]
-    fn zero_returns_false() {
-        assert!(!embedded_mode_enabled_from_value(Some("0")));
-    }
-
-    #[test]
-    fn one_returns_true() {
-        assert!(embedded_mode_enabled_from_value(Some("1")));
-    }
-
-    #[test]
-    fn two_returns_false_strict_match() {
-        assert!(!embedded_mode_enabled_from_value(Some("2")));
-    }
-
-    #[test]
-    fn true_string_returns_false_strict_match() {
-        assert!(!embedded_mode_enabled_from_value(Some("true")));
-    }
-}

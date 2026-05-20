@@ -15,7 +15,9 @@ use crate::domains::settings::domain::value_objects::{is_required_key, SettingVa
 use crate::domains::sync::domain::entities::audit_entry::AuditCreateInput;
 use crate::domains::sync::domain::entities::{AuditEntry, OutboxOp};
 use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo};
-use crate::domains::sync::domain::services::{compute_delta, AuditWriter, BusinessWrite};
+use crate::domains::sync::domain::services::{
+    compute_delta, encode_audit_payload, AuditWriter, BusinessWrite,
+};
 use crate::domains::sync::domain::value_objects::AuditAction;
 use crate::error::{AppError, AppResult};
 
@@ -183,7 +185,7 @@ impl SettingsService {
                 entity_id_tenant: entity_id.to_string(),
             });
             self.audit_repo.append(&mut tx, &audit).await?;
-            let audit_payload = rmp_serde::to_vec_named(&audit)?;
+            let audit_payload = encode_audit_payload(&audit)?;
             let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
             self.outbox_repo.enqueue(&mut tx, &audit_outbox).await?;
 

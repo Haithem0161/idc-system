@@ -8,7 +8,7 @@ paths:
 
 # Frontend Rules (React 19 + Vite + TypeScript)
 
-The frontend is React 19 with Vite 8, Tailwind v4, shadcn/ui, React Router v7, Zustand v5, TanStack React Query v5, react-i18next, and Zod v4. It runs in two modes: standalone Tauri webview, and embedded under Torch Business OS via the bundled HTTP server.
+The frontend is React 19 with Vite 8, Tailwind v4, shadcn/ui, React Router v7, Zustand v5, TanStack React Query v5, react-i18next, and Zod v4. It runs inside the standalone Tauri webview.
 
 ## Core Principles
 
@@ -85,8 +85,8 @@ A new screen lives in `pages/`; its data + business hooks live under `features/<
 
 ## Auth
 
-- `AuthProvider` ships in two modes: standalone (login screen + cached JWT) and embedded (poll `/api/auth` until token arrives).
-- Token storage: in-memory + Tauri secure storage (`@tauri-apps/plugin-stronghold` or app data dir behind a Rust command). Never `localStorage`/`sessionStorage` for tokens in standalone mode.
+- `AuthProvider` handles the login screen and cached JWT.
+- Token storage: in-memory + Tauri secure storage (`@tauri-apps/plugin-stronghold` or app data dir behind a Rust command). Never `localStorage`/`sessionStorage` for tokens.
 - Axios interceptor attaches `Authorization: Bearer <token>` and refreshes on 401 by re-invoking the auth IPC command.
 
 ## i18n

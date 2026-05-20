@@ -86,6 +86,22 @@ impl SyncStateRepo for SqliteSyncStateRepo {
                 .await?;
         Ok(existing)
     }
+
+    async fn get_server_url(&self) -> AppResult<Option<String>> {
+        let row: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT server_url FROM sync_state WHERE id = 1")
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.and_then(|(url,)| url))
+    }
+
+    async fn put_server_url(&self, url: &str) -> AppResult<()> {
+        sqlx::query("UPDATE sync_state SET server_url = ? WHERE id = 1")
+            .bind(url)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
 }
 
 #[derive(sqlx::FromRow)]

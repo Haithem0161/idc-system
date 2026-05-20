@@ -281,7 +281,7 @@ let decoded: IpcMessage = rmp_serde::from_slice(&bytes).unwrap();
 
 ### Length-Prefixed Protocol
 
-Used for TCP IPC with Business OS:
+Used for TCP IPC:
 
 ```rust
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

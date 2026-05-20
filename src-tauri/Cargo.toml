@@ -1,8 +1,8 @@
 [package]
-name = "torch-app-template"
+name = "idc-system"
 version = "0.1.0"
-description = "Torch App Template - Desktop Application"
-authors = ["Torch Corp"]
+description = "IDC System - Desktop Application"
+authors = []
 license = ""
 repository = ""
 edition = "2021"
@@ -26,10 +26,6 @@ rmp-serde = "1"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
-
-# HTTP server (for embedded mode)
-axum = "0.8"
-tower-http = { version = "0.6", features = ["fs"] }
 
 # Logging
 log = "0.4"
