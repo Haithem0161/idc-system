@@ -9,7 +9,6 @@ import LockPage from "@/pages/auth/lock"
 import LoginPage from "@/pages/auth/login"
 import NoAccessPage from "@/pages/auth/no-access"
 import RootRedirect from "@/pages/index/redirect"
-import HomePage from "@/pages/home"
 import NotFoundPage from "@/pages/not-found"
 import UsersListPage from "@/pages/admin/users/list"
 import UserDetailPage from "@/pages/admin/users/detail"
@@ -59,7 +58,6 @@ export const router = createBrowserRouter([
         ),
         children: [
           { index: true, Component: RootRedirect },
-          { path: "home", Component: HomePage },
           {
             path: "admin",
             Component: AdminGate,

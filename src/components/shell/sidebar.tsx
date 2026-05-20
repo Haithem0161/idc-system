@@ -1,7 +1,6 @@
 import { NavLink, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 import {
-  Home,
   Users,
   Settings,
   ClipboardList,
@@ -51,7 +50,6 @@ export function Sidebar() {
     {
       key: "operations",
       items: [
-        { key: "home", to: "/home", icon: Home, enabled: true },
         {
           key: "reception",
           to: "/reception",
@@ -64,7 +62,6 @@ export function Sidebar() {
           icon: HardHat,
           enabled: role === "receptionist" || role === "superadmin",
         },
-        { key: "doctors", to: "/doctors", icon: Stethoscope, enabled: false },
         {
           key: "inventory",
           to: "/inventory",
@@ -124,7 +121,7 @@ export function Sidebar() {
 
       <div className="mt-3 flex-1 overflow-y-auto px-3 pb-4">
         {groups.map((group) => {
-          const visible = group.items.filter((it) => it.enabled || group.key !== "admin" || role === "superadmin")
+          const visible = group.items.filter((it) => it.enabled)
           if (visible.length === 0) return null
           return (
             <div key={group.key} className="mb-5 last:mb-0">
@@ -134,27 +131,15 @@ export function Sidebar() {
               <ul className="space-y-0.5">
                 {visible.map((item) => (
                   <li key={item.key}>
-                    {item.enabled ? (
-                      <NavLink
-                        to={item.to}
-                        end={item.to === "/home"}
-                        className={({ isActive }) =>
-                          cn("nav-item", isActive && "is-active")
-                        }
-                      >
-                        <item.icon className="h-[15px] w-[15px]" strokeWidth={1.8} />
-                        <span>{t(`nav.${item.key}`, { defaultValue: item.key })}</span>
-                      </NavLink>
-                    ) : (
-                      <span
-                        aria-disabled="true"
-                        className="nav-item is-disabled"
-                        title={t("nav.coming_soon", { defaultValue: "Coming soon" })}
-                      >
-                        <item.icon className="h-[15px] w-[15px]" strokeWidth={1.8} />
-                        <span>{t(`nav.${item.key}`, { defaultValue: item.key })}</span>
-                      </span>
-                    )}
+                    <NavLink
+                      to={item.to}
+                      className={({ isActive }) =>
+                        cn("nav-item", isActive && "is-active")
+                      }
+                    >
+                      <item.icon className="h-[15px] w-[15px]" strokeWidth={1.8} />
+                      <span>{t(`nav.${item.key}`, { defaultValue: item.key })}</span>
+                    </NavLink>
                   </li>
                 ))}
               </ul>

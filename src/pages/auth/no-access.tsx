@@ -34,7 +34,7 @@ export default function NoAccessPage () {
           {t("auth.sign_out", { defaultValue: "Sign out" })}
         </button>
         <Link to="/" className="btn btn-ink btn-sm">
-          {t("nav.home", { defaultValue: "Home" })}
+          {t("common.back", { defaultValue: "Back" })}
         </Link>
       </div>
     </div>

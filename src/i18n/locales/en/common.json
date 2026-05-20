@@ -19,7 +19,6 @@
   },
   "nav": {
     "aria_label": "Primary",
-    "home": "Home",
     "reception": "Reception",
     "shifts": "Shifts",
     "doctors": "Doctors",
@@ -30,60 +29,10 @@
     "users": "Users",
     "audit": "Audit log",
     "settings": "Settings",
-    "coming_soon": "Coming soon",
     "group": {
       "operations": "Operations",
       "records": "Records",
       "admin": "Administration"
-    }
-  },
-  "home": {
-    "greeting": "Good morning, {{name}}.",
-    "subtitle": "Today at a glance.",
-    "sync": {
-      "synced": "Synced",
-      "syncing": "Syncing {{count}} change",
-      "syncing_other": "Syncing {{count}} changes",
-      "pending": "{{count}} pending change",
-      "pending_other": "{{count}} pending changes",
-      "offline": "Offline",
-      "error": "Sync error"
-    },
-    "day": {
-      "open": "Day open · {{count}} shift",
-      "open_other": "Day open · {{count}} shifts",
-      "open_simple": "Day open",
-      "closed": "Day closed",
-      "no_shifts": "No open shifts"
-    },
-    "tile": {
-      "visits_today": "Visits today",
-      "open_shifts": "Open shifts",
-      "active_check_types": "Active check types"
-    },
-    "kpi": {
-      "revenue": "Revenue today",
-      "doctor_cuts": "Doctor cuts",
-      "operator_cuts": "Operator cuts",
-      "inventory_value": "Inventory value",
-      "net": "Net today"
-    },
-    "panel": {
-      "checks_today": "Today's checks",
-      "go_to_reception": "Go to reception",
-      "no_checks": "No active check types yet.",
-      "top_doctors_today": "Top doctors today",
-      "see_all": "See all",
-      "no_top_doctors": "No doctor earnings today.",
-      "visits_short": "v"
-    },
-    "action": {
-      "new_visit": "New visit",
-      "open_shifts": "Open a shift",
-      "admin": "Admin",
-      "daily_close": "Open daily close",
-      "full_dashboard": "Full dashboard",
-      "disabled_no_shift": "Open an operator shift first."
     }
   },
   "not_found": {

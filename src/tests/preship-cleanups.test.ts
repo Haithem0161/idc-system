@@ -98,25 +98,23 @@ describe("phase-09 §1.2 -- setup.subtitle resolves in both locales", () => {
   })
 })
 
-describe("phase-09 §1.2 -- sidebar 'Coming soon' state consistent", () => {
-  it("disabled nav item carries aria-disabled='true' for accessibility", () => {
-    // Either the disabled item is rendered (must have proper a11y) or it
-    // is removed entirely. Phase-09 §1.2 left the decision open; the
-    // current implementation renders it disabled, so pin that contract.
-    expect(sidebarSource).toMatch(/aria-disabled="true"/)
+describe("sidebar drops disabled nav items entirely", () => {
+  // Phase-09 §1.2 originally rendered disabled nav items as a "Coming
+  // soon" greyed span. That contract was reversed: the sidebar now
+  // filters out anything the user cannot reach (role-gated or not yet
+  // built), so the UI never shows a teaser the user can't act on.
+
+  it("renderer filters items where enabled is false", () => {
+    expect(sidebarSource).toMatch(/group\.items\.filter\(\(it\) => it\.enabled\)/)
   })
 
-  it("disabled nav item uses the nav.coming_soon i18n key, not a hardcoded English string", () => {
-    expect(sidebarSource).toMatch(/t\("nav\.coming_soon"/)
+  it("no longer renders the aria-disabled stub branch", () => {
+    expect(sidebarSource).not.toMatch(/aria-disabled="true"/)
+    expect(sidebarSource).not.toMatch(/is-disabled/)
   })
 
-  it("nav.coming_soon key is present in both en and ar locales", () => {
-    expect(dig(enCommon, "nav.coming_soon")).toBe("Coming soon")
-    expect(dig(arCommon, "nav.coming_soon")).toMatch(/[؀-ۿ]/)
-  })
-
-  it("disabled nav item carries the is-disabled CSS class for visual consistency", () => {
-    expect(sidebarSource).toMatch(/is-disabled/)
+  it("no longer references the nav.coming_soon i18n key", () => {
+    expect(sidebarSource).not.toMatch(/nav\.coming_soon/)
   })
 })
 
@@ -131,7 +129,6 @@ describe("phase-09 §2.4 -- locale-key parity (no untranslated leftovers)", () =
     [enAdmin, arAdmin, "admin.inventory.consumption_subtype_picker"],
     [enAdmin, arAdmin, "admin.inventory.consumption_dye_unsupported"],
     [enCommon, arCommon, "setup.subtitle"],
-    [enCommon, arCommon, "nav.coming_soon"],
   ] as const
 
   it.each(required)(

@@ -15,7 +15,7 @@ export default function NotFoundPage() {
         <p className="text-[14px] text-ink-3">{t("not_found.body", { defaultValue: "We could not find that page." })}</p>
       </div>
       <Link to="/" className="btn btn-ink btn-sm">
-        {t("nav.home", { defaultValue: "Home" })}
+        {t("common.back", { defaultValue: "Back" })}
       </Link>
     </div>
   )
