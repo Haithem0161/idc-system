@@ -19,7 +19,6 @@
       "new_visit": "New visit",
       "filters": {
         "all": "All",
-        "draft": "Draft",
         "locked": "Locked",
         "voided": "Voided"
       },
@@ -42,7 +41,7 @@
     "new_visit": {
       "title": "New visit",
       "subtitle": "Capture patient and pricing.",
-      "back_to_workspace": "Back to workspace",
+      "no_tab": "No visit selected. Open a new tab to start.",
       "patient": "Patient",
       "patient_placeholder": "Type to search or add a new patient",
       "patient_create_hint": "Press Enter to add as a new patient.",
@@ -52,25 +51,40 @@
       "doctor_placeholder": "Leave empty for house",
       "house": "House",
       "dye": "Dye",
+      "dye_unsupported": "Dye is not supported for this check.",
       "report": "Report",
+      "report_unsupported": "Report is not supported for this check.",
       "total_label": "Running total",
-      "save_draft": "Save draft",
-      "discard": "Discard",
-      "lock_and_print": "Lock & print",
+      "finish": "Finish",
+      "autosave": {
+        "saving": "Saving…",
+        "saved": "All changes saved",
+        "pending": "Pending save",
+        "error": "Auto-save failed"
+      },
       "operator_picker": {
         "title": "Pick operator",
         "subtitle": "Only operators on shift with matching specialty.",
         "no_qualified": "No qualified operator on shift. Open the shifts page to clock one in.",
-        "confirm": "Lock visit"
+        "confirm": "Finish visit"
       },
       "errors": {
         "patient_required": "Patient is required.",
         "lock_failed": "Lock failed.",
-        "discarded": "Visit discarded.",
         "locked": "Visit locked. Receipt rendered.",
         "void_too_short": "Reason must be at least 5 characters."
-      },
-      "saved": "Draft saved."
+      }
+    },
+    "tabs": {
+      "new_visit": "New visit",
+      "untitled": "Untitled visit",
+      "close": "Close tab",
+      "discard_confirm": "Discard this visit? Any patient info you typed will be lost.",
+      "check_type_picker_title": "Start a new visit",
+      "check_type_picker_subtitle": "Pick a check type to begin.",
+      "cap_reached": "You already have the maximum number of open tabs. Close one first.",
+      "restored_one": "{{count}} tab restored.",
+      "restored_other": "{{count}} tabs restored."
     },
     "visit_detail": {
       "title": "Visit",

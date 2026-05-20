@@ -19,7 +19,6 @@
       "new_visit": "زيارة جديدة",
       "filters": {
         "all": "الكل",
-        "draft": "مسودة",
         "locked": "مقفلة",
         "voided": "ملغاة"
       },
@@ -42,7 +41,7 @@
     "new_visit": {
       "title": "زيارة جديدة",
       "subtitle": "أدخل بيانات المريض والتسعير.",
-      "back_to_workspace": "عودة للمساحة",
+      "no_tab": "لا توجد زيارة محددة. افتح علامة تبويب جديدة للبدء.",
       "patient": "المريض",
       "patient_placeholder": "اكتب للبحث أو إضافة مريض جديد",
       "patient_create_hint": "اضغط Enter لإضافة كمريض جديد.",
@@ -52,25 +51,40 @@
       "doctor_placeholder": "اتركه فارغاً للبيت",
       "house": "البيت",
       "dye": "صبغة",
+      "dye_unsupported": "الصبغة غير مدعومة لهذا الفحص.",
       "report": "تقرير",
+      "report_unsupported": "التقرير غير مدعوم لهذا الفحص.",
       "total_label": "الإجمالي الحالي",
-      "save_draft": "حفظ المسودة",
-      "discard": "تجاهل",
-      "lock_and_print": "قفل وطباعة",
+      "finish": "إنهاء",
+      "autosave": {
+        "saving": "جارٍ الحفظ…",
+        "saved": "تم حفظ كل التغييرات",
+        "pending": "بانتظار الحفظ",
+        "error": "فشل الحفظ التلقائي"
+      },
       "operator_picker": {
         "title": "اختر مشغلاً",
         "subtitle": "فقط المشغلون في وردية والمختصون بهذا الفحص.",
         "no_qualified": "لا يوجد مشغل مؤهل في وردية. سجّل دخول مشغل من صفحة الورديات.",
-        "confirm": "قفل الزيارة"
+        "confirm": "إنهاء الزيارة"
       },
       "errors": {
         "patient_required": "المريض مطلوب.",
         "lock_failed": "فشل القفل.",
-        "discarded": "تم تجاهل الزيارة.",
         "locked": "تم قفل الزيارة. تم إصدار الإيصال.",
         "void_too_short": "السبب يجب أن يكون 5 أحرف على الأقل."
-      },
-      "saved": "تم حفظ المسودة."
+      }
+    },
+    "tabs": {
+      "new_visit": "زيارة جديدة",
+      "untitled": "زيارة بدون عنوان",
+      "close": "إغلاق التبويب",
+      "discard_confirm": "تجاهل هذه الزيارة؟ ستفقد أي بيانات أدخلتها.",
+      "check_type_picker_title": "بدء زيارة جديدة",
+      "check_type_picker_subtitle": "اختر نوع الفحص للبدء.",
+      "cap_reached": "وصلت إلى الحد الأقصى من التبويبات المفتوحة. أغلق إحداها أولاً.",
+      "restored_one": "تمت استعادة {{count}} تبويب.",
+      "restored_other": "تمت استعادة {{count}} تبويبات."
     },
     "visit_detail": {
       "title": "الزيارة",

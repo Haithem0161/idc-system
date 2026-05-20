@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { invoke, isTauri } from "@/lib/ipc"
 import type { AuthLoginResult, UserAdminRecord, UserRoleLiteral } from "@/lib/ipc"
 import { useAuthStore } from "@/stores/auth-store"
+import { useVisitTabsStore } from "@/stores/visit-tabs-store"
 
 export const authKeys = {
   current: ["auth", "current"] as const,
@@ -43,7 +44,12 @@ export function useLogout () {
     mutationFn: async () => {
       await invoke("auth_logout")
     },
-    onSuccess: () => setAnonymous(),
+    onSuccess: () => {
+      // Wipe in-progress tabs so the next sign-in (possibly a different
+      // receptionist on the same workstation) doesn't inherit them.
+      useVisitTabsStore.getState().clearAll()
+      setAnonymous()
+    },
   })
 }
 

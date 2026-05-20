@@ -24,8 +24,9 @@ import InventoryItemDetailPage from "@/pages/admin/inventory/detail"
 import ShiftsPage from "@/pages/reception/shifts"
 import ChecksGridPage from "@/pages/reception/checks-grid"
 import CheckWorkspacePage from "@/pages/reception/check-workspace"
-import NewVisitPage from "@/pages/reception/new-visit"
+import NewVisitTabbedPage from "@/pages/reception/new-visit-tabbed"
 import VisitDetailPage from "@/pages/reception/visit-detail"
+import { ReceptionShell } from "@/components/reception/reception-shell"
 import InventoryListPage from "@/pages/inventory/list"
 import InventoryItemDetailOpsPage from "@/pages/inventory/detail"
 import InventoryAdjustPage from "@/pages/inventory/adjust"
@@ -79,14 +80,14 @@ export const router = createBrowserRouter([
             path: "reception",
             element: (
               <RequireRole roles={["receptionist", "superadmin"]}>
-                <Outlet />
+                <ReceptionShell />
               </RequireRole>
             ),
             children: [
               { index: true, Component: ChecksGridPage },
               { path: "shifts", Component: ShiftsPage },
+              { path: "new", Component: NewVisitTabbedPage },
               { path: "checks/:slug", Component: CheckWorkspacePage },
-              { path: "checks/:slug/new", Component: NewVisitPage },
               { path: "visits/:id", Component: VisitDetailPage },
             ],
           },

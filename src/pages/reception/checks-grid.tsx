@@ -1,23 +1,30 @@
-import { Link } from "react-router"
+import { Link, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 
 import { AdminHeader, ErrorBanner } from "@/components/admin/admin-panel"
 import { useChecksGrid } from "@/features/visits/queries"
-
-function slugify (s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9؀-ۿ]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-}
+import { useVisitTabsStore, VISIT_TAB_CAP } from "@/stores/visit-tabs-store"
 
 export default function ChecksGridPage () {
   const { t, i18n } = useTranslation(["reception", "common"])
+  const navigate = useNavigate()
   const { data: cards, error } = useChecksGrid()
   const lang = i18n.language
 
+  const openTab = useVisitTabsStore((s) => s.openTab)
+  const tabsCount = useVisitTabsStore((s) => s.tabs.length)
+
+  function startVisit (checkTypeId: string) {
+    if (tabsCount >= VISIT_TAB_CAP) {
+      window.alert(t("reception.tabs.cap_reached"))
+      return
+    }
+    openTab(checkTypeId)
+    navigate("/reception/new")
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-9 pb-12 pt-6">
       <AdminHeader
         eyebrow={t("reception.eyebrow")}
         title={t("reception.checks_grid.title")}
@@ -31,15 +38,14 @@ export default function ChecksGridPage () {
       <ErrorBanner message={error ? String(error.message ?? error) : null} />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {(cards ?? []).map((card) => {
-          const slug = card.check_type_id
           const localized =
             (lang === "en" ? card.name_en : card.name_ar) ?? card.name_ar
-          void slugify
           return (
-            <Link
+            <button
               key={card.check_type_id}
-              to={`/reception/checks/${slug}`}
-              className="panel block transition hover:-translate-y-px hover:shadow-[0_4px_12px_rgba(10,18,48,0.04)]"
+              type="button"
+              onClick={() => startVisit(card.check_type_id)}
+              className="panel block text-start transition hover:-translate-y-px hover:shadow-[0_4px_12px_rgba(10,18,48,0.04)]"
             >
               <div className="panel-head">
                 <span className="panel-title">{localized}</span>
@@ -68,8 +74,15 @@ export default function ChecksGridPage () {
                     </span>
                   ) : null}
                 </div>
+                <Link
+                  to={`/reception/checks/${card.check_type_id}`}
+                  className="mt-1 inline-block text-[11px] font-medium text-ink-3 hover:text-ink"
+                  onClick={(ev) => ev.stopPropagation()}
+                >
+                  {t("reception.checks_grid.open_workspace")}
+                </Link>
               </div>
-            </Link>
+            </button>
           )
         })}
         {(cards ?? []).length === 0 && !error ? (

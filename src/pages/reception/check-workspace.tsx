@@ -7,11 +7,14 @@ import {
   useChecksGrid,
   useVisitsTodayByCheck,
 } from "@/features/visits/queries"
+import { useVisitTabsStore, VISIT_TAB_CAP } from "@/stores/visit-tabs-store"
 import type { VisitStatusLiteral } from "@/lib/schemas/visit"
 
+// "draft" is intentionally absent: drafts are now tab-shaped and live in the
+// reception tab strip, not as a workspace status. Legacy draft rows still
+// surface under "all" so they remain triagable until they're voided / locked.
 const FILTER_KEYS: Array<{ key: "all" | VisitStatusLiteral; label: string }> = [
   { key: "all", label: "reception.workspace.filters.all" },
-  { key: "draft", label: "reception.workspace.filters.draft" },
   { key: "locked", label: "reception.workspace.filters.locked" },
   { key: "voided", label: "reception.workspace.filters.voided" },
 ]
@@ -40,6 +43,19 @@ export default function CheckWorkspacePage () {
     filter === "all" ? true : v.status === filter
   )
 
+  const openTab = useVisitTabsStore((s) => s.openTab)
+  const tabsCount = useVisitTabsStore((s) => s.tabs.length)
+
+  function handleNewVisit () {
+    if (!checkTypeId) return
+    if (tabsCount >= VISIT_TAB_CAP) {
+      window.alert(t("reception.tabs.cap_reached"))
+      return
+    }
+    openTab(checkTypeId)
+    navigate("/reception/new")
+  }
+
   return (
     <div className="space-y-6">
       <Link to="/reception" className="text-[11px] uppercase tracking-[0.1em] text-ink-3 hover:text-ink">
@@ -53,9 +69,7 @@ export default function CheckWorkspacePage () {
           <button
             type="button"
             className="btn btn-primary"
-            onClick={() =>
-              navigate(`/reception/checks/${slug}/new`)
-            }
+            onClick={handleNewVisit}
             disabled={!checkTypeId}
           >
             {t("reception.workspace.new_visit")}
