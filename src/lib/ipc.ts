@@ -300,6 +300,7 @@ export type CommandMap = {
     args: {
       args: {
         visit_id: string
+        patient_id?: string
         check_subtype_id?: string | null
         doctor_id?: string | null
         dye?: boolean

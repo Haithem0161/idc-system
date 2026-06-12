@@ -111,6 +111,11 @@ export default function NewVisitTabbedPage () {
       } else {
         await visitUpdate.mutateAsync({
           visit_id: tab.draftVisitId,
+          // Carry the committed patient so a corrected name re-attributes the
+          // existing draft. Only sent once a patient is committed (non-null);
+          // while the receptionist is still typing, patientId is null and the
+          // draft keeps its current patient until a new one is committed.
+          patient_id: tab.form.patientId ?? undefined,
           check_subtype_id: tab.form.subtypeId,
           doctor_id: tab.form.doctorId,
           dye: checkType?.dye_supported ? tab.form.dye : false,

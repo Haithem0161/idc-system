@@ -784,6 +784,7 @@ async fn update_draft_rejected_on_locked_visit() {
             UserRole::Receptionist,
             app_lib::domains::visits::service::UpdateDraftInput {
                 visit_id,
+                patient_id: None,
                 check_subtype_id: None,
                 doctor_id: None,
                 dye: Some(true),

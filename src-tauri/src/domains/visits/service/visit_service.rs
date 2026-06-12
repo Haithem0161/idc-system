@@ -65,6 +65,10 @@ pub struct CreateDraftInput {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct UpdateDraftInput {
     pub visit_id: Uuid,
+    /// `Some(id)` reassigns the draft to a different patient (e.g. the
+    /// receptionist corrected the name after the first autosave). `None`
+    /// leaves the patient unchanged.
+    pub patient_id: Option<Uuid>,
     pub check_subtype_id: Option<Option<Uuid>>,
     pub doctor_id: Option<Option<Uuid>>,
     pub dye: Option<bool>,
@@ -373,7 +377,16 @@ impl VisitService {
         Self::require_role(actor_role, &[UserRole::Receptionist, UserRole::Superadmin])?;
         let current = self.load_visit(input.visit_id).await?;
         let entity_id = current.entity_id.clone();
+        // Reassigning the patient is only meaningful while the visit is still a
+        // draft, and the target patient must actually exist (the frontend is
+        // untrusted). `edit_draft` already rejects non-draft visits.
+        if let Some(new_patient_id) = input.patient_id {
+            if self.patients.get_by_id(new_patient_id).await?.is_none() {
+                return Err(AppError::NotFound(format!("patient {new_patient_id}")));
+            }
+        }
         let updated = current.clone().edit_draft(VisitDraftPatch {
+            patient_id: input.patient_id,
             check_subtype_id: input.check_subtype_id,
             doctor_id: input.doctor_id,
             dye: input.dye,

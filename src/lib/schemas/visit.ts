@@ -15,6 +15,8 @@ export type VisitCreateDraftInput = z.infer<typeof VisitCreateDraftSchema>
 
 export const VisitUpdateDraftSchema = z.object({
   visit_id: z.string().uuid(),
+  // Reassign the draft to a corrected patient. Omitted = unchanged.
+  patient_id: z.string().uuid().optional(),
   check_subtype_id: z.string().uuid().nullable().optional(),
   doctor_id: z.string().uuid().nullable().optional(),
   dye: z.boolean().optional(),

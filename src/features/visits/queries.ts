@@ -121,6 +121,7 @@ export function useVisitUpdateDraft () {
       invoke("visits_update_draft", {
         args: {
           visit_id: input.visit_id,
+          patient_id: input.patient_id,
           check_subtype_id: input.check_subtype_id,
           doctor_id: input.doctor_id,
           dye: input.dye,

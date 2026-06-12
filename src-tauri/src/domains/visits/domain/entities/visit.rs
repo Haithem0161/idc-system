@@ -105,6 +105,9 @@ pub struct VisitCreateDraftInput {
 
 #[derive(Debug, Clone, Default)]
 pub struct VisitDraftPatch {
+    /// `Some(id)` reassigns the draft's patient (legal only in Draft state).
+    /// `None` leaves the patient unchanged.
+    pub patient_id: Option<Uuid>,
     pub check_subtype_id: Option<Option<Uuid>>,
     pub doctor_id: Option<Option<Uuid>>,
     pub dye: Option<bool>,
@@ -162,6 +165,9 @@ impl Visit {
         Self::assert_transition(self.status, VisitStatus::Draft)?;
         if self.deleted_at.is_some() {
             return Err(AppError::Validation("visit is deleted".into()));
+        }
+        if let Some(patient_id) = patch.patient_id {
+            self.patient_id = patient_id;
         }
         if let Some(sub) = patch.check_subtype_id {
             self.check_subtype_id = sub;
@@ -379,6 +385,34 @@ mod tests {
         assert!(edited.dye);
         assert_eq!(edited.version, v.version + 1);
         assert!(edited.updated_at >= v.updated_at);
+    }
+
+    #[test]
+    fn edit_draft_reassigns_patient_and_leaves_it_unchanged_when_absent() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let original_patient = v.patient_id;
+        let new_patient = Uuid::now_v7();
+        assert_ne!(original_patient, new_patient);
+
+        // Reassign the patient.
+        let moved = v
+            .clone()
+            .edit_draft(VisitDraftPatch {
+                patient_id: Some(new_patient),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(moved.patient_id, new_patient);
+
+        // An unrelated edit (no patient_id) must NOT touch the patient.
+        let kept = moved
+            .clone()
+            .edit_draft(VisitDraftPatch {
+                dye: Some(true),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(kept.patient_id, new_patient);
     }
 
     #[test]

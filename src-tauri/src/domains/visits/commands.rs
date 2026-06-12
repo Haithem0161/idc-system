@@ -214,6 +214,8 @@ pub async fn visits_create_draft(
 pub struct VisitUpdateDraftArgs {
     pub visit_id: String,
     #[serde(default)]
+    pub patient_id: Option<String>,
+    #[serde(default)]
     pub check_subtype_id: Option<Option<String>>,
     #[serde(default)]
     pub doctor_id: Option<Option<String>>,
@@ -245,6 +247,7 @@ pub async fn visits_update_draft(
             role,
             UpdateDraftInput {
                 visit_id: Uuid::parse_str(&args.visit_id)?,
+                patient_id: args.patient_id.map(|s| Uuid::parse_str(&s)).transpose()?,
                 check_subtype_id: parse_uuid_set_opt(args.check_subtype_id)?,
                 doctor_id: parse_uuid_set_opt(args.doctor_id)?,
                 dye: args.dye,
