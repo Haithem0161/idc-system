@@ -109,9 +109,11 @@ pub async fn settings_update_impl(
         .update(actor_id, role, &ctx.entity_id, &args.key, args.value)
         .await?;
 
-    // Cache the new value for in-memory consumers.
+    // Cache the new value for in-memory consumers. Store the bare scalar
+    // (not the tagged-enum serialization) so money/receipt reads via
+    // `get_setting(..).as_i64()/.as_str()/.as_bool()` resolve correctly.
     state
-        .set_setting(updated.key.clone(), serde_json::to_value(&updated.value)?)
+        .set_setting(updated.key.clone(), updated.value.to_cache_json())
         .await;
 
     Ok(updated.into())
@@ -222,10 +224,11 @@ pub async fn settings_update_batch_impl(
         .update_batch(actor_id, role, &ctx.entity_id, entries)
         .await?;
 
-    // Refresh the in-memory settings_cache for every key that landed.
+    // Refresh the in-memory settings_cache for every key that landed. Store
+    // the bare scalar so money/receipt reads resolve (see to_cache_json).
     for setting in &updated {
         state
-            .set_setting(setting.key.clone(), serde_json::to_value(&setting.value)?)
+            .set_setting(setting.key.clone(), setting.value.to_cache_json())
             .await;
     }
 

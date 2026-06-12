@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use tauri::Manager;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::db::migrations;
@@ -489,8 +489,41 @@ async fn bootstrap(
     });
     app.manage(state);
 
+    // Warm the in-memory settings cache from SQLite. Without this, every
+    // consumer that reads through `state.get_setting(...)` (notably visit-lock
+    // money snapshots: dye/report cost and internal_doctor_pct) silently sees
+    // 0 until a superadmin re-saves a setting in this session, permanently
+    // corrupting locked-visit financials after each restart.
+    warm_settings_cache(app, &entity_id_tenant).await;
+
     info!("bootstrap complete");
     Ok(())
+}
+
+/// Populate `AppState.settings_cache` from the persisted `settings` rows so
+/// money/receipt reads resolve real values immediately at startup.
+async fn warm_settings_cache(app: &tauri::AppHandle, entity_id: &str) {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let Some(svc) = state.settings_service() else {
+        warn!("settings service unavailable; cache not warmed");
+        return;
+    };
+    match svc.list(entity_id).await {
+        Ok(settings) => {
+            let mut count = 0usize;
+            for setting in &settings {
+                // Store the bare scalar (not the tagged-enum serialization) so
+                // `get_setting(..).as_i64()/.as_str()/.as_bool()` resolve.
+                state
+                    .set_setting(setting.key.clone(), setting.value.to_cache_json())
+                    .await;
+                count += 1;
+            }
+            info!(count, "settings cache warmed");
+        }
+        Err(e) => warn!(error = %e, "failed to warm settings cache"),
+    }
 }
 
 fn resolve_db_path(

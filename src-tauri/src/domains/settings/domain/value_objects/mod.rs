@@ -31,6 +31,20 @@ impl SettingValue {
         }
     }
 
+    /// Bare JSON scalar for the in-memory settings cache. NOTE: the derived
+    /// `Serialize` is a tagged object (`{"valueType":..,"value":..}`), whose
+    /// `.as_i64()/.as_str()/.as_bool()` are all `None`. Cache consumers
+    /// (`money_settings`, `receipt_options`) expect a bare scalar, so the
+    /// cache must store THIS, not `serde_json::to_value(self)`.
+    pub fn to_cache_json(&self) -> serde_json::Value {
+        match self {
+            Self::Int(n) => serde_json::json!(n),
+            Self::Decimal(s) => serde_json::json!(s),
+            Self::Text(s) => serde_json::json!(s),
+            Self::Bool(b) => serde_json::json!(b),
+        }
+    }
+
     pub fn parse(value_type: &str, raw: &str) -> Option<Self> {
         match value_type {
             "int" => raw.parse::<i64>().ok().map(Self::Int),
@@ -153,5 +167,36 @@ mod tests {
     fn is_required_key_rejects_unknown_key() {
         assert!(!is_required_key("horizon_pet_mode"));
         assert!(!is_required_key(""));
+    }
+
+    #[test]
+    fn to_cache_json_yields_bare_scalars_readable_by_cache_consumers() {
+        // money_settings/receipt_options read get_setting(..).as_i64()/.as_str()
+        // /.as_bool(); the cache must hold bare scalars, not the tagged enum.
+        assert_eq!(
+            SettingValue::Int(10_000).to_cache_json().as_i64(),
+            Some(10_000)
+        );
+        assert_eq!(
+            SettingValue::Text("IDC".into()).to_cache_json().as_str(),
+            Some("IDC")
+        );
+        assert_eq!(
+            SettingValue::Bool(true).to_cache_json().as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            SettingValue::Decimal("1.5".into()).to_cache_json().as_str(),
+            Some("1.5")
+        );
+    }
+
+    #[test]
+    fn derived_serialize_is_tagged_and_not_readable_as_scalar() {
+        // Documents WHY to_cache_json exists: the derived Serialize is tagged,
+        // so as_i64() on it is None -- storing it in the cache zeroes money.
+        let tagged = serde_json::to_value(SettingValue::Int(10_000)).unwrap();
+        assert!(tagged.is_object());
+        assert_eq!(tagged.as_i64(), None);
     }
 }

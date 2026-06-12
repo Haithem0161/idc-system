@@ -37,25 +37,23 @@ fn service(state: &AppState) -> AppResult<Arc<VisitService>> {
 }
 
 async fn money_settings(state: &AppState) -> AppResult<MoneySettings> {
-    let dye_cost = state
-        .get_setting("dye_cost_iqd")
-        .await
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-    let report_cost = state
-        .get_setting("report_cost_iqd")
-        .await
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-    let internal_pct = state
-        .get_setting("internal_doctor_pct")
-        .await
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
+    // These three keys are seeded by migration 002 and warmed into the cache at
+    // bootstrap. A missing key here means a broken DB or an unwarmed cache --
+    // fail loudly instead of locking a visit with a silently-zeroed money
+    // snapshot (which would permanently corrupt the immutable receipt).
+    async fn required_i64(state: &AppState, key: &str) -> AppResult<i64> {
+        state
+            .get_setting(key)
+            .await
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| {
+                AppError::Configuration(format!("required money setting `{key}` is not configured"))
+            })
+    }
     Ok(MoneySettings {
-        dye_cost_iqd: dye_cost,
-        report_cost_iqd: report_cost,
-        internal_doctor_pct: internal_pct,
+        dye_cost_iqd: required_i64(state, "dye_cost_iqd").await?,
+        report_cost_iqd: required_i64(state, "report_cost_iqd").await?,
+        internal_doctor_pct: required_i64(state, "internal_doctor_pct").await?,
     })
 }
 
