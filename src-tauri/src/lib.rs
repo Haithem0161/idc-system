@@ -517,4 +517,3 @@ async fn resolve_device_id(
     let device_id = repo.ensure_device_id(&candidate).await?;
     Ok(device_id)
 }
-

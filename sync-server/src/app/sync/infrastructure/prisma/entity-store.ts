@@ -50,11 +50,18 @@ export class PrismaEntityStore implements SyncEntityStore {
           : null
       },
       async () => {
+        // A pushed user update with an unchanged password omits password_hash
+        // (or sends null). NEVER coerce that to '' -- doing so would overwrite
+        // the stored argon2 hash and lock the user out. Only set passwordHash
+        // when the client actually carries a non-empty hash.
+        const incomingHash =
+          typeof row.password_hash === 'string' && row.password_hash.length > 0
+            ? row.password_hash
+            : null
         const data = {
           id: row.id,
           email: row.email,
           name: row.name,
-          passwordHash: row.password_hash ?? '',
           role: row.role,
           isActive: row.is_active,
           createdAt: new Date(row.updated_at),
@@ -66,8 +73,15 @@ export class PrismaEntityStore implements SyncEntityStore {
         }
         await this.prisma.user.upsert({
           where: { id: row.id },
-          create: data,
-          update: { ...data, createdAt: undefined },
+          // On create the column is NOT NULL, so a brand-new user with no hash
+          // gets ''; they must complete an online login to populate it.
+          create: { ...data, passwordHash: incomingHash ?? '' },
+          // On update, only touch passwordHash when one was actually sent.
+          update: {
+            ...data,
+            createdAt: undefined,
+            ...(incomingHash !== null ? { passwordHash: incomingHash } : {}),
+          },
         })
       }
     )

@@ -159,27 +159,88 @@ fn hash_password(pw: &str) -> R<String> {
 // ---- Compile-time data ------------------------------------------------------
 
 const PATIENT_NAMES: &[&str] = &[
-    "Ahmad Hussein", "Fatima Al-Rashid", "Mohammed Ibrahim", "Layla Khaled",
-    "Omar Faisal", "Zainab Hassan", "Hassan Ali", "Mariam Nazar",
-    "Yusuf Tahir", "Rana Saadi", "Ali Mahmoud", "Noor Karim",
-    "Tariq Adnan", "Salma Reda", "Karim Nuri", "Huda Sabri",
-    "Ibrahim Walid", "Aisha Mounir", "Sami Talib", "Dunya Hadi",
-    "Bilal Othman", "Reem Naji", "Jamal Khalil", "Lina Saif",
-    "Khaled Mansour", "Hala Mostafa", "Saad Rafiq", "Maha Yassin",
-    "Faris Atef", "Suhad Kazem", "Murad Hilal", "Yara Fouad",
-    "Adel Khaldoun", "Iman Rashed", "Walid Najib", "Sahar Tarek",
-    "Nidal Anwar", "Rasha Mustapha", "Basim Qassim", "Asma Fadel",
-    "Mazen Lutfi", "Salwa Akram", "Tahsin Mohsen", "Nadia Sami",
-    "Wissam Adib", "Lubna Habib", "Ghassan Murtada", "Sundus Wadii",
-    "Rami Salam", "Mona Talal", "Anas Faraj", "Wafa Naseer",
-    "Sirwan Idris", "Hadeel Aram", "Jaber Saleem", "Diala Munir",
-    "Kareem Maher", "Najwa Wajih", "Mounir Salim", "Abeer Khalid",
-    "Sabah Hatim", "Lamia Razzaq", "Imad Sharif", "Areej Wasim",
-    "Faisal Asad", "Banan Mahir", "Hussam Adnan", "Najat Walid",
-    "Riad Hashim", "Bushra Tareq", "Jihad Kamal", "Hayat Aziz",
-    "Saif Hatem", "Marwa Abu Bakr", "Bashar Jameel", "Hanaa Walid",
-    "Munir Abdullah", "Roula Abbas", "Issam Khairy", "Suad Tareq",
-    "Nizar Asaad", "Ghada Murad",
+    "Ahmad Hussein",
+    "Fatima Al-Rashid",
+    "Mohammed Ibrahim",
+    "Layla Khaled",
+    "Omar Faisal",
+    "Zainab Hassan",
+    "Hassan Ali",
+    "Mariam Nazar",
+    "Yusuf Tahir",
+    "Rana Saadi",
+    "Ali Mahmoud",
+    "Noor Karim",
+    "Tariq Adnan",
+    "Salma Reda",
+    "Karim Nuri",
+    "Huda Sabri",
+    "Ibrahim Walid",
+    "Aisha Mounir",
+    "Sami Talib",
+    "Dunya Hadi",
+    "Bilal Othman",
+    "Reem Naji",
+    "Jamal Khalil",
+    "Lina Saif",
+    "Khaled Mansour",
+    "Hala Mostafa",
+    "Saad Rafiq",
+    "Maha Yassin",
+    "Faris Atef",
+    "Suhad Kazem",
+    "Murad Hilal",
+    "Yara Fouad",
+    "Adel Khaldoun",
+    "Iman Rashed",
+    "Walid Najib",
+    "Sahar Tarek",
+    "Nidal Anwar",
+    "Rasha Mustapha",
+    "Basim Qassim",
+    "Asma Fadel",
+    "Mazen Lutfi",
+    "Salwa Akram",
+    "Tahsin Mohsen",
+    "Nadia Sami",
+    "Wissam Adib",
+    "Lubna Habib",
+    "Ghassan Murtada",
+    "Sundus Wadii",
+    "Rami Salam",
+    "Mona Talal",
+    "Anas Faraj",
+    "Wafa Naseer",
+    "Sirwan Idris",
+    "Hadeel Aram",
+    "Jaber Saleem",
+    "Diala Munir",
+    "Kareem Maher",
+    "Najwa Wajih",
+    "Mounir Salim",
+    "Abeer Khalid",
+    "Sabah Hatim",
+    "Lamia Razzaq",
+    "Imad Sharif",
+    "Areej Wasim",
+    "Faisal Asad",
+    "Banan Mahir",
+    "Hussam Adnan",
+    "Najat Walid",
+    "Riad Hashim",
+    "Bushra Tareq",
+    "Jihad Kamal",
+    "Hayat Aziz",
+    "Saif Hatem",
+    "Marwa Abu Bakr",
+    "Bashar Jameel",
+    "Hanaa Walid",
+    "Munir Abdullah",
+    "Roula Abbas",
+    "Issam Khairy",
+    "Suad Tareq",
+    "Nizar Asaad",
+    "Ghada Murad",
 ];
 
 fn personas() -> [Persona; 4] {
@@ -219,33 +280,57 @@ fn check_types() -> Vec<CheckType> {
     vec![
         CheckType {
             id: "01940000-0000-7000-c001-000000000001".into(),
-            name_ar: "أشعة مقطعية", name_en: "CT Scan",
-            has_subtypes: true, base_price_iqd: None, dye: true, report: true,
+            name_ar: "أشعة مقطعية",
+            name_en: "CT Scan",
+            has_subtypes: true,
+            base_price_iqd: None,
+            dye: true,
+            report: true,
         },
         CheckType {
             id: "01940000-0000-7000-c002-000000000001".into(),
-            name_ar: "رنين مغناطيسي", name_en: "MRI",
-            has_subtypes: true, base_price_iqd: None, dye: true, report: true,
+            name_ar: "رنين مغناطيسي",
+            name_en: "MRI",
+            has_subtypes: true,
+            base_price_iqd: None,
+            dye: true,
+            report: true,
         },
         CheckType {
             id: "01940000-0000-7000-c003-000000000001".into(),
-            name_ar: "سونار", name_en: "Ultrasound",
-            has_subtypes: true, base_price_iqd: None, dye: false, report: true,
+            name_ar: "سونار",
+            name_en: "Ultrasound",
+            has_subtypes: true,
+            base_price_iqd: None,
+            dye: false,
+            report: true,
         },
         CheckType {
             id: "01940000-0000-7000-c004-000000000001".into(),
-            name_ar: "أشعة سينية", name_en: "X-Ray",
-            has_subtypes: false, base_price_iqd: Some(25_000), dye: false, report: true,
+            name_ar: "أشعة سينية",
+            name_en: "X-Ray",
+            has_subtypes: false,
+            base_price_iqd: Some(25_000),
+            dye: false,
+            report: true,
         },
         CheckType {
             id: "01940000-0000-7000-c005-000000000001".into(),
-            name_ar: "كثافة العظام", name_en: "DEXA",
-            has_subtypes: false, base_price_iqd: Some(80_000), dye: false, report: true,
+            name_ar: "كثافة العظام",
+            name_en: "DEXA",
+            has_subtypes: false,
+            base_price_iqd: Some(80_000),
+            dye: false,
+            report: true,
         },
         CheckType {
             id: "01940000-0000-7000-c006-000000000001".into(),
-            name_ar: "تخطيط القلب", name_en: "ECG",
-            has_subtypes: false, base_price_iqd: Some(20_000), dye: false, report: false,
+            name_ar: "تخطيط القلب",
+            name_en: "ECG",
+            has_subtypes: false,
+            base_price_iqd: Some(20_000),
+            dye: false,
+            report: false,
         },
     ]
 }
@@ -264,7 +349,9 @@ fn subtypes(cts: &[CheckType]) -> Vec<Subtype> {
         out.push(Subtype {
             id: format!("01940000-0000-7000-d000-00000000010{i}"),
             check_type_id: ct(0),
-            name_ar: ar, name_en: en, price_iqd: *p,
+            name_ar: ar,
+            name_en: en,
+            price_iqd: *p,
         });
     }
     // MRI (idx 1)
@@ -277,7 +364,9 @@ fn subtypes(cts: &[CheckType]) -> Vec<Subtype> {
         out.push(Subtype {
             id: format!("01940000-0000-7000-d000-00000000020{i}"),
             check_type_id: ct(1),
-            name_ar: ar, name_en: en, price_iqd: *p,
+            name_ar: ar,
+            name_en: en,
+            price_iqd: *p,
         });
     }
     // US (idx 2)
@@ -291,7 +380,9 @@ fn subtypes(cts: &[CheckType]) -> Vec<Subtype> {
         out.push(Subtype {
             id: format!("01940000-0000-7000-d000-00000000030{i}"),
             check_type_id: ct(2),
-            name_ar: ar, name_en: en, price_iqd: *p,
+            name_ar: ar,
+            name_en: en,
+            price_iqd: *p,
         });
     }
     out
@@ -299,102 +390,261 @@ fn subtypes(cts: &[CheckType]) -> Vec<Subtype> {
 
 fn doctors() -> Vec<Doctor> {
     vec![
-        Doctor { id: "01940000-0000-7000-e001-000000000001".into(), name: "Dr. Ali Mahmoud",   specialty: "Radiology" },
-        Doctor { id: "01940000-0000-7000-e002-000000000001".into(), name: "Dr. Layla Hussein", specialty: "Cardiology" },
-        Doctor { id: "01940000-0000-7000-e003-000000000001".into(), name: "Dr. Omar Faisal",   specialty: "Orthopedics" },
-        Doctor { id: "01940000-0000-7000-e004-000000000001".into(), name: "Dr. Zainab Khalil", specialty: "Pediatrics" },
-        Doctor { id: "01940000-0000-7000-e005-000000000001".into(), name: "Dr. Hassan Reda",   specialty: "Neurology" },
-        Doctor { id: "01940000-0000-7000-e006-000000000001".into(), name: "Dr. Noor Saadi",    specialty: "Internal Medicine" },
+        Doctor {
+            id: "01940000-0000-7000-e001-000000000001".into(),
+            name: "Dr. Ali Mahmoud",
+            specialty: "Radiology",
+        },
+        Doctor {
+            id: "01940000-0000-7000-e002-000000000001".into(),
+            name: "Dr. Layla Hussein",
+            specialty: "Cardiology",
+        },
+        Doctor {
+            id: "01940000-0000-7000-e003-000000000001".into(),
+            name: "Dr. Omar Faisal",
+            specialty: "Orthopedics",
+        },
+        Doctor {
+            id: "01940000-0000-7000-e004-000000000001".into(),
+            name: "Dr. Zainab Khalil",
+            specialty: "Pediatrics",
+        },
+        Doctor {
+            id: "01940000-0000-7000-e005-000000000001".into(),
+            name: "Dr. Hassan Reda",
+            specialty: "Neurology",
+        },
+        Doctor {
+            id: "01940000-0000-7000-e006-000000000001".into(),
+            name: "Dr. Noor Saadi",
+            specialty: "Internal Medicine",
+        },
     ]
 }
 
 fn pricing(docs: &[Doctor], cts: &[CheckType]) -> Vec<Pricing> {
     // Doctor x check_type cut policies. Pct unless noted. Some have price overrides.
-    let mk = |i: usize, doc: &Doctor, ct: &CheckType, kind: &'static str, val: i64, ovr: Option<i64>| Pricing {
-        id: format!("01940000-0000-7000-f000-{:012x}", i),
-        doctor_id: doc.id.clone(),
-        check_type_id: ct.id.clone(),
-        cut_kind: kind, cut_value: val, price_override_iqd: ovr,
-    };
+    let mk =
+        |i: usize, doc: &Doctor, ct: &CheckType, kind: &'static str, val: i64, ovr: Option<i64>| {
+            Pricing {
+                id: format!("01940000-0000-7000-f000-{:012x}", i),
+                doctor_id: doc.id.clone(),
+                check_type_id: ct.id.clone(),
+                cut_kind: kind,
+                cut_value: val,
+                price_override_iqd: ovr,
+            }
+        };
     let mut out = Vec::new();
     let mut i = 1usize;
     // Dr Ali (Radiology): CT 30%, MRI 25%, XR 35%
-    out.push(mk(i, &docs[0], &cts[0], "pct", 30, None)); i += 1;
-    out.push(mk(i, &docs[0], &cts[1], "pct", 25, None)); i += 1;
-    out.push(mk(i, &docs[0], &cts[3], "pct", 35, None)); i += 1;
+    out.push(mk(i, &docs[0], &cts[0], "pct", 30, None));
+    i += 1;
+    out.push(mk(i, &docs[0], &cts[1], "pct", 25, None));
+    i += 1;
+    out.push(mk(i, &docs[0], &cts[3], "pct", 35, None));
+    i += 1;
     // Dr Layla (Cardiology): ECG 40%, US 20%
-    out.push(mk(i, &docs[1], &cts[5], "pct", 40, None)); i += 1;
-    out.push(mk(i, &docs[1], &cts[2], "pct", 20, None)); i += 1;
+    out.push(mk(i, &docs[1], &cts[5], "pct", 40, None));
+    i += 1;
+    out.push(mk(i, &docs[1], &cts[2], "pct", 20, None));
+    i += 1;
     // Dr Omar (Ortho): MRI fixed 30k, XR 30%, DEXA 35%
-    out.push(mk(i, &docs[2], &cts[1], "fixed", 30_000, None)); i += 1;
-    out.push(mk(i, &docs[2], &cts[3], "pct", 30, None)); i += 1;
-    out.push(mk(i, &docs[2], &cts[4], "pct", 35, None)); i += 1;
+    out.push(mk(i, &docs[2], &cts[1], "fixed", 30_000, None));
+    i += 1;
+    out.push(mk(i, &docs[2], &cts[3], "pct", 30, None));
+    i += 1;
+    out.push(mk(i, &docs[2], &cts[4], "pct", 35, None));
+    i += 1;
     // Dr Zainab (Peds): US 25%, XR fixed 10k
-    out.push(mk(i, &docs[3], &cts[2], "pct", 25, None)); i += 1;
-    out.push(mk(i, &docs[3], &cts[3], "fixed", 10_000, None)); i += 1;
+    out.push(mk(i, &docs[3], &cts[2], "pct", 25, None));
+    i += 1;
+    out.push(mk(i, &docs[3], &cts[3], "fixed", 10_000, None));
+    i += 1;
     // Dr Hassan (Neuro): MRI 30% with price override on BASE check type
-    out.push(mk(i, &docs[4], &cts[1], "pct", 30, None)); i += 1;
-    out.push(mk(i, &docs[4], &cts[0], "pct", 25, None)); i += 1;
+    out.push(mk(i, &docs[4], &cts[1], "pct", 30, None));
+    i += 1;
+    out.push(mk(i, &docs[4], &cts[0], "pct", 25, None));
+    i += 1;
     // Dr Noor (Internal): all main
-    out.push(mk(i, &docs[5], &cts[2], "pct", 20, None)); i += 1;
-    out.push(mk(i, &docs[5], &cts[3], "pct", 25, None)); i += 1;
-    out.push(mk(i, &docs[5], &cts[5], "pct", 35, None)); i += 1;
+    out.push(mk(i, &docs[5], &cts[2], "pct", 20, None));
+    i += 1;
+    out.push(mk(i, &docs[5], &cts[3], "pct", 25, None));
+    i += 1;
+    out.push(mk(i, &docs[5], &cts[5], "pct", 35, None));
+    i += 1;
     // Dr Ali also gets DEXA with a price override (premium reading fee)
-    out.push(mk(i, &docs[0], &cts[4], "pct", 40, Some(95_000))); let _ = i + 1;
+    out.push(mk(i, &docs[0], &cts[4], "pct", 40, Some(95_000)));
+    let _ = i + 1;
     out
 }
 
 fn operators() -> Vec<Operator> {
     vec![
-        Operator { id: "01940000-0000-7000-a100-000000000001".into(), name: "Karim Mahmoud", base_cut_per_check_iqd: 5_000 },
-        Operator { id: "01940000-0000-7000-a200-000000000001".into(), name: "Yusuf Tarek",   base_cut_per_check_iqd: 5_000 },
-        Operator { id: "01940000-0000-7000-a300-000000000001".into(), name: "Rana Salim",    base_cut_per_check_iqd: 4_000 },
-        Operator { id: "01940000-0000-7000-a400-000000000001".into(), name: "Talal Adnan",   base_cut_per_check_iqd: 4_500 },
+        Operator {
+            id: "01940000-0000-7000-a100-000000000001".into(),
+            name: "Karim Mahmoud",
+            base_cut_per_check_iqd: 5_000,
+        },
+        Operator {
+            id: "01940000-0000-7000-a200-000000000001".into(),
+            name: "Yusuf Tarek",
+            base_cut_per_check_iqd: 5_000,
+        },
+        Operator {
+            id: "01940000-0000-7000-a300-000000000001".into(),
+            name: "Rana Salim",
+            base_cut_per_check_iqd: 4_000,
+        },
+        Operator {
+            id: "01940000-0000-7000-a400-000000000001".into(),
+            name: "Talal Adnan",
+            base_cut_per_check_iqd: 4_500,
+        },
     ]
 }
 
 // Operator specialties: which check_types they can run.
 fn operator_specialties(ops: &[Operator], cts: &[CheckType]) -> Vec<(String, String, String)> {
     let mut out = Vec::new();
-    let mk = |op: usize, ct: usize, i: usize| (
-        format!("01940000-0000-7000-a000-{:012x}", 0xb000 + i),
-        ops[op].id.clone(),
-        cts[ct].id.clone(),
-    );
+    let mk = |op: usize, ct: usize, i: usize| {
+        (
+            format!("01940000-0000-7000-a000-{:012x}", 0xb000 + i),
+            ops[op].id.clone(),
+            cts[ct].id.clone(),
+        )
+    };
     let mut i = 1;
     // Karim: CT, MRI
-    out.push(mk(0, 0, i)); i += 1;
-    out.push(mk(0, 1, i)); i += 1;
+    out.push(mk(0, 0, i));
+    i += 1;
+    out.push(mk(0, 1, i));
+    i += 1;
     // Yusuf: MRI, US, CT
-    out.push(mk(1, 1, i)); i += 1;
-    out.push(mk(1, 2, i)); i += 1;
-    out.push(mk(1, 0, i)); i += 1;
+    out.push(mk(1, 1, i));
+    i += 1;
+    out.push(mk(1, 2, i));
+    i += 1;
+    out.push(mk(1, 0, i));
+    i += 1;
     // Rana: US, XR, ECG
-    out.push(mk(2, 2, i)); i += 1;
-    out.push(mk(2, 3, i)); i += 1;
-    out.push(mk(2, 5, i)); i += 1;
+    out.push(mk(2, 2, i));
+    i += 1;
+    out.push(mk(2, 3, i));
+    i += 1;
+    out.push(mk(2, 5, i));
+    i += 1;
     // Talal: XR, DEXA, ECG, US
-    out.push(mk(3, 3, i)); i += 1;
-    out.push(mk(3, 4, i)); i += 1;
-    out.push(mk(3, 5, i)); i += 1;
-    out.push(mk(3, 2, i)); let _ = i + 1;
+    out.push(mk(3, 3, i));
+    i += 1;
+    out.push(mk(3, 4, i));
+    i += 1;
+    out.push(mk(3, 5, i));
+    i += 1;
+    out.push(mk(3, 2, i));
+    let _ = i + 1;
     out
 }
 
 fn inventory_items() -> Vec<InvItem> {
     vec![
-        InvItem { id: "01940000-0000-7000-b001-000000000001".into(), name_ar: "صبغة تباين 200مل", name_en: "Contrast dye 200ml", unit: "bottle", low_threshold: 5,  starting_qty: 40 },
-        InvItem { id: "01940000-0000-7000-b002-000000000001".into(), name_ar: "قسطرة وريدية",     name_en: "IV catheter",         unit: "pcs",    low_threshold: 20, starting_qty: 200 },
-        InvItem { id: "01940000-0000-7000-b003-000000000001".into(), name_ar: "محلول ملحي 1لتر",  name_en: "Saline 1L",           unit: "bag",    low_threshold: 15, starting_qty: 80 },
-        InvItem { id: "01940000-0000-7000-b004-000000000001".into(), name_ar: "مناديل كحولية",    name_en: "Alcohol wipes",       unit: "pack",   low_threshold: 10, starting_qty: 50 },
-        InvItem { id: "01940000-0000-7000-b005-000000000001".into(), name_ar: "قفازات وسط",       name_en: "Gloves (M)",          unit: "box",    low_threshold: 20, starting_qty: 250 },
-        InvItem { id: "01940000-0000-7000-b006-000000000001".into(), name_ar: "ورق حراري",        name_en: "Thermal paper roll",  unit: "roll",   low_threshold: 10, starting_qty: 60 },
-        InvItem { id: "01940000-0000-7000-b007-000000000001".into(), name_ar: "أقطاب تخطيط",      name_en: "ECG electrodes",      unit: "pack",   low_threshold: 5,  starting_qty: 50 },
-        InvItem { id: "01940000-0000-7000-b008-000000000001".into(), name_ar: "جل سونار 500مل",   name_en: "Ultrasound gel 500ml",unit: "bottle", low_threshold: 5,  starting_qty: 80 },
-        InvItem { id: "01940000-0000-7000-b009-000000000001".into(), name_ar: "مريول رصاص",       name_en: "Lead apron",          unit: "pcs",    low_threshold: 2,  starting_qty: 6 },
-        InvItem { id: "01940000-0000-7000-b00a-000000000001".into(), name_ar: "شاش طبي",          name_en: "Gauze rolls",         unit: "pack",   low_threshold: 8,  starting_qty: 35 },
-        InvItem { id: "01940000-0000-7000-b00b-000000000001".into(), name_ar: "محقن 10مل",        name_en: "Syringes 10ml",       unit: "box",    low_threshold: 6,  starting_qty: 24 },
-        InvItem { id: "01940000-0000-7000-b00c-000000000001".into(), name_ar: "مطهر 5لتر",        name_en: "Disinfectant 5L",     unit: "bottle", low_threshold: 3,  starting_qty: 10 },
+        InvItem {
+            id: "01940000-0000-7000-b001-000000000001".into(),
+            name_ar: "صبغة تباين 200مل",
+            name_en: "Contrast dye 200ml",
+            unit: "bottle",
+            low_threshold: 5,
+            starting_qty: 40,
+        },
+        InvItem {
+            id: "01940000-0000-7000-b002-000000000001".into(),
+            name_ar: "قسطرة وريدية",
+            name_en: "IV catheter",
+            unit: "pcs",
+            low_threshold: 20,
+            starting_qty: 200,
+        },
+        InvItem {
+            id: "01940000-0000-7000-b003-000000000001".into(),
+            name_ar: "محلول ملحي 1لتر",
+            name_en: "Saline 1L",
+            unit: "bag",
+            low_threshold: 15,
+            starting_qty: 80,
+        },
+        InvItem {
+            id: "01940000-0000-7000-b004-000000000001".into(),
+            name_ar: "مناديل كحولية",
+            name_en: "Alcohol wipes",
+            unit: "pack",
+            low_threshold: 10,
+            starting_qty: 50,
+        },
+        InvItem {
+            id: "01940000-0000-7000-b005-000000000001".into(),
+            name_ar: "قفازات وسط",
+            name_en: "Gloves (M)",
+            unit: "box",
+            low_threshold: 20,
+            starting_qty: 250,
+        },
+        InvItem {
+            id: "01940000-0000-7000-b006-000000000001".into(),
+            name_ar: "ورق حراري",
+            name_en: "Thermal paper roll",
+            unit: "roll",
+            low_threshold: 10,
+            starting_qty: 60,
+        },
+        InvItem {
+            id: "01940000-0000-7000-b007-000000000001".into(),
+            name_ar: "أقطاب تخطيط",
+            name_en: "ECG electrodes",
+            unit: "pack",
+            low_threshold: 5,
+            starting_qty: 50,
+        },
+        InvItem {
+            id: "01940000-0000-7000-b008-000000000001".into(),
+            name_ar: "جل سونار 500مل",
+            name_en: "Ultrasound gel 500ml",
+            unit: "bottle",
+            low_threshold: 5,
+            starting_qty: 80,
+        },
+        InvItem {
+            id: "01940000-0000-7000-b009-000000000001".into(),
+            name_ar: "مريول رصاص",
+            name_en: "Lead apron",
+            unit: "pcs",
+            low_threshold: 2,
+            starting_qty: 6,
+        },
+        InvItem {
+            id: "01940000-0000-7000-b00a-000000000001".into(),
+            name_ar: "شاش طبي",
+            name_en: "Gauze rolls",
+            unit: "pack",
+            low_threshold: 8,
+            starting_qty: 35,
+        },
+        InvItem {
+            id: "01940000-0000-7000-b00b-000000000001".into(),
+            name_ar: "محقن 10مل",
+            name_en: "Syringes 10ml",
+            unit: "box",
+            low_threshold: 6,
+            starting_qty: 24,
+        },
+        InvItem {
+            id: "01940000-0000-7000-b00c-000000000001".into(),
+            name_ar: "مطهر 5لتر",
+            name_en: "Disinfectant 5L",
+            unit: "bottle",
+            low_threshold: 3,
+            starting_qty: 10,
+        },
     ]
 }
 
@@ -402,24 +652,24 @@ fn consumption_rules(cts: &[CheckType], items: &[InvItem]) -> Vec<ConsumptionRul
     // (check_type_idx, item_idx, qty, on_dye_only)
     let rules: &[(usize, usize, i64, bool)] = &[
         // CT (idx 0)
-        (0, 0, 1, true),   // contrast dye on dye
-        (0, 1, 1, true),   // IV catheter on dye
-        (0, 2, 1, true),   // saline on dye
-        (0, 4, 1, false),  // gloves always
+        (0, 0, 1, true),  // contrast dye on dye
+        (0, 1, 1, true),  // IV catheter on dye
+        (0, 2, 1, true),  // saline on dye
+        (0, 4, 1, false), // gloves always
         // MRI (idx 1)
         (1, 0, 1, true),
         (1, 4, 1, false),
         // US (idx 2)
-        (2, 7, 1, false),  // US gel
+        (2, 7, 1, false), // US gel
         // XR (idx 3)
-        (3, 5, 1, false),  // thermal paper
+        (3, 5, 1, false), // thermal paper
         (3, 4, 1, false),
         // DEXA (idx 4)
         (4, 5, 1, false),
         (4, 4, 1, false),
         // ECG (idx 5)
-        (5, 6, 1, false),  // electrodes
-        (5, 3, 1, false),  // alcohol wipes
+        (5, 6, 1, false), // electrodes
+        (5, 3, 1, false), // alcohol wipes
     ];
     rules
         .iter()
@@ -600,7 +850,11 @@ async fn insert_operators(pool: &SqlitePool, ops: &[Operator], at: DateTime<Utc>
     Ok(())
 }
 
-async fn insert_op_specialties(pool: &SqlitePool, rows: &[(String, String, String)], at: DateTime<Utc>) -> R<()> {
+async fn insert_op_specialties(
+    pool: &SqlitePool,
+    rows: &[(String, String, String)],
+    at: DateTime<Utc>,
+) -> R<()> {
     for (id, op_id, ct_id) in rows {
         sqlx::query(
             "INSERT INTO operator_specialties (id, operator_id, check_type_id, created_at, updated_at, version, dirty, entity_id) \
@@ -638,7 +892,11 @@ async fn insert_inventory_items(pool: &SqlitePool, items: &[InvItem], at: DateTi
     Ok(())
 }
 
-async fn insert_consumption(pool: &SqlitePool, rules: &[ConsumptionRule], at: DateTime<Utc>) -> R<()> {
+async fn insert_consumption(
+    pool: &SqlitePool,
+    rules: &[ConsumptionRule],
+    at: DateTime<Utc>,
+) -> R<()> {
     for r in rules {
         sqlx::query(
             "INSERT INTO inventory_consumption_map (id, check_type_id, check_subtype_id, item_id, quantity_per_check, on_dye_only, created_at, updated_at, version, dirty, entity_id) \
@@ -693,6 +951,9 @@ impl<'a> AuditWriter<'a> {
         Self { pool, counter: 1 }
     }
 
+    // Dev-only seed binary: a wide positional signature is acceptable here.
+    // Tracked as a build-health follow-up to refactor into a params struct.
+    #[allow(clippy::too_many_arguments)]
     async fn write(
         &mut self,
         actor: &str,
@@ -740,6 +1001,9 @@ struct Money {
     total: i64,
 }
 
+// Dev-only seed binary: a wide positional signature is acceptable here.
+// Tracked as a build-health follow-up to refactor into a params struct.
+#[allow(clippy::too_many_arguments)]
 fn compute_money(
     ct: &CheckType,
     sub: Option<&Subtype>,
@@ -754,7 +1018,8 @@ fn compute_money(
     let base = if let Some(s) = sub {
         s.price_iqd
     } else {
-        ct.base_price_iqd.expect("flat check type must have base price")
+        ct.base_price_iqd
+            .expect("flat check type must have base price")
     };
     let price = pricing.and_then(|p| p.price_override_iqd).unwrap_or(base);
     let dye_c = if dye { dye_cost_setting } else { 0 };
@@ -808,11 +1073,34 @@ async fn open_shift(
     .bind(ENTITY)
     .execute(pool)
     .await?;
-    audit.write(&by_user.id, "clock_in", "operator_shifts", &id, &format!("{{\"operator_id\":\"{}\"}}", op.id), by_user.device, at).await?;
-    audit.write(&by_user.id, "clock_out", "operator_shifts", &id, &format!("{{\"operator_id\":\"{}\"}}", op.id), by_user.device, end_at).await?;
+    audit
+        .write(
+            &by_user.id,
+            "clock_in",
+            "operator_shifts",
+            &id,
+            &format!("{{\"operator_id\":\"{}\"}}", op.id),
+            by_user.device,
+            at,
+        )
+        .await?;
+    audit
+        .write(
+            &by_user.id,
+            "clock_out",
+            "operator_shifts",
+            &id,
+            &format!("{{\"operator_id\":\"{}\"}}", op.id),
+            by_user.device,
+            end_at,
+        )
+        .await?;
     Ok(())
 }
 
+// Dev-only seed binary: a wide positional signature is acceptable here.
+// Tracked as a build-health follow-up to refactor into a params struct.
+#[allow(clippy::too_many_arguments)]
 async fn adjust_inventory(
     pool: &SqlitePool,
     audit: &mut AuditWriter<'_>,
@@ -847,7 +1135,17 @@ async fn adjust_inventory(
         .execute(pool)
         .await?;
     let delta_json = format!("{{\"delta\":{},\"reason\":\"{}\"}}", delta, reason);
-    audit.write(&by_user.id, "create", "inventory_adjustments", &id, &delta_json, by_user.device, at).await?;
+    audit
+        .write(
+            &by_user.id,
+            "create",
+            "inventory_adjustments",
+            &id,
+            &delta_json,
+            by_user.device,
+            at,
+        )
+        .await?;
     Ok(())
 }
 
@@ -899,7 +1197,11 @@ async fn create_visit(
 
     // Subtype if required.
     let sub = if ct.has_subtypes {
-        let cands: Vec<&Subtype> = ctx.subs.iter().filter(|s| s.check_type_id == ct.id).collect();
+        let cands: Vec<&Subtype> = ctx
+            .subs
+            .iter()
+            .filter(|s| s.check_type_id == ct.id)
+            .collect();
         Some(*rng.pick(&cands))
     } else {
         None
@@ -909,9 +1211,17 @@ async fn create_visit(
     let op_candidates: Vec<&Operator> = ctx
         .ops
         .iter()
-        .filter(|o| ctx.op_specs.iter().any(|(_, op_id, ct_id)| op_id == &o.id && ct_id == &ct.id))
+        .filter(|o| {
+            ctx.op_specs
+                .iter()
+                .any(|(_, op_id, ct_id)| op_id == &o.id && ct_id == &ct.id)
+        })
         .collect();
-    let op = if op_candidates.is_empty() { &ctx.ops[0] } else { *rng.pick(&op_candidates) };
+    let op = if op_candidates.is_empty() {
+        &ctx.ops[0]
+    } else {
+        *rng.pick(&op_candidates)
+    };
 
     // Doctor: 70% of visits have a doctor; pick one that has pricing for this check type.
     let with_doctor = rng.pct(70);
@@ -920,7 +1230,12 @@ async fn create_visit(
             .pricing
             .iter()
             .filter(|p| p.check_type_id == ct.id)
-            .filter_map(|p| ctx.docs.iter().find(|d| d.id == p.doctor_id).map(|d| (d, p)))
+            .filter_map(|p| {
+                ctx.docs
+                    .iter()
+                    .find(|d| d.id == p.doctor_id)
+                    .map(|d| (d, p))
+            })
             .collect();
         if doc_candidates.is_empty() {
             (None, None)
@@ -938,9 +1253,24 @@ async fn create_visit(
     let recep = rng.pick(ctx.receps);
     let id = Uuid::now_v7().to_string();
 
-    let created_at = iso_date(day, 8 + (seq_in_day as u32 / 4), (seq_in_day as u32 * 7) % 60, (seq_in_day as u32 * 13) % 60);
+    let created_at = iso_date(
+        day,
+        8 + (seq_in_day as u32 / 4),
+        (seq_in_day as u32 * 7) % 60,
+        (seq_in_day as u32 * 13) % 60,
+    );
 
-    let money = compute_money(ct, sub, pricing, op, dye, report, ctx.dye_cost, ctx.report_cost, ctx.internal_pct);
+    let money = compute_money(
+        ct,
+        sub,
+        pricing,
+        op,
+        dye,
+        report,
+        ctx.dye_cost,
+        ctx.report_cost,
+        ctx.internal_pct,
+    );
 
     match status {
         "draft" => {
@@ -954,7 +1284,17 @@ async fn create_visit(
             .bind(rfc(created_at)).bind(rfc(created_at))
             .bind(recep.device).bind(ENTITY)
             .execute(pool).await?;
-            audit.write(&recep.id, "create", "visits", &id, "{\"status\":\"draft\"}", recep.device, created_at).await?;
+            audit
+                .write(
+                    &recep.id,
+                    "create",
+                    "visits",
+                    &id,
+                    "{\"status\":\"draft\"}",
+                    recep.device,
+                    created_at,
+                )
+                .await?;
         }
         "locked" | "voided" => {
             let lock_at = created_at + Duration::minutes(rng.range(2, 15) as i64);
@@ -978,8 +1318,28 @@ async fn create_visit(
             .bind(rfc(created_at)).bind(rfc(lock_at))
             .bind(recep.device).bind(ENTITY)
             .execute(pool).await?;
-            audit.write(&recep.id, "create", "visits", &id, "{\"status\":\"draft\"}", recep.device, created_at).await?;
-            audit.write(&recep.id, "lock", "visits", &id, &format!("{{\"total\":{}}}", money.total), recep.device, lock_at).await?;
+            audit
+                .write(
+                    &recep.id,
+                    "create",
+                    "visits",
+                    &id,
+                    "{\"status\":\"draft\"}",
+                    recep.device,
+                    created_at,
+                )
+                .await?;
+            audit
+                .write(
+                    &recep.id,
+                    "lock",
+                    "visits",
+                    &id,
+                    &format!("{{\"total\":{}}}", money.total),
+                    recep.device,
+                    lock_at,
+                )
+                .await?;
 
             // Apply consume_visit inventory adjustments per consumption rules.
             for r in ctx.rules {
@@ -989,8 +1349,22 @@ async fn create_visit(
                 if r.on_dye_only && !dye {
                     continue;
                 }
-                let item = ctx.items.iter().find(|i| i.id == r.item_id).expect("item must exist for rule");
-                adjust_inventory(pool, audit, item, -r.qty, "consume_visit", Some(&id), recep, lock_at).await?;
+                let item = ctx
+                    .items
+                    .iter()
+                    .find(|i| i.id == r.item_id)
+                    .expect("item must exist for rule");
+                adjust_inventory(
+                    pool,
+                    audit,
+                    item,
+                    -r.qty,
+                    "consume_visit",
+                    Some(&id),
+                    recep,
+                    lock_at,
+                )
+                .await?;
             }
 
             if status == "voided" {
@@ -1005,7 +1379,17 @@ async fn create_visit(
                 .bind(rfc(void_at))
                 .bind(&id)
                 .execute(pool).await?;
-                audit.write(&ctx.admin.id, "void", "visits", &id, &format!("{{\"reason\":\"{}\"}}", reason), ctx.admin.device, void_at).await?;
+                audit
+                    .write(
+                        &ctx.admin.id,
+                        "void",
+                        "visits",
+                        &id,
+                        &format!("{{\"reason\":\"{}\"}}", reason),
+                        ctx.admin.device,
+                        void_at,
+                    )
+                    .await?;
             }
         }
         _ => unreachable!(),
@@ -1063,31 +1447,89 @@ async fn main() -> R<()> {
 
     // Catalog creation audit entries (one per kind, batched).
     let admin = &ps[0];
-    audit.write(&admin.id, "create", "users", &admin.id, "{\"role\":\"superadmin\"}", admin.device, catalog_at).await?;
+    audit
+        .write(
+            &admin.id,
+            "create",
+            "users",
+            &admin.id,
+            "{\"role\":\"superadmin\"}",
+            admin.device,
+            catalog_at,
+        )
+        .await?;
     for c in &cts {
-        audit.write(&admin.id, "create", "check_types", &c.id, &format!("{{\"name_en\":\"{}\"}}", c.name_en), admin.device, catalog_at).await?;
+        audit
+            .write(
+                &admin.id,
+                "create",
+                "check_types",
+                &c.id,
+                &format!("{{\"name_en\":\"{}\"}}", c.name_en),
+                admin.device,
+                catalog_at,
+            )
+            .await?;
     }
     for d in &docs {
-        audit.write(&admin.id, "create", "doctors", &d.id, &format!("{{\"name\":\"{}\"}}", d.name), admin.device, catalog_at).await?;
+        audit
+            .write(
+                &admin.id,
+                "create",
+                "doctors",
+                &d.id,
+                &format!("{{\"name\":\"{}\"}}", d.name),
+                admin.device,
+                catalog_at,
+            )
+            .await?;
     }
     for o in &ops {
-        audit.write(&admin.id, "create", "operators", &o.id, &format!("{{\"name\":\"{}\"}}", o.name), admin.device, catalog_at).await?;
+        audit
+            .write(
+                &admin.id,
+                "create",
+                "operators",
+                &o.id,
+                &format!("{{\"name\":\"{}\"}}", o.name),
+                admin.device,
+                catalog_at,
+            )
+            .await?;
     }
 
     // Initial stock receive for every inventory item (60 days back).
     eprintln!("[seed-weekly] seeding initial inventory receive");
     for it in &items {
-        adjust_inventory(&pool, &mut audit, it, it.starting_qty, "receive", None, admin, catalog_at + Duration::hours(1)).await?;
+        adjust_inventory(
+            &pool,
+            &mut audit,
+            it,
+            it.starting_qty,
+            "receive",
+            None,
+            admin,
+            catalog_at + Duration::hours(1),
+        )
+        .await?;
     }
 
     // 7 days of activity.
     let ctx = VisitContext {
-        cts: &cts, subs: &subs, docs: &docs, pricing: &prs,
-        ops: &ops, op_specs: &op_specs, items: &items, rules: &rules,
+        cts: &cts,
+        subs: &subs,
+        docs: &docs,
+        pricing: &prs,
+        ops: &ops,
+        op_specs: &op_specs,
+        items: &items,
+        rules: &rules,
         patients: &pts,
         receps: &ps[2..4], // Mehdi + Sara
         admin: &ps[0],
-        dye_cost: 10_000, report_cost: 10_000, internal_pct: 30,
+        dye_cost: 10_000,
+        report_cost: 10_000,
+        internal_pct: 30,
     };
 
     let mut rng = Rng::new(1);
@@ -1097,17 +1539,59 @@ async fn main() -> R<()> {
         eprintln!("[seed-weekly] day {} ({})", day_offset + 1, day);
 
         // Logins (08:00 for receptionists, 08:30 for accountant, 09:00 admin spot-check)
-        audit.write(&ps[2].id, "login", "users", &ps[2].id, "{}", ps[2].device, iso_date(day, 8, 0, 0)).await?;
-        audit.write(&ps[3].id, "login", "users", &ps[3].id, "{}", ps[3].device, iso_date(day, 8, 5, 0)).await?;
-        audit.write(&ps[1].id, "login", "users", &ps[1].id, "{}", ps[1].device, iso_date(day, 8, 30, 0)).await?;
+        audit
+            .write(
+                &ps[2].id,
+                "login",
+                "users",
+                &ps[2].id,
+                "{}",
+                ps[2].device,
+                iso_date(day, 8, 0, 0),
+            )
+            .await?;
+        audit
+            .write(
+                &ps[3].id,
+                "login",
+                "users",
+                &ps[3].id,
+                "{}",
+                ps[3].device,
+                iso_date(day, 8, 5, 0),
+            )
+            .await?;
+        audit
+            .write(
+                &ps[1].id,
+                "login",
+                "users",
+                &ps[1].id,
+                "{}",
+                ps[1].device,
+                iso_date(day, 8, 30, 0),
+            )
+            .await?;
         if day_offset % 2 == 0 {
-            audit.write(&ps[0].id, "login", "users", &ps[0].id, "{}", ps[0].device, iso_date(day, 9, 0, 0)).await?;
+            audit
+                .write(
+                    &ps[0].id,
+                    "login",
+                    "users",
+                    &ps[0].id,
+                    "{}",
+                    ps[0].device,
+                    iso_date(day, 9, 0, 0),
+                )
+                .await?;
         }
 
         // Operator shifts: open ~08:15, close ~17:30 (all four operators most days, one off mid-week)
         let off_op = if day_offset == 3 { Some(1usize) } else { None };
         for (i, op) in ops.iter().enumerate() {
-            if Some(i) == off_op { continue; }
+            if Some(i) == off_op {
+                continue;
+            }
             let in_at = iso_date(day, 8, 10 + (i as u32 * 3), 0);
             let out_at = iso_date(day, 17, 30 + (i as u32 * 2), 0);
             let by = &ps[2 + (i % 2)]; // alternate between Mehdi and Sara
@@ -1116,14 +1600,48 @@ async fn main() -> R<()> {
 
         // Periodic receive: every other day a couple items get restock.
         if day_offset % 2 == 1 {
-            adjust_inventory(&pool, &mut audit, &items[1], 50,  "receive", None, &ps[2], iso_date(day, 9, 30, 0)).await?;
-            adjust_inventory(&pool, &mut audit, &items[3], 20,  "receive", None, &ps[2], iso_date(day, 9, 35, 0)).await?;
-            adjust_inventory(&pool, &mut audit, &items[0], 10,  "receive", None, &ps[2], iso_date(day, 9, 40, 0)).await?;
+            adjust_inventory(
+                &pool,
+                &mut audit,
+                &items[1],
+                50,
+                "receive",
+                None,
+                &ps[2],
+                iso_date(day, 9, 30, 0),
+            )
+            .await?;
+            adjust_inventory(
+                &pool,
+                &mut audit,
+                &items[3],
+                20,
+                "receive",
+                None,
+                &ps[2],
+                iso_date(day, 9, 35, 0),
+            )
+            .await?;
+            adjust_inventory(
+                &pool,
+                &mut audit,
+                &items[0],
+                10,
+                "receive",
+                None,
+                &ps[2],
+                iso_date(day, 9, 40, 0),
+            )
+            .await?;
         }
 
         // Visit count: 22..32 per day, biased lighter on Friday (idx 1 since week_start=Thu)
         let weekday = day.format("%a").to_string();
-        let count = if weekday == "Fri" { rng.range(14, 20) } else { rng.range(22, 32) };
+        let count = if weekday == "Fri" {
+            rng.range(14, 20)
+        } else {
+            rng.range(22, 32)
+        };
 
         // Mix: 70% locked, 15% voided (admin acts), 15% draft (still in workspace)
         // For non-today days, drafts become very rare (we'd expect them to be locked already);
@@ -1148,21 +1666,91 @@ async fn main() -> R<()> {
 
         // Sometimes a writeoff (broken vial, expired stock).
         if day_offset == 2 {
-            adjust_inventory(&pool, &mut audit, &items[0], -1, "writeoff", None, &ps[1], iso_date(day, 14, 0, 0)).await?;
+            adjust_inventory(
+                &pool,
+                &mut audit,
+                &items[0],
+                -1,
+                "writeoff",
+                None,
+                &ps[1],
+                iso_date(day, 14, 0, 0),
+            )
+            .await?;
         }
         if day_offset == 5 {
-            adjust_inventory(&pool, &mut audit, &items[7], -1, "writeoff", None, &ps[1], iso_date(day, 15, 0, 0)).await?;
+            adjust_inventory(
+                &pool,
+                &mut audit,
+                &items[7],
+                -1,
+                "writeoff",
+                None,
+                &ps[1],
+                iso_date(day, 15, 0, 0),
+            )
+            .await?;
         }
         // A count correction once during the week.
         if day_offset == 4 {
-            adjust_inventory(&pool, &mut audit, &items[10], 2, "count_correction", None, &ps[1], iso_date(day, 16, 30, 0)).await?;
+            adjust_inventory(
+                &pool,
+                &mut audit,
+                &items[10],
+                2,
+                "count_correction",
+                None,
+                &ps[1],
+                iso_date(day, 16, 30, 0),
+            )
+            .await?;
         }
 
         // End of day: vacuum audit + logouts.
-        audit.write("00000000-0000-0000-0000-000000000000", "vacuum", "audit_log", "00000000-0000-0000-0000-000000000000", "{\"mode\":\"daily\"}", "system", iso_date(day, 23, 0, 0)).await?;
-        audit.write(&ps[2].id, "logout", "users", &ps[2].id, "{}", ps[2].device, iso_date(day, 18, 0, 0)).await?;
-        audit.write(&ps[3].id, "logout", "users", &ps[3].id, "{}", ps[3].device, iso_date(day, 18, 30, 0)).await?;
-        audit.write(&ps[1].id, "logout", "users", &ps[1].id, "{}", ps[1].device, iso_date(day, 17, 0, 0)).await?;
+        audit
+            .write(
+                "00000000-0000-0000-0000-000000000000",
+                "vacuum",
+                "audit_log",
+                "00000000-0000-0000-0000-000000000000",
+                "{\"mode\":\"daily\"}",
+                "system",
+                iso_date(day, 23, 0, 0),
+            )
+            .await?;
+        audit
+            .write(
+                &ps[2].id,
+                "logout",
+                "users",
+                &ps[2].id,
+                "{}",
+                ps[2].device,
+                iso_date(day, 18, 0, 0),
+            )
+            .await?;
+        audit
+            .write(
+                &ps[3].id,
+                "logout",
+                "users",
+                &ps[3].id,
+                "{}",
+                ps[3].device,
+                iso_date(day, 18, 30, 0),
+            )
+            .await?;
+        audit
+            .write(
+                &ps[1].id,
+                "logout",
+                "users",
+                &ps[1].id,
+                "{}",
+                ps[1].device,
+                iso_date(day, 17, 0, 0),
+            )
+            .await?;
     }
 
     // Update sync_state to look freshly synced.
@@ -1177,17 +1765,42 @@ async fn main() -> R<()> {
     // Mark every seeded row as clean (dirty=0) and assign a recent last_synced_at
     // so the dashboard's "needs sync" pill stays calm. (Audit log entries already 0).
     for tbl in [
-        "users", "settings", "check_types", "check_subtypes", "doctors",
-        "doctor_check_pricing", "operators", "operator_specialties",
-        "inventory_items", "inventory_consumption_map", "patients", "visits",
-        "operator_shifts", "inventory_adjustments",
+        "users",
+        "settings",
+        "check_types",
+        "check_subtypes",
+        "doctors",
+        "doctor_check_pricing",
+        "operators",
+        "operator_specialties",
+        "inventory_items",
+        "inventory_consumption_map",
+        "patients",
+        "visits",
+        "operator_shifts",
+        "inventory_adjustments",
     ] {
         let sql = format!("UPDATE {tbl} SET dirty = 0, last_synced_at = ?");
         sqlx::query(&sql).bind(rfc(now)).execute(&pool).await?;
     }
 
     // Summary.
-    for t in ["users", "check_types", "check_subtypes", "doctors", "doctor_check_pricing", "operators", "operator_specialties", "inventory_items", "inventory_consumption_map", "patients", "visits", "operator_shifts", "inventory_adjustments", "audit_log"] {
+    for t in [
+        "users",
+        "check_types",
+        "check_subtypes",
+        "doctors",
+        "doctor_check_pricing",
+        "operators",
+        "operator_specialties",
+        "inventory_items",
+        "inventory_consumption_map",
+        "patients",
+        "visits",
+        "operator_shifts",
+        "inventory_adjustments",
+        "audit_log",
+    ] {
         let row: (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM {t}"))
             .fetch_one(&pool)
             .await?;

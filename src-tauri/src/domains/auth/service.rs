@@ -335,9 +335,7 @@ impl AuthService {
         match resp {
             Ok(r) if r.status().is_success() => Ok(()),
             Ok(r) if r.status() == reqwest::StatusCode::CONFLICT => {
-                tracing::info!(
-                    "sync server already has users; skipping remote bootstrap"
-                );
+                tracing::info!("sync server already has users; skipping remote bootstrap");
                 Ok(())
             }
             Ok(r) => {
@@ -398,7 +396,13 @@ impl AuthService {
         let audit_outbox = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
         self.outbox_repo.enqueue(&mut tx, &audit_outbox).await?;
 
-        let user_payload = serde_json::to_vec(&user)?;
+        // Push the first superadmin WITH the password hash: the `User`
+        // serializer skips `password_hash`, so serializing the entity directly
+        // would ship the account to the server with no credential and break
+        // online login from any other device. Use the explicit push payload.
+        let user_payload = serde_json::to_vec(
+            &crate::domains::auth::user_service::to_push_payload(&user, true),
+        )?;
         let user_outbox = OutboxOp::new("users", user.id.to_string(), user_payload);
         self.outbox_repo.enqueue(&mut tx, &user_outbox).await?;
 

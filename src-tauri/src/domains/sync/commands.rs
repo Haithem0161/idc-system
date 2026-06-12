@@ -100,7 +100,11 @@ pub async fn config_set_sync_server_url_impl(state: &AppState, url: String) -> A
     // pointing at a URL the DB has forgotten. The setter is also called by
     // the first-launch modal and the superadmin first-run wizard; without
     // persistence the modal reopened on every restart.
-    state.sync_engine().state_repo().put_server_url(&url).await?;
+    state
+        .sync_engine()
+        .state_repo()
+        .put_server_url(&url)
+        .await?;
     state.set_sync_server_url(url.clone()).await;
     state.sync_engine().set_server_url(url).await;
     Ok(())

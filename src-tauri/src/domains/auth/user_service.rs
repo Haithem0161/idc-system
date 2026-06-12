@@ -240,10 +240,15 @@ impl UserService {
 }
 
 #[derive(Serialize)]
-struct UserPushPayload {
+pub(crate) struct UserPushPayload {
     id: String,
     email: String,
     name: String,
+    // Omit entirely when the password did not change. Serializing `null`
+    // lets the server coerce it to '' and wipe the stored hash (DEF: user
+    // update destroys credential). `skip_serializing_if` drops the key so
+    // the server's update path leaves passwordHash untouched.
+    #[serde(skip_serializing_if = "Option::is_none")]
     password_hash: Option<String>,
     role: String,
     is_active: bool,
@@ -253,7 +258,7 @@ struct UserPushPayload {
     deleted_at: Option<String>,
 }
 
-fn to_push_payload(user: &User, include_hash: bool) -> UserPushPayload {
+pub(crate) fn to_push_payload(user: &User, include_hash: bool) -> UserPushPayload {
     UserPushPayload {
         id: user.id.to_string(),
         email: user.email.clone(),
@@ -366,6 +371,12 @@ mod tests {
         assert!(payload.password_hash.is_none());
         let json = serde_json::to_string(&payload).unwrap();
         assert!(!json.contains("LOCAL_HASH"));
+        // The key must be ABSENT, not `null`. A `null` lets the server coerce
+        // it to '' and wipe the stored hash; an absent key leaves it untouched.
+        assert!(
+            !json.contains("password_hash"),
+            "unchanged-password push must omit the field entirely, got: {json}"
+        );
     }
 
     #[test]
