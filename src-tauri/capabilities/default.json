@@ -8,6 +8,7 @@
     "store:default",
     "os:default",
     "dialog:default",
-    "fs:default"
+    "fs:default",
+    "updater:default"
   ]
 }
