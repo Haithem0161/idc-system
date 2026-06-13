@@ -14,7 +14,9 @@ pub trait OutboxRepo: Send + Sync {
     async fn enqueue(&self, tx: &mut Tx<'_>, op: &OutboxOp) -> AppResult<()>;
 
     /// Select up to `limit` rows whose `next_attempt_at <= now`, `attempts < 10`,
-    /// `parked = 0`. Returned in `next_attempt_at` order ascending.
+    /// `parked = 0`. Returned in CREATION order (`created_at ASC, op_id ASC`) so
+    /// causally-dependent ops drain in the order they were enqueued -- a
+    /// transiently-rescheduled op must never jump ahead of an earlier one.
     async fn next_batch(&self, limit: usize) -> AppResult<Vec<OutboxOp>>;
 
     /// Total pending count (`attempts < 10` and not parked).

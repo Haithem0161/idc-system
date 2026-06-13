@@ -391,6 +391,65 @@ async fn reschedule_transient_does_not_bump_attempts() {
 }
 
 #[tokio::test]
+async fn next_batch_drains_in_creation_order_even_after_one_op_is_rescheduled() {
+    // M14: causally-dependent ops MUST drain in the order they were enqueued.
+    // After a transient failure reschedules an earlier op, ordering by
+    // `next_attempt_at` would let that op sort AFTER later ops (its new
+    // `next_attempt_at = now` is later than the later ops' original
+    // `created_at`), pushing it out of creation order. With the corrected
+    // `ORDER BY created_at ASC, op_id ASC`, the earlier op still drains first.
+    let pool = fresh_pool().await;
+    let repo = SqliteOutboxRepo::new(pool.clone());
+
+    // Insert three ops with explicit, strictly increasing creation timestamps
+    // so the ordering assertion is deterministic regardless of clock skew.
+    // op_id is UUIDv7 (monotonic) so the tiebreak also matches creation order.
+    let mut ids = Vec::new();
+    for (i, ts) in [
+        "2026-05-13T10:00:00Z",
+        "2026-05-13T10:00:01Z",
+        "2026-05-13T10:00:02Z",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let op_id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO outbox \
+             (op_id, entity, entity_id, op, payload, created_at, attempts, \
+              next_attempt_at, last_error, parked) \
+             VALUES (?, 'patients', ?, 'upsert', ?, ?, 0, ?, NULL, 0)",
+        )
+        .bind(op_id.to_string())
+        .bind(format!("p-{i}"))
+        .bind(b"x".to_vec())
+        .bind(ts)
+        .bind(ts)
+        .execute(&pool)
+        .await
+        .unwrap();
+        ids.push(op_id);
+    }
+    let (first, second, third) = (ids[0], ids[1], ids[2]);
+
+    // Transiently reschedule the FIRST (oldest) op: its `next_attempt_at`
+    // becomes ~now, far later than the others' 2026 timestamps. Under the old
+    // `ORDER BY next_attempt_at ASC` it would sort LAST; creation order keeps
+    // it first.
+    repo.reschedule_transient(first, "network down", 0)
+        .await
+        .unwrap();
+
+    let batch = repo.next_batch(10).await.unwrap();
+    let order: Vec<Uuid> = batch.iter().map(|op| op.op_id).collect();
+    assert_eq!(
+        order,
+        vec![first, second, third],
+        "ops must drain in creation order, not next_attempt_at order"
+    );
+}
+
+#[tokio::test]
 async fn mark_failure_still_bumps_attempts_for_server_errors() {
     let pool = fresh_pool().await;
     let repo = SqliteOutboxRepo::new(pool.clone());

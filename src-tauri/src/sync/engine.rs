@@ -17,7 +17,7 @@ use tracing::{debug, error, info, warn};
 use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo, SyncStateRepo};
 use crate::domains::sync::domain::value_objects::SyncStatus;
 use crate::domains::sync::infrastructure::{ServerConflict, SyncHttpClient};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 pub const STATUS_EVENT: &str = "sync:status";
 pub const CONFLICT_EVENT: &str = "sync:conflict";
@@ -371,7 +371,17 @@ impl SyncEngine {
                 }
                 Err(e) => {
                     error!(error = %e, "push step failed");
-                    self.set_status(app, SyncStatus::Error).await;
+                    // Distinguish "offline" from "broken": a transport-level
+                    // failure (connection refused / timeout -- mapped to
+                    // `AppError::Network` by `From<reqwest::Error>`) means the
+                    // device is simply offline, so the UI shows Offline.
+                    // Everything else (5xx, protocol/server errors) is a genuine
+                    // Error the user may need to act on.
+                    let status = match e {
+                        AppError::Network(_) => SyncStatus::Offline,
+                        _ => SyncStatus::Error,
+                    };
+                    self.set_status(app, status).await;
                     return;
                 }
             }
@@ -423,7 +433,14 @@ impl SyncEngine {
                 }
                 Err(e) => {
                     error!(error = %e, "pull step failed");
-                    self.set_status(app, SyncStatus::Error).await;
+                    // Mirror do_push: a transport-level failure (mapped to
+                    // `AppError::Network`) means the device is offline -> show
+                    // Offline; any other error stays a genuine Error.
+                    let status = match e {
+                        AppError::Network(_) => SyncStatus::Offline,
+                        _ => SyncStatus::Error,
+                    };
+                    self.set_status(app, status).await;
                     return;
                 }
             }

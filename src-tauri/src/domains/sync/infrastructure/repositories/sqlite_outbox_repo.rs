@@ -47,12 +47,20 @@ impl OutboxRepo for SqliteOutboxRepo {
 
     async fn next_batch(&self, limit: usize) -> AppResult<Vec<OutboxOp>> {
         let now = Utc::now().to_rfc3339();
+        // Drain eligible ops in CREATION order, not `next_attempt_at` order.
+        // Causally-dependent ops (a visit after its patient, an update after
+        // its create) MUST push in the order they were enqueued; ordering by
+        // `next_attempt_at` lets a transiently-rescheduled op jump ahead of an
+        // earlier op and push out of order. `op_id` is UUIDv7 (time-sortable),
+        // so it is a stable creation-order tiebreak. The WHERE clause still
+        // excludes backed-off ops (`next_attempt_at <= now`), so among the
+        // currently-eligible ops we drain oldest-first.
         let rows: Vec<OutboxRow> = sqlx::query_as::<_, OutboxRow>(
             "SELECT op_id, entity, entity_id, op, payload, created_at, attempts, \
                     next_attempt_at, last_error, parked \
              FROM outbox \
              WHERE attempts < 10 AND parked = 0 AND next_attempt_at <= ? \
-             ORDER BY next_attempt_at ASC \
+             ORDER BY created_at ASC, op_id ASC \
              LIMIT ?",
         )
         .bind(now)

@@ -259,6 +259,60 @@ async fn pusher_backs_off_on_5xx_and_returns_err() {
     assert!(outbox.next_batch(10).await.unwrap().is_empty());
 }
 
+#[tokio::test]
+async fn pusher_backs_off_an_op_the_server_neither_accepts_rejects_nor_conflicts() {
+    // M27: an op the server omits from accepted/conflicts/rejected must still
+    // get its attempts bumped and a backoff applied. Otherwise it stays at the
+    // queue head and hot-retries every push cycle forever. Here the server
+    // returns an EMPTY accepted/conflicts/rejected set for a non-empty batch.
+    let pool = fresh_pool().await;
+    let outbox: Arc<dyn OutboxRepo> = Arc::new(SqliteOutboxRepo::new(pool.clone()));
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+
+    let mut tx = pool.begin().await.unwrap();
+    let op = OutboxOp::new("audit_log", "row-1", b"x".to_vec());
+    outbox.enqueue(&mut tx, &op).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/sync/push"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "accepted": [],
+            "conflicts": [],
+            "rejected": [],
+        })))
+        .mount(&server)
+        .await;
+
+    let outcome = pusher::run_step(
+        &pool,
+        outbox.clone(),
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("ok");
+    assert_eq!(outcome.pushed, 0);
+
+    // The unreported op stays in the outbox (not acked, not parked)...
+    let attempts: i64 = sqlx::query_scalar("SELECT attempts FROM outbox WHERE op_id = ?")
+        .bind(op.op_id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(attempts, 1, "unreported op must have its attempts bumped");
+
+    // ...and it is backed off, so it is excluded from the next eligible batch
+    // until the backoff elapses (no hot-looping at the queue head).
+    assert!(
+        outbox.next_batch(10).await.unwrap().is_empty(),
+        "backed-off unreported op must not be immediately re-drained"
+    );
+}
+
 // --- Puller --------------------------------------------------------------
 
 #[tokio::test]

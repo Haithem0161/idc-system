@@ -146,6 +146,38 @@ pub async fn run_step(
         }
     }
 
+    // Backstop any op the server neither accepted, flagged as a conflict, nor
+    // rejected. Without this such an "unreported" op gets no attempts bump and
+    // no backoff, so it stays at the queue head and hot-retries every push
+    // cycle forever. Mark it as a failure so it backs off and eventually hits
+    // the attempts cap (surfaced as stuck) instead of hot-looping.
+    let mut handled: std::collections::HashSet<Uuid> = accepted_set;
+    handled.extend(
+        result
+            .conflicts
+            .iter()
+            .filter_map(|c| Uuid::parse_str(&c.op_id).ok()),
+    );
+    handled.extend(
+        result
+            .rejected
+            .iter()
+            .filter_map(|r| Uuid::parse_str(&r.op_id).ok()),
+    );
+    for op in &batch {
+        if !handled.contains(&op.op_id) {
+            let backoff = OutboxOp::next_backoff(op.attempts).as_secs();
+            if let Err(e) = outbox_repo
+                .mark_failure(op.op_id, "server did not report this op", backoff)
+                .await
+            {
+                warn!(op_id = %op.op_id, error = %e, "push: failed to mark unreported op");
+            } else {
+                warn!(op_id = %op.op_id, "push: server did not report op, backing off");
+            }
+        }
+    }
+
     let _ = state_repo.mark_pushed().await;
 
     write_metric(
