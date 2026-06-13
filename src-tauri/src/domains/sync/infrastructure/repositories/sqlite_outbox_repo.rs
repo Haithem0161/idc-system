@@ -172,6 +172,54 @@ impl OutboxRepo for SqliteOutboxRepo {
         query.execute(&self.pool).await?;
         Ok(())
     }
+
+    async fn mark_entities_synced(&self, entities: &[(String, String)]) -> AppResult<()> {
+        if entities.is_empty() {
+            return Ok(());
+        }
+        let now = Utc::now().to_rfc3339();
+        for (table, id) in entities {
+            // The table name cannot be bound as a parameter, so it MUST come
+            // from this fixed allowlist of syncable tables -- never from
+            // untrusted input -- to keep the statement injection-safe.
+            if !is_syncable_table(table) {
+                continue;
+            }
+            let sql = format!(
+                "UPDATE {table} SET dirty = 0, last_synced_at = ? WHERE id = ? AND dirty = 1"
+            );
+            sqlx::query(&sql)
+                .bind(&now)
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+/// Allowlist of syncable tables whose rows the push ack may mark clean. Any
+/// `entity` value not in this set is ignored (defensive: the table name is
+/// interpolated into SQL, so it can never come from untrusted input).
+fn is_syncable_table(table: &str) -> bool {
+    matches!(
+        table,
+        "audit_log"
+            | "users"
+            | "settings"
+            | "check_types"
+            | "check_subtypes"
+            | "doctors"
+            | "doctor_check_pricing"
+            | "operators"
+            | "operator_specialties"
+            | "inventory_items"
+            | "inventory_consumption_map"
+            | "operator_shifts"
+            | "patients"
+            | "visits"
+            | "inventory_adjustments"
+    )
 }
 
 #[derive(sqlx::FromRow)]

@@ -976,3 +976,68 @@ async fn c3_pull_fails_loudly_on_unknown_entity_instead_of_dropping_it() {
         "cursor must NOT advance past an unapplied change"
     );
 }
+
+// --- H15/H17: push ack marks the business row clean -----------------------
+//
+// Before the fix a successful push only deleted the outbox op; the source
+// row stayed dirty=1 forever, so the dirty flag was meaningless and the audit
+// vacuum (which only purges dirty=0 rows) could never reclaim own-device rows.
+
+#[tokio::test]
+async fn h15_push_ack_marks_pushed_row_clean() {
+    let pool = fresh_pool().await;
+    let outbox: Arc<dyn OutboxRepo> = Arc::new(SqliteOutboxRepo::new(pool.clone()));
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+
+    // Seed a dirty patients row + its outbox op.
+    let patient_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO patients (id, name, created_at, updated_at, version, dirty, entity_id) \
+         VALUES (?, 'Huda', '2026-05-13T10:00:00Z', '2026-05-13T10:00:00Z', 1, 1, 'tenant-x')",
+    )
+    .bind(patient_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let op = OutboxOp::new("patients", patient_id.to_string(), b"x".to_vec());
+    let op_id = op.op_id;
+    let mut tx = pool.begin().await.unwrap();
+    outbox.enqueue(&mut tx, &op).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/sync/push"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "accepted": [{ "op_id": op_id.to_string(), "status": "applied" }],
+            "conflicts": [],
+            "rejected": [],
+        })))
+        .mount(&server)
+        .await;
+
+    pusher::run_step(
+        &pool,
+        outbox.clone(),
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("push ok");
+
+    let (dirty, last_synced): (i64, Option<String>) =
+        sqlx::query_as("SELECT dirty, last_synced_at FROM patients WHERE id = ?")
+            .bind(patient_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(dirty, 0, "pushed row must be marked clean");
+    assert!(
+        last_synced.is_some(),
+        "last_synced_at must be stamped on ack"
+    );
+    // Outbox op is gone too.
+    assert_eq!(outbox.pending_count().await.unwrap(), 0);
+}

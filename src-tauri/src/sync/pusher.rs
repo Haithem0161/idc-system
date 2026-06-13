@@ -90,6 +90,19 @@ pub async fn run_step(
         .iter()
         .filter_map(|r| Uuid::parse_str(&r.op_id).ok())
         .collect();
+
+    // Mark the underlying business rows clean BEFORE deleting the outbox ops
+    // (after delete we lose the entity/entity_id mapping). Without this the
+    // pushed rows stay dirty=1 forever, so the dirty flag is meaningless and
+    // the audit-retention vacuum can never purge own-device rows.
+    let accepted_set: std::collections::HashSet<Uuid> = accepted_ids.iter().copied().collect();
+    let synced_entities: Vec<(String, String)> = batch
+        .iter()
+        .filter(|op| accepted_set.contains(&op.op_id))
+        .map(|op| (op.entity.clone(), op.entity_id.clone()))
+        .collect();
+    outbox_repo.mark_entities_synced(&synced_entities).await?;
+
     outbox_repo.delete_acked(&accepted_ids).await?;
 
     // Park conflicts

@@ -59,4 +59,12 @@ pub trait OutboxRepo: Send + Sync {
 
     /// Server acknowledged the listed ops: delete them from the local outbox.
     async fn delete_acked(&self, op_ids: &[Uuid]) -> AppResult<()>;
+
+    /// Mark the business rows behind acknowledged ops as clean
+    /// (`dirty = 0`, `last_synced_at = now`). Without this the source rows
+    /// stay `dirty = 1` forever after a successful push, so the dirty flag is
+    /// meaningless and the audit-retention vacuum (which only purges
+    /// `dirty = 0` rows) can never reclaim own-device rows. Pairs are
+    /// `(entity_table, entity_id)`; unknown tables are skipped.
+    async fn mark_entities_synced(&self, entities: &[(String, String)]) -> AppResult<()>;
 }
