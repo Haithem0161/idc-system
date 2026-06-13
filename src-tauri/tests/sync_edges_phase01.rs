@@ -354,3 +354,128 @@ async fn data_integrity_outbox_op_id_uniqueness_enforced_by_primary_key() {
     let result = repo.enqueue(&mut tx, &op_b).await;
     assert!(result.is_err(), "duplicate op_id must be rejected");
 }
+
+// --- C1 / C2 / C10: push failure isolation + stuck-op recovery ----------
+//
+// These pin the audit-driven sync-engine fixes:
+//  - transport failures must NOT burn the attempts cap (offline device),
+//  - per-op server rejections are parked (not poisoning the whole batch),
+//  - parked / attempts-capped ops surface as "stuck" and can be requeued.
+
+async fn enqueue_one(repo: &SqliteOutboxRepo, pool: &SqlitePool, entity_id: &str) -> Uuid {
+    let op = OutboxOp::new("patients", entity_id, b"x".to_vec());
+    let mut tx = pool.begin().await.unwrap();
+    repo.enqueue(&mut tx, &op).await.unwrap();
+    tx.commit().await.unwrap();
+    op.op_id
+}
+
+#[tokio::test]
+async fn reschedule_transient_does_not_bump_attempts() {
+    // A device that is merely offline must never exhaust its retry cap.
+    let pool = fresh_pool().await;
+    let repo = SqliteOutboxRepo::new(pool.clone());
+    let id = enqueue_one(&repo, &pool, "p-1").await;
+
+    for _ in 0..20 {
+        repo.reschedule_transient(id, "network down", 0)
+            .await
+            .unwrap();
+    }
+
+    // attempts still 0 -> the op is still pending, never stuck.
+    assert_eq!(repo.pending_count().await.unwrap(), 1);
+    assert_eq!(repo.stuck_count().await.unwrap(), 0);
+    let batch = repo.next_batch(10).await.unwrap();
+    assert_eq!(batch.len(), 1, "op must remain pushable after 20 outages");
+}
+
+#[tokio::test]
+async fn mark_failure_still_bumps_attempts_for_server_errors() {
+    let pool = fresh_pool().await;
+    let repo = SqliteOutboxRepo::new(pool.clone());
+    let id = enqueue_one(&repo, &pool, "p-1").await;
+
+    for _ in 0..10 {
+        repo.mark_failure(id, "server 500", 0).await.unwrap();
+    }
+
+    // attempts reached the cap -> excluded from pending, surfaced as stuck.
+    assert_eq!(repo.pending_count().await.unwrap(), 0);
+    assert_eq!(repo.stuck_count().await.unwrap(), 1);
+    assert!(repo.next_batch(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn park_with_error_surfaces_op_as_stuck_with_reason() {
+    let pool = fresh_pool().await;
+    let repo = SqliteOutboxRepo::new(pool.clone());
+    let id = enqueue_one(&repo, &pool, "p-1").await;
+
+    repo.park_with_error(id, "VALIDATION_ERROR: patient name required")
+        .await
+        .unwrap();
+
+    assert_eq!(repo.pending_count().await.unwrap(), 0);
+    assert_eq!(repo.stuck_count().await.unwrap(), 1);
+    let stuck = repo.list_stuck().await.unwrap();
+    assert_eq!(stuck.len(), 1);
+    assert_eq!(stuck[0].op_id, id);
+    assert!(stuck[0].parked);
+    assert_eq!(
+        stuck[0].last_error.as_deref(),
+        Some("VALIDATION_ERROR: patient name required")
+    );
+}
+
+#[tokio::test]
+async fn one_poison_op_does_not_strand_the_rest_of_the_batch() {
+    // Parking a single bad op must leave the others pushable.
+    let pool = fresh_pool().await;
+    let repo = SqliteOutboxRepo::new(pool.clone());
+    let poison = enqueue_one(&repo, &pool, "p-bad").await;
+    let _good_a = enqueue_one(&repo, &pool, "p-good-a").await;
+    let _good_b = enqueue_one(&repo, &pool, "p-good-b").await;
+
+    repo.park_with_error(poison, "VALIDATION_ERROR: bad")
+        .await
+        .unwrap();
+
+    assert_eq!(repo.stuck_count().await.unwrap(), 1);
+    assert_eq!(repo.pending_count().await.unwrap(), 2);
+    let batch = repo.next_batch(10).await.unwrap();
+    assert_eq!(batch.len(), 2, "the two good ops must still be pushable");
+    assert!(batch.iter().all(|op| op.op_id != poison));
+}
+
+#[tokio::test]
+async fn requeue_stuck_resets_a_parked_op_and_makes_it_pushable_again() {
+    let pool = fresh_pool().await;
+    let repo = SqliteOutboxRepo::new(pool.clone());
+    let id = enqueue_one(&repo, &pool, "p-1").await;
+    repo.park_with_error(id, "VALIDATION_ERROR: transient config gap")
+        .await
+        .unwrap();
+    assert_eq!(repo.stuck_count().await.unwrap(), 1);
+
+    let affected = repo.requeue_stuck(id).await.unwrap();
+    assert_eq!(affected, 1);
+    assert_eq!(repo.stuck_count().await.unwrap(), 0);
+    assert_eq!(repo.pending_count().await.unwrap(), 1);
+    let batch = repo.next_batch(10).await.unwrap();
+    assert_eq!(batch.len(), 1);
+    assert_eq!(batch[0].op_id, id);
+    assert_eq!(batch[0].attempts, 0, "attempts reset on requeue");
+    assert!(batch[0].last_error.is_none());
+}
+
+#[tokio::test]
+async fn requeue_stuck_returns_zero_for_a_non_stuck_or_unknown_op() {
+    let pool = fresh_pool().await;
+    let repo = SqliteOutboxRepo::new(pool.clone());
+    // Unknown id.
+    assert_eq!(repo.requeue_stuck(Uuid::now_v7()).await.unwrap(), 0);
+    // A pending (not stuck) op is not affected by requeue_stuck.
+    let id = enqueue_one(&repo, &pool, "p-1").await;
+    assert_eq!(repo.requeue_stuck(id).await.unwrap(), 0);
+}

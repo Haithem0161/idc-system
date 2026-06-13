@@ -12,6 +12,8 @@ export type CommandMap = {
   sync_outbox_count: { args: void; result: number }
   sync_trigger_push: { args: void; result: null }
   sync_trigger_pull: { args: void; result: null }
+  sync_list_stuck: { args: void; result: StuckOpRecord[] }
+  sync_requeue_op: { args: { op_id: string }; result: null }
   sync_list_conflicts: {
     args: { limit?: number; offset?: number }
     result: ConflictRecord[]
@@ -863,6 +865,18 @@ export interface SyncStatusSnapshot {
   status: SyncStatus
   pendingOps: number
   pending_ops?: number
+  /** Ops stranded after a server rejection or attempts cap (snake_case wire). */
+  stuck_ops?: number
+}
+
+export interface StuckOpRecord {
+  op_id: string
+  entity: string
+  entity_id: string
+  attempts: number
+  parked: boolean
+  last_error: string | null
+  created_at: string
 }
 
 export interface DeviceInfo {

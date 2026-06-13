@@ -130,7 +130,10 @@ test('DEF-007 G24: same op_id replay returns duplicate (ProcessedOp dedupe)', as
   assert.strictEqual(body.accepted[0].op_id, opId)
 })
 
-test('DEF-007 G24: receptionist push of users row rejected with 403 (role gate)', async (t) => {
+test('DEF-007 G24: receptionist push of users row is per-op rejected (role gate)', async (t) => {
+  // Per-op isolation: a role/validation failure no longer aborts the batch
+  // with an HTTP error; the op lands in `rejected[]` with a 200 envelope so
+  // the rest of the batch still applies.
   const app = await build(t)
   const token = receptionistToken(app as unknown as FastifyAppLike)
   const opId = '01HZ0000000000000000000g24c'
@@ -141,9 +144,13 @@ test('DEF-007 G24: receptionist push of users row rejected with 403 (role gate)'
     headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-1' },
     payload: { ops: [makeUserOp(opId, makeUserPayload(userId))] },
   })
-  assert.strictEqual(res.statusCode, 403, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
   const body = JSON.parse(res.payload)
-  assert.strictEqual(body.code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, opId)
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 403)
 })
 
 test('DEF-007 G24: dedupe keyed on op_id, NOT user id (two distinct ops on same user both apply)', async (t) => {

@@ -126,9 +126,13 @@ test('POST /sync/push rejects audit_log with deleted_at (AUDIT_IMMUTABLE)', asyn
     headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-1' },
     payload: { ops: [makeOp(opId, payload)] },
   })
-  assert.strictEqual(res.statusCode, 422)
+  assert.strictEqual(res.statusCode, 200, res.payload)
   const body = JSON.parse(res.payload)
-  assert.strictEqual(body.code, 'AUDIT_IMMUTABLE')
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, opId)
+  assert.strictEqual(body.rejected[0].code, 'AUDIT_IMMUTABLE')
+  assert.strictEqual(body.rejected[0].status_code, 422)
 })
 
 test('GET /sync/pull returns pushed rows in order', async (t) => {

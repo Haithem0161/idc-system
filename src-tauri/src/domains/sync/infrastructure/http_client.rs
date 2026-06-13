@@ -38,9 +38,24 @@ pub struct ServerConflict {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct PushRejectedOp {
+    pub op_id: String,
+    pub code: String,
+    pub message: String,
+    #[allow(dead_code)]
+    pub status_code: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct PushResult {
     pub accepted: Vec<PushResponseOp>,
     pub conflicts: Vec<ServerConflict>,
+    /// Per-op rejections (validation / authorization). Server isolates these
+    /// instead of aborting the batch; the client parks them so one poison op
+    /// never strands the rest of the queue. `#[serde(default)]` keeps the
+    /// client compatible with older servers that omit the field.
+    #[serde(default)]
+    pub rejected: Vec<PushRejectedOp>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

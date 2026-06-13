@@ -100,7 +100,13 @@ test('inventory: count_correction with delta=0 is rejected (422)', async (t) => 
       ],
     },
   })
-  assert.strictEqual(res.statusCode, 422, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZWP00000000000000000002')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
 })
 
 test('inventory: count_correction from receptionist is forbidden (403)', async (t) => {
@@ -123,7 +129,13 @@ test('inventory: count_correction from receptionist is forbidden (403)', async (
       ],
     },
   })
-  assert.strictEqual(res.statusCode, 403, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZWP00000000000000000003')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 403)
 })
 
 test('inventory: count_correction superadmin negative signed delta is applied', async (t) => {
@@ -171,7 +183,13 @@ test('inventory: receive with non-positive delta is rejected (422)', async (t) =
       ],
     },
   })
-  assert.strictEqual(res.statusCode, 422, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZWP00000000000000000005')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
 })
 
 test('inventory: writeoff with positive delta is rejected (422)', async (t) => {
@@ -194,7 +212,13 @@ test('inventory: writeoff with positive delta is rejected (422)', async (t) => {
       ],
     },
   })
-  assert.strictEqual(res.statusCode, 422, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZWP00000000000000000006')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
 })
 
 test('inventory: adjustment replay returns 409 ADDITIVE_VIOLATION on different op_id', async (t) => {
@@ -229,7 +253,13 @@ test('inventory: adjustment replay returns 409 ADDITIVE_VIOLATION on different o
       ],
     },
   })
-  assert.strictEqual(second.statusCode, 409, second.payload)
+  assert.strictEqual(second.statusCode, 200, second.payload)
+  const body = JSON.parse(second.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZWP00000000000000000008')
+  assert.strictEqual(body.rejected[0].code, 'ADDITIVE_VIOLATION')
+  assert.strictEqual(body.rejected[0].status_code, 409)
 })
 
 test('inventory: note longer than 500 chars is rejected', async (t) => {
@@ -253,5 +283,11 @@ test('inventory: note longer than 500 chars is rejected', async (t) => {
       ],
     },
   })
-  assert.strictEqual(res.statusCode, 422, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZWP00000000000000000009')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
 })

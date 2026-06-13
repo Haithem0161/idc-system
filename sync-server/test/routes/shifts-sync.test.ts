@@ -92,9 +92,13 @@ test('POST /sync/push rejects operator_shifts with check_out_at < check_in_at', 
       ],
     },
   })
-  assert.strictEqual(res.statusCode, 422, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
   const body = JSON.parse(res.payload)
-  assert.strictEqual(body.code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZSH00000000000000000002')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
 })
 
 test('POST /sync/push rejects operator_shifts from accountant role', async (t) => {
@@ -114,7 +118,13 @@ test('POST /sync/push rejects operator_shifts from accountant role', async (t) =
       ops: [jsonOp('01HZSH00000000000000000003', 'operator_shifts', shiftId, shiftPayload(shiftId))],
     },
   })
-  assert.strictEqual(res.statusCode, 403, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZSH00000000000000000003')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 403)
 })
 
 test('POST /sync/push is idempotent on op_id replay', async (t) => {

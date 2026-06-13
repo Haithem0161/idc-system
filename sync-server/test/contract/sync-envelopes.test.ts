@@ -150,13 +150,21 @@ test('PushResponseSchema accepts a fully populated response with both accepted a
         reason: 'AUDIT_IMMUTABLE',
       },
     ],
+    rejected: [
+      {
+        op_id: 'op-4',
+        code: 'VALIDATION_ERROR',
+        message: 'patient name required',
+        status_code: 422,
+      },
+    ],
   }
   assert.equal(Value.Check(PushResponseSchema, response), true)
 })
 
-test('PushResponseSchema accepts both empty arrays (idle push)', () => {
+test('PushResponseSchema accepts all empty arrays (idle push)', () => {
   assert.equal(
-    Value.Check(PushResponseSchema, { accepted: [], conflicts: [] }),
+    Value.Check(PushResponseSchema, { accepted: [], conflicts: [], rejected: [] }),
     true
   )
 })

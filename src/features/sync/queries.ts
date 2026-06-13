@@ -12,11 +12,13 @@ export const syncKeys = {
   status: ["sync", "status"] as const,
   conflicts: ["sync", "conflicts"] as const,
   outboxCount: ["sync", "outbox-count"] as const,
+  stuck: ["sync", "stuck"] as const,
 }
 
 export interface SyncStatusSnapshot {
   status: SyncStatus
   pendingOps: number
+  stuckOps: number
 }
 
 function normalizeSnapshot (raw: unknown): SyncStatusSnapshot {
@@ -24,9 +26,14 @@ function normalizeSnapshot (raw: unknown): SyncStatusSnapshot {
     const obj = raw as Record<string, unknown>
     const status = SyncStatusSchema.parse(obj.status ?? "idle")
     const pending = obj.pendingOps ?? obj.pending_ops ?? 0
-    return { status, pendingOps: typeof pending === "number" ? pending : 0 }
+    const stuck = obj.stuckOps ?? obj.stuck_ops ?? 0
+    return {
+      status,
+      pendingOps: typeof pending === "number" ? pending : 0,
+      stuckOps: typeof stuck === "number" ? stuck : 0,
+    }
   }
-  return { status: "offline", pendingOps: 0 }
+  return { status: "offline", pendingOps: 0, stuckOps: 0 }
 }
 
 export function useSyncStatus () {
@@ -87,6 +94,51 @@ export function useTriggerPull () {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: syncKeys.status })
+    },
+  })
+}
+
+export interface StuckOp {
+  opId: string
+  entity: string
+  entityId: string
+  attempts: number
+  parked: boolean
+  lastError: string | null
+  createdAt: string
+}
+
+export function useStuckOps () {
+  return useQuery({
+    queryKey: syncKeys.stuck,
+    enabled: isTauri(),
+    queryFn: async (): Promise<StuckOp[]> => {
+      const rows = await invoke("sync_list_stuck")
+      if (!Array.isArray(rows)) return []
+      return rows.map((r) => ({
+        opId: r.op_id,
+        entity: r.entity,
+        entityId: r.entity_id,
+        attempts: r.attempts,
+        parked: r.parked,
+        lastError: r.last_error,
+        createdAt: r.created_at,
+      }))
+    },
+    refetchInterval: 10_000,
+  })
+}
+
+export function useRequeueOp () {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (opId: string) => {
+      await invoke("sync_requeue_op", { op_id: opId })
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: syncKeys.stuck })
+      void qc.invalidateQueries({ queryKey: syncKeys.status })
+      void qc.invalidateQueries({ queryKey: syncKeys.outboxCount })
     },
   })
 }

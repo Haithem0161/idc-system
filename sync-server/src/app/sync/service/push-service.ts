@@ -42,9 +42,17 @@ export interface PushAccepted {
   status: 'applied' | 'duplicate'
 }
 
+export interface PushRejected {
+  op_id: string
+  code: string
+  message: string
+  status_code: number
+}
+
 export interface PushOutcome {
   accepted: PushAccepted[]
   conflicts: ParkedConflict[]
+  rejected: PushRejected[]
 }
 
 export interface ActorClaims {
@@ -67,15 +75,48 @@ export class SyncPushService {
     deviceId: string,
     actor?: ActorClaims
   ): Promise<PushOutcome> {
-    void deviceId
     const accepted: PushAccepted[] = []
     const conflicts: ParkedConflict[] = []
+    const rejected: PushRejected[] = []
 
     for (const op of batch) {
+      try {
+        await this.applyOne(op, tenantId, deviceId, actor, accepted, conflicts)
+      } catch (err) {
+        // A single bad op (validation / authorization / unsupported) is
+        // isolated as a rejection instead of aborting the whole batch, so the
+        // remaining good ops still apply. Non-DomainError failures (DB outage,
+        // bugs) still abort -- those are transient/systemic, not op-specific.
+        if (err instanceof DomainError) {
+          rejected.push({
+            op_id: op.op_id,
+            code: err.code,
+            message: err.message,
+            status_code: err.status,
+          })
+          continue
+        }
+        throw err
+      }
+    }
+
+    return { accepted, conflicts, rejected }
+  }
+
+  private async applyOne (
+    op: PushOp,
+    tenantId: string,
+    deviceId: string,
+    actor: ActorClaims | undefined,
+    accepted: PushAccepted[],
+    conflicts: ParkedConflict[]
+  ): Promise<void> {
+    void deviceId
+    {
       const cached = await this.processed.has(op.op_id, tenantId)
       if (cached) {
         accepted.push({ op_id: op.op_id, status: 'duplicate' })
-        continue
+        return
       }
       if (op.op !== 'upsert') {
         throw new DomainError(
@@ -139,7 +180,7 @@ export class SyncPushService {
             }
             await this.conflicts.park({ ...envelope, tenantId })
             conflicts.push(envelope)
-            continue
+            return
           }
           await this.store.upsertSetting(row)
           break
@@ -293,7 +334,7 @@ export class SyncPushService {
             }
             await this.conflicts.park({ ...envelope, tenantId })
             conflicts.push(envelope)
-            continue
+            return
           }
           await this.store.upsertVisit(row)
           break
@@ -369,8 +410,6 @@ export class SyncPushService {
       await this.processed.remember(op.op_id, tenantId, response)
       accepted.push({ op_id: op.op_id, status: 'applied' })
     }
-
-    return { accepted, conflicts }
   }
 
   private requireSuperadmin (actor: ActorClaims | undefined, what: string): void {

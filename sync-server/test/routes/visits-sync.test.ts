@@ -183,7 +183,13 @@ test('POST /sync/push rejects a patient with empty name', async (t) => {
       ],
     },
   })
-  assert.strictEqual(res.statusCode, 422, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZVP00000000000000000002')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
 })
 
 test('POST /sync/push accepts a draft visit', async (t) => {
@@ -255,9 +261,13 @@ test('POST /sync/push rejects locked visit with mismatched total snapshot', asyn
       ],
     },
   })
-  assert.strictEqual(res.statusCode, 422, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
   const body = JSON.parse(res.payload)
-  assert.strictEqual(body.code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZVP00000000000000000006')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
 })
 
 test('POST /sync/push parks manual visit conflict on version divergence', async (t) => {
@@ -357,9 +367,13 @@ test('POST /sync/push rejects mutating an existing inventory_adjustment', async 
       ],
     },
   })
-  assert.strictEqual(second.statusCode, 409, second.payload)
+  assert.strictEqual(second.statusCode, 200, second.payload)
   const body = JSON.parse(second.payload)
-  assert.strictEqual(body.code, 'ADDITIVE_VIOLATION')
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZVP00000000000000000011')
+  assert.strictEqual(body.rejected[0].code, 'ADDITIVE_VIOLATION')
+  assert.strictEqual(body.rejected[0].status_code, 409)
 })
 
 test('POST /sync/push rejects inventory_adjustments with bad reason+delta combo', async (t) => {
@@ -386,9 +400,13 @@ test('POST /sync/push rejects inventory_adjustments with bad reason+delta combo'
       ],
     },
   })
-  assert.strictEqual(res.statusCode, 422, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
   const body = JSON.parse(res.payload)
-  assert.strictEqual(body.code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZVP00000000000000000012')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
 })
 
 test('GET /sync/pull surfaces newly pushed visits', async (t) => {

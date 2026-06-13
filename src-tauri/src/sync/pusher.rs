@@ -75,7 +75,11 @@ pub async fn run_step(
                 }),
             )
             .await;
-            backoff_all(&outbox_repo, &batch, &e.to_string()).await?;
+            // The whole HTTP call failed -- a transport-level error, not an
+            // op-specific one. Reschedule the batch WITHOUT burning attempts so
+            // a device that is merely offline never strands its queue once
+            // connectivity returns.
+            reschedule_transient_all(&outbox_repo, &batch, &e.to_string()).await?;
             return Err(e);
         }
     };
@@ -100,6 +104,29 @@ pub async fn run_step(
                     "op_id": conflict.op_id,
                     "entity": conflict.entity,
                     "auto_resolved": false,
+                }),
+            )
+            .await;
+        }
+    }
+
+    // Park per-op rejections (validation / authorization). The server isolated
+    // these instead of aborting the batch; parking them keeps one poison op
+    // from blocking every later push, and surfaces them via `stuck_count` /
+    // `list_stuck` for manual recovery rather than letting them vanish.
+    for rejected in &result.rejected {
+        if let Ok(id) = Uuid::parse_str(&rejected.op_id) {
+            let reason = format!("{}: {}", rejected.code, rejected.message);
+            let _ = outbox_repo.park_with_error(id, &reason).await;
+            warn!(op_id = %rejected.op_id, code = %rejected.code, "push: op rejected, parked");
+            write_metric(
+                pool,
+                entity_id_tenant,
+                MetricKind::SyncPushFail,
+                serde_json::json!({
+                    "op_id": rejected.op_id,
+                    "rejected": true,
+                    "code": rejected.code,
                 }),
             )
             .await;
@@ -135,10 +162,18 @@ pub async fn run_step(
     })
 }
 
-async fn backoff_all(repo: &Arc<dyn OutboxRepo>, batch: &[OutboxOp], err: &str) -> AppResult<()> {
+/// Reschedule a whole batch after a transport-level failure WITHOUT bumping
+/// `attempts`. Backoff still grows with the existing attempt count so a server
+/// that is down for a while is polled less aggressively, but the cap is never
+/// consumed by connectivity problems.
+async fn reschedule_transient_all(
+    repo: &Arc<dyn OutboxRepo>,
+    batch: &[OutboxOp],
+    err: &str,
+) -> AppResult<()> {
     for op in batch {
         let backoff = OutboxOp::next_backoff(op.attempts).as_secs();
-        repo.mark_failure(op.op_id, err, backoff).await?;
+        repo.reschedule_transient(op.op_id, err, backoff).await?;
     }
     Ok(())
 }

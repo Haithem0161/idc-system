@@ -55,6 +55,7 @@ const route: FastifyPluginAsync = async (fastify) => {
           local_payload: c.localPayload,
           reason: c.reason,
         })),
+        rejected: result.rejected,
       }
     },
   })

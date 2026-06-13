@@ -12,6 +12,21 @@ use crate::state::AppState;
 pub struct SyncStatusSnapshot {
     pub status: SyncStatus,
     pub pending_ops: u32,
+    /// Ops that can no longer make progress on their own (parked after a
+    /// server rejection or attempts-capped). Surfaced so stranded work is
+    /// visible instead of silently lost; recover via `sync_requeue_op`.
+    pub stuck_ops: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StuckOp {
+    pub op_id: String,
+    pub entity: String,
+    pub entity_id: String,
+    pub attempts: i32,
+    pub parked: bool,
+    pub last_error: Option<String>,
+    pub created_at: String,
 }
 
 // --- testable `_impl` helpers -------------------------------------------
@@ -23,15 +38,51 @@ pub struct SyncStatusSnapshot {
 pub async fn sync_status_impl(state: &AppState) -> AppResult<SyncStatusSnapshot> {
     let engine = state.sync_engine();
     let status = engine.status().await;
-    let pending_ops = engine.outbox_repo().pending_count().await?;
+    let outbox = engine.outbox_repo();
+    let pending_ops = outbox.pending_count().await?;
+    let stuck_ops = outbox.stuck_count().await?;
     Ok(SyncStatusSnapshot {
         status,
         pending_ops,
+        stuck_ops,
     })
 }
 
 pub async fn sync_outbox_count_impl(state: &AppState) -> AppResult<u32> {
     state.sync_engine().outbox_repo().pending_count().await
+}
+
+pub async fn sync_list_stuck_impl(state: &AppState) -> AppResult<Vec<StuckOp>> {
+    let ops = state.sync_engine().outbox_repo().list_stuck().await?;
+    Ok(ops
+        .into_iter()
+        .map(|op| StuckOp {
+            op_id: op.op_id.to_string(),
+            entity: op.entity,
+            entity_id: op.entity_id,
+            attempts: op.attempts,
+            parked: op.parked,
+            last_error: op.last_error,
+            created_at: op.created_at.to_rfc3339(),
+        })
+        .collect())
+}
+
+pub async fn sync_requeue_op_impl(state: &AppState, op_id: String) -> AppResult<()> {
+    let parsed = uuid::Uuid::parse_str(&op_id)?;
+    let affected = state
+        .sync_engine()
+        .outbox_repo()
+        .requeue_stuck(parsed)
+        .await?;
+    if affected == 0 {
+        return Err(crate::error::AppError::NotFound(format!(
+            "no stuck op with id {op_id}"
+        )));
+    }
+    // Kick a push so the requeued op is attempted promptly.
+    state.sync_engine().trigger_push().await;
+    Ok(())
 }
 
 pub async fn sync_trigger_push_impl(state: &AppState) -> AppResult<()> {
@@ -132,6 +183,18 @@ pub async fn sync_outbox_count(state: State<'_, AppState>) -> AppResult<u32> {
 #[instrument(skip(state))]
 pub async fn sync_trigger_push(state: State<'_, AppState>) -> AppResult<()> {
     sync_trigger_push_impl(&state).await
+}
+
+#[tauri::command]
+#[instrument(skip(state))]
+pub async fn sync_list_stuck(state: State<'_, AppState>) -> AppResult<Vec<StuckOp>> {
+    sync_list_stuck_impl(&state).await
+}
+
+#[tauri::command]
+#[instrument(skip(state))]
+pub async fn sync_requeue_op(state: State<'_, AppState>, op_id: String) -> AppResult<()> {
+    sync_requeue_op_impl(&state, op_id).await
 }
 
 #[tauri::command]

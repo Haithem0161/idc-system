@@ -86,12 +86,74 @@ impl OutboxRepo for SqliteOutboxRepo {
         Ok(())
     }
 
+    async fn reschedule_transient(
+        &self,
+        op_id: Uuid,
+        error: &str,
+        backoff_secs: u64,
+    ) -> AppResult<()> {
+        // Transport failure: reschedule but DO NOT bump attempts, so an offline
+        // device never exhausts its retry cap and strands the queue.
+        let next = (Utc::now() + chrono::Duration::seconds(backoff_secs as i64)).to_rfc3339();
+        sqlx::query("UPDATE outbox SET last_error = ?, next_attempt_at = ? WHERE op_id = ?")
+            .bind(error)
+            .bind(next)
+            .bind(op_id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn park(&self, op_id: Uuid) -> AppResult<()> {
         sqlx::query("UPDATE outbox SET parked = 1 WHERE op_id = ?")
             .bind(op_id.to_string())
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    async fn park_with_error(&self, op_id: Uuid, error: &str) -> AppResult<()> {
+        sqlx::query("UPDATE outbox SET parked = 1, last_error = ? WHERE op_id = ?")
+            .bind(error)
+            .bind(op_id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn stuck_count(&self) -> AppResult<u32> {
+        let (n,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE parked = 1 OR attempts >= 10")
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(n.max(0) as u32)
+    }
+
+    async fn list_stuck(&self) -> AppResult<Vec<OutboxOp>> {
+        let rows: Vec<OutboxRow> = sqlx::query_as::<_, OutboxRow>(
+            "SELECT op_id, entity, entity_id, op, payload, created_at, attempts, \
+                    next_attempt_at, last_error, parked \
+             FROM outbox \
+             WHERE parked = 1 OR attempts >= 10 \
+             ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(OutboxRow::try_into_domain).collect()
+    }
+
+    async fn requeue_stuck(&self, op_id: Uuid) -> AppResult<u64> {
+        let now = Utc::now().to_rfc3339();
+        let result = sqlx::query(
+            "UPDATE outbox \
+             SET attempts = 0, parked = 0, next_attempt_at = ?, last_error = NULL \
+             WHERE op_id = ? AND (parked = 1 OR attempts >= 10)",
+        )
+        .bind(now)
+        .bind(op_id.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
     }
 
     async fn delete_acked(&self, op_ids: &[Uuid]) -> AppResult<()> {

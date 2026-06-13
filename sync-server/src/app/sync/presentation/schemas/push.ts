@@ -29,6 +29,17 @@ export const PushResponseSchema = Type.Object({
       reason: Type.String(),
     })
   ),
+  // Per-op rejections (validation / authorization failures). A single bad op
+  // no longer aborts the whole batch -- it lands here so the client can park
+  // it while the rest of the batch applies.
+  rejected: Type.Array(
+    Type.Object({
+      op_id: Type.String(),
+      code: Type.String(),
+      message: Type.String(),
+      status_code: Type.Integer(),
+    })
+  ),
 })
 
 export type PushBody = Static<typeof PushBodySchema>

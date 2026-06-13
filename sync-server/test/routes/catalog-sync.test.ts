@@ -88,9 +88,13 @@ test('POST /sync/push rejects check_types with XOR violation', async (t) => {
       ],
     },
   })
-  assert.strictEqual(res.statusCode, 422, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
   const body = JSON.parse(res.payload)
-  assert.strictEqual(body.code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, opId)
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
 })
 
 test('POST /sync/push rejects catalog push when role is not superadmin', async (t) => {
@@ -109,8 +113,14 @@ test('POST /sync/push rejects catalog push when role is not superadmin', async (
     headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-1' },
     payload: { ops: [jsonOp(opId, 'check_types', ctId, checkTypePayload(ctId))] },
   })
-  // Role guard surfaces as 403 from DomainError
-  assert.strictEqual(res.statusCode, 403, res.payload)
+  // Role guard surfaces as a per-op rejection (403 status_code) inside the 200 envelope.
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, opId)
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 403)
 })
 
 test('Pull returns previously-pushed catalog rows for a new device', async (t) => {
@@ -210,7 +220,11 @@ test('POST /sync/push rejects doctor_check_pricing when parent has_subtypes mism
       ],
     },
   })
-  assert.strictEqual(res.statusCode, 422, res.payload)
+  assert.strictEqual(res.statusCode, 200, res.payload)
   const body = JSON.parse(res.payload)
-  assert.strictEqual(body.code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZBB00000000000000000003')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
 })
