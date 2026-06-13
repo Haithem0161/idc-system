@@ -595,28 +595,49 @@ export class PrismaEntityStore implements SyncEntityStore {
 
   // ---- pull aggregation ----------------------------------------------------
 
-  async collectChanges (tenantId: string): Promise<ChangeRow[]> {
+  /**
+   * Aggregate every syncable entity changed since the pull watermark.
+   *
+   * `sinceUpdatedAt` is the `at` component of the decoded pull cursor. Pushing
+   * it into each `findMany` `where` means a pull only loads rows that changed
+   * after the cursor instead of the ENTIRE tenant dataset across 14 tables on
+   * every /sync/pull. Combined with a per-entity `take` cap, a single pull can
+   * never load an unbounded result set. We use `updatedAt: { gt: ... }`; the
+   * caller (`PrismaAuditLogRepo.changesSince`) re-applies the full keyset
+   * (`updated_at`, `id`) filter in-memory after the merge, so the strict `gt`
+   * boundary never drops a row that shares the cursor's exact timestamp.
+   *
+   * `orderBy [updatedAt asc, id asc]` makes the capped window the OLDEST
+   * unsynced rows, so successive pulls walk the change set forward in cursor
+   * order rather than returning an arbitrary slice.
+   */
+  async collectChanges (tenantId: string, sinceUpdatedAt?: string): Promise<ChangeRow[]> {
+    const TAKE_CAP = 1000
+    const since = sinceUpdatedAt ? new Date(sinceUpdatedAt) : null
+    const sinceWhere = since ? { updatedAt: { gt: since } } : {}
+    const orderBy = [{ updatedAt: 'asc' as const }, { id: 'asc' as const }]
+
     const [
       users, settings, checkTypes, checkSubtypes, doctors, doctorPricings,
       operators, operatorSpecialties, inventoryItems, consumptionMaps,
       operatorShifts, patients, visits, inventoryAdjustments,
     ] = await Promise.all([
-      this.prisma.user.findMany({ where: { entityId: tenantId } }),
-      this.prisma.setting.findMany({ where: { entityId: tenantId, deletedAt: null } }),
-      this.prisma.checkType.findMany({ where: { entityId: tenantId, deletedAt: null } }),
-      this.prisma.checkSubtype.findMany({ where: { entityId: tenantId, deletedAt: null } }),
-      this.prisma.doctor.findMany({ where: { entityId: tenantId, deletedAt: null } }),
-      this.prisma.doctorCheckPricing.findMany({ where: { entityId: tenantId, deletedAt: null } }),
-      this.prisma.operator.findMany({ where: { entityId: tenantId, deletedAt: null } }),
-      this.prisma.operatorSpecialty.findMany({ where: { entityId: tenantId, deletedAt: null } }),
-      this.prisma.inventoryItem.findMany({ where: { entityId: tenantId, deletedAt: null } }),
-      this.prisma.inventoryConsumptionMap.findMany({ where: { entityId: tenantId, deletedAt: null } }),
+      this.prisma.user.findMany({ where: { entityId: tenantId, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.setting.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.checkType.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.checkSubtype.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.doctor.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.doctorCheckPricing.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.operator.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.operatorSpecialty.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.inventoryItem.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.inventoryConsumptionMap.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
       // Additive shifts: keep tombstones so other devices see the delete.
-      this.prisma.operatorShift.findMany({ where: { entityId: tenantId } }),
-      this.prisma.patient.findMany({ where: { entityId: tenantId, deletedAt: null } }),
-      this.prisma.visit.findMany({ where: { entityId: tenantId, deletedAt: null } }),
+      this.prisma.operatorShift.findMany({ where: { entityId: tenantId, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.patient.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.visit.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
       // Additive adjustments: keep tombstones for symmetry.
-      this.prisma.inventoryAdjustment.findMany({ where: { entityId: tenantId } }),
+      this.prisma.inventoryAdjustment.findMany({ where: { entityId: tenantId, ...sinceWhere }, orderBy, take: TAKE_CAP }),
     ])
 
     const changes: ChangeRow[] = []

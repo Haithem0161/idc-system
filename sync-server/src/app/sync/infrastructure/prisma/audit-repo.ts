@@ -81,7 +81,12 @@ export class PrismaAuditLogRepo implements AuditLogRepository {
       version: row.version,
     }))
 
-    const entityChanges = await this.entityStore.collectChanges(tenantId)
+    // Thread the cursor watermark into the entity sweep so a pull loads only
+    // rows changed since the cursor (bounded by a per-entity take cap) instead
+    // of the whole tenant dataset across every table. The in-memory keyset
+    // filter + slice below still de-dupes the boundary and enforces the page
+    // size, so a watermark-narrowed window stays correct.
+    const entityChanges = await this.entityStore.collectChanges(tenantId, decoded?.at)
 
     const merged = [...auditChanges, ...entityChanges]
       .sort((a, b) => {

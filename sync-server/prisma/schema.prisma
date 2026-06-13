@@ -37,11 +37,17 @@ model AuditLog {
 }
 
 model ProcessedOp {
-  opId           String   @id @map("op_id")
+  // Dedupe key is (op_id, tenant). The same op_id legitimately occurs under
+  // two different tenants -- a tenant collision is NOT a duplicate. Keying on
+  // op_id alone let tenant B's `remember` overwrite tenant A's dedupe row, so
+  // a later retry from tenant A would double-apply. The composite primary key
+  // isolates dedupe per tenant.
+  opId           String   @map("op_id")
   entityIdTenant String   @map("entity_id_tenant")
   responseHash   String   @map("response_hash")
   processedAt    DateTime @default(now()) @map("processed_at") @db.Timestamptz
 
+  @@id([opId, entityIdTenant])
   @@index([entityIdTenant, processedAt])
   @@map("processed_ops")
 }

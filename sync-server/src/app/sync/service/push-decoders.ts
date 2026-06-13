@@ -31,19 +31,44 @@ export function decodeAuditPayload (b64: string): AuditPayload {
   }
 }
 
-export function decodeJsonPayload<T> (b64: string): T {
+export function decodeJsonPayload<T> (b64: string, opId: string): T {
   const bytes = Buffer.from(b64, 'base64')
+  let parsed: unknown
   try {
     const txt = bytes.toString('utf-8')
-    return JSON.parse(txt) as T
+    parsed = JSON.parse(txt)
   } catch (err) {
     throw new DomainError(
       'VALIDATION_ERROR',
       'payload is not valid JSON',
       422,
-      { reason: (err as Error).message }
+      { op_id: opId, reason: (err as Error).message }
     )
   }
+  // Structural guard: JSON.parse happily accepts numbers, strings, arrays and
+  // null -- none of which are syncable records. Every syncable record is a
+  // non-null object carrying a non-empty string `id`. Reject anything else so
+  // a malformed-but-parseable payload is isolated as a per-op rejection
+  // (push-service collects DomainErrors into `rejected`) instead of flowing
+  // unchecked into the entity store.
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'decoded payload is not a valid record',
+      422,
+      { op_id: opId }
+    )
+  }
+  const id = (parsed as Record<string, unknown>).id
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'decoded payload is not a valid record',
+      422,
+      { op_id: opId }
+    )
+  }
+  return parsed as T
 }
 
 function decodeRaw (b64: string): Record<string, unknown> {

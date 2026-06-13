@@ -620,14 +620,17 @@ export class MemorySyncStore implements
   }
 
   async has (opId: string, tenantId: string): Promise<ProcessedOpResponse | null> {
-    const hit = this.processed.get(opId)
+    const hit = this.processed.get(processedKey(opId, tenantId))
     if (!hit) return null
-    if (hit.tenantId !== tenantId) return null
     return hit.response
   }
 
   async remember (opId: string, tenantId: string, response: ProcessedOpResponse): Promise<void> {
-    this.processed.set(opId, { tenantId, response, processedAt: new Date() })
+    // Key on the composite (op_id, tenant) so the same op_id under two tenants
+    // keeps two independent dedupe rows -- a tenant B remember must NOT clobber
+    // tenant A's dedupe (which would let A's retry double-apply). Mirrors the
+    // Prisma store's composite primary key.
+    this.processed.set(processedKey(opId, tenantId), { tenantId, response, processedAt: new Date() })
   }
 
   async purgeOlderThan (cutoff: Date): Promise<number> {
@@ -846,6 +849,10 @@ function upsertLWW<T extends SyncRow> (store: Map<string, T>, row: T): { applied
     return { applied: true }
   }
   return { applied: false }
+}
+
+function processedKey (opId: string, tenantId: string): string {
+  return `${tenantId}:${opId}`
 }
 
 function encodeCursor (at: string, id: string): string {

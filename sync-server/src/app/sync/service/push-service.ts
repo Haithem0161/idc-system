@@ -151,14 +151,14 @@ export class SyncPushService {
         }
         case 'users': {
           this.requireSuperadmin(actor, 'users push')
-          const row = decodeJsonPayload<UserSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<UserSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           await this.store.upsertUser(row)
           break
         }
         case 'settings': {
           this.requireSuperadmin(actor, 'settings push')
-          const row = decodeJsonPayload<SettingSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<SettingSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           if (row.deleted_at && PROTECTED_SETTING_KEYS.has(row.key)) {
             throw new DomainError(
@@ -187,7 +187,7 @@ export class SyncPushService {
         }
         case 'check_types': {
           this.requireSuperadmin(actor, 'check_types push')
-          const row = decodeJsonPayload<CheckTypeSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<CheckTypeSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           validateCheckType(row, op.op_id)
           await this.store.upsertCheckType(row)
@@ -195,7 +195,7 @@ export class SyncPushService {
         }
         case 'check_subtypes': {
           this.requireSuperadmin(actor, 'check_subtypes push')
-          const row = decodeJsonPayload<CheckSubtypeSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<CheckSubtypeSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           await this.requireSubtypedParent(row.check_type_id, op.op_id)
           await this.store.upsertCheckSubtype(row)
@@ -203,7 +203,7 @@ export class SyncPushService {
         }
         case 'doctors': {
           this.requireSuperadmin(actor, 'doctors push')
-          const row = decodeJsonPayload<DoctorSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<DoctorSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           if (row.name.trim().length === 0) {
             throw new DomainError(
@@ -218,7 +218,7 @@ export class SyncPushService {
         }
         case 'doctor_check_pricing': {
           this.requireSuperadmin(actor, 'doctor_check_pricing push')
-          const row = decodeJsonPayload<DoctorPricingSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<DoctorPricingSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           await this.validateDoctorPricing(row, op.op_id)
           await this.store.upsertDoctorPricing(row)
@@ -226,7 +226,7 @@ export class SyncPushService {
         }
         case 'operators': {
           this.requireSuperadmin(actor, 'operators push')
-          const row = decodeJsonPayload<OperatorSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<OperatorSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           if (row.name.trim().length === 0) {
             throw new DomainError(
@@ -250,7 +250,8 @@ export class SyncPushService {
         case 'operator_specialties': {
           this.requireSuperadmin(actor, 'operator_specialties push')
           const row = decodeJsonPayload<OperatorSpecialtySyncRecord>(
-            op.payload_b64
+            op.payload_b64,
+            op.op_id
           )
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           await this.store.upsertOperatorSpecialty(row)
@@ -258,7 +259,7 @@ export class SyncPushService {
         }
         case 'inventory_items': {
           this.requireSuperadmin(actor, 'inventory_items push')
-          const row = decodeJsonPayload<InventoryItemSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<InventoryItemSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           if (row.name_ar.trim().length === 0) {
             throw new DomainError(
@@ -281,7 +282,7 @@ export class SyncPushService {
         }
         case 'inventory_consumption_map': {
           this.requireSuperadmin(actor, 'inventory_consumption_map push')
-          const row = decodeJsonPayload<ConsumptionSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<ConsumptionSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           await this.validateConsumption(row, op.op_id)
           await this.store.upsertConsumption(row)
@@ -297,7 +298,7 @@ export class SyncPushService {
               { op_id: op.op_id }
             )
           }
-          const row = decodeJsonPayload<PatientSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<PatientSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           if (row.name.trim().length === 0) {
             throw new DomainError(
@@ -319,7 +320,7 @@ export class SyncPushService {
               { op_id: op.op_id }
             )
           }
-          const row = decodeJsonPayload<VisitSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<VisitSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           validateVisit(row, op.op_id)
           const conflict = await this.store.detectVisitConflict(row)
@@ -354,7 +355,7 @@ export class SyncPushService {
               { op_id: op.op_id }
             )
           }
-          const row = decodeJsonPayload<InventoryAdjustmentSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<InventoryAdjustmentSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           validateAdjustment(row, op.op_id)
           // Phase-06 §7.6: count_correction is superadmin-only.
@@ -391,7 +392,7 @@ export class SyncPushService {
               { op_id: op.op_id }
             )
           }
-          const row = decodeJsonPayload<OperatorShiftSyncRecord>(op.payload_b64)
+          const row = decodeJsonPayload<OperatorShiftSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           validateOperatorShift(row, op.op_id)
           await this.store.upsertOperatorShift(row)
@@ -406,6 +407,16 @@ export class SyncPushService {
           )
       }
 
+      // Dedupe is recorded AFTER the entity write, so the two are not a single
+      // atomic unit (the SyncEntityStore port is store-agnostic and would need
+      // a tx threaded through all 14 upserts plus both store impls to make it
+      // so -- out of scope here). The residual non-atomicity is bounded and
+      // safe: if a crash lands between the entity write and `remember`, the
+      // retry re-applies the SAME op, and every entity write is idempotent
+      // (LWW upserts no-op on an equal-or-stale version; additive entities key
+      // on a stable id), while `remember` itself is an idempotent upsert keyed
+      // on (op_id, tenant). A double-apply therefore converges to the same
+      // state rather than corrupting it.
       const response = { op_id: op.op_id, status: 'applied' as const, body: { ok: true } }
       await this.processed.remember(op.op_id, tenantId, response)
       accepted.push({ op_id: op.op_id, status: 'applied' })

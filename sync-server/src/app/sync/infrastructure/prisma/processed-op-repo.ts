@@ -24,9 +24,12 @@ export class PrismaProcessedOpRepo implements ProcessedOpRepository {
   constructor (private readonly prisma: PrismaClient) {}
 
   async has (opId: string, tenantId: string): Promise<ProcessedOpResponse | null> {
-    const hit = await this.prisma.processedOp.findUnique({ where: { opId } })
+    // Look up by the composite (op_id, tenant) key so a row remembered under a
+    // different tenant cannot satisfy -- or shadow -- this tenant's dedupe.
+    const hit = await this.prisma.processedOp.findUnique({
+      where: { opId_entityIdTenant: { opId, entityIdTenant: tenantId } },
+    })
     if (!hit) return null
-    if (hit.entityIdTenant !== tenantId) return null
     const body = decodeResponseHash(hit.responseHash)
     return {
       op_id: opId,
@@ -56,15 +59,17 @@ export class PrismaProcessedOpRepo implements ProcessedOpRepository {
     response: ProcessedOpResponse
   ): Promise<void> {
     const encoded = encodeResponseHash(response)
+    // Upsert is keyed by the composite (op_id, tenant). This makes a repeated
+    // remember idempotent (a double-remember after a crash-retry is safe) and
+    // guarantees one tenant's write never clobbers another tenant's dedupe row.
     await tx.processedOp.upsert({
-      where: { opId },
+      where: { opId_entityIdTenant: { opId, entityIdTenant: tenantId } },
       create: {
         opId,
         entityIdTenant: tenantId,
         responseHash: encoded,
       },
       update: {
-        entityIdTenant: tenantId,
         responseHash: encoded,
       },
     })
