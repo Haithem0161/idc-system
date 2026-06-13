@@ -44,14 +44,17 @@ export function AuthBootstrap() {
         if (!cancelled) setAnonymous()
       })
 
-    listenEvent<string>("auth:changed", () => {
+    listenEvent<string>("auth:changed", (payload) => {
+      // Rust emits the real LoginMode ("online" | "offline"); honour it
+      // instead of hardcoding "online", which clobbered offline-login state.
+      const mode: "online" | "offline" = payload === "offline" ? "offline" : "online"
       void invoke("auth_current_user").then((user) => {
         if (!user) {
           setAnonymous()
           return
         }
         const role = (user.role as UserRoleLiteral) ?? "receptionist"
-        setAuthenticated({ user, role, mode: "online" })
+        setAuthenticated({ user, role, mode })
       })
     }).then((u) => unsubs.push(u))
 

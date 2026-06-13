@@ -195,8 +195,15 @@ export function usePatientSearch (query: string) {
 }
 
 export function usePatientCreate () {
+  const qc = useQueryClient()
   return useMutation<PatientRecord, Error, { name: string }>({
     mutationFn: (input) =>
       invoke("patients_create", { args: { name: input.name } }),
+    onSuccess: () => {
+      // Invalidate every patient search so a freshly-created patient shows up
+      // immediately and a second commit of the same name resolves the existing
+      // row instead of creating a duplicate.
+      void qc.invalidateQueries({ queryKey: ["patients", "search"] })
+    },
   })
 }

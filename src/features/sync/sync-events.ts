@@ -73,12 +73,20 @@ export function useSyncEvents (): void {
       const parsed = SyncStatusSchema.safeParse(payload)
       if (parsed.success) {
         setStatus(parsed.data)
-        // DEF-007 G11: a transition to `idle` after a `pushing` phase
-        // signals a successful push. The store's `lastPushedAt`
-        // timestamp drives the `<UserMenu>` red dot threshold.
-        if (parsed.data === "idle") setLastPushedAt(Date.now())
       }
       if (parsed.success && parsed.data !== "error") setError(null)
+    })
+      .then((unlisten) => unsubs.push(unlisten))
+      .catch(() => void 0)
+
+    // DEF-007 G11: stamp lastPushedAt only on a REAL push. The engine emits
+    // sync:progress { pushed } when it actually acks ops; the old code stamped
+    // it on every idle transition (including idle pulls and no-op cycles), so
+    // the UserMenu red dot was permanently suppressed.
+    listenEvent<{ pushed?: number }>(SYNC_EVENTS.PROGRESS, (payload) => {
+      if (typeof payload?.pushed === "number" && payload.pushed > 0) {
+        setLastPushedAt(Date.now())
+      }
     })
       .then((unlisten) => unsubs.push(unlisten))
       .catch(() => void 0)

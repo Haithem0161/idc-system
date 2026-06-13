@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { LogOut, Lock, ChevronDown } from "lucide-react"
 
 import { useAuthStore } from "@/stores/auth-store"
+import { useOutboxCount } from "@/features/sync/queries"
 import { isUserMenuStale, useSyncStatusStore } from "@/stores/sync-status-store"
 import { useLock, useLogout } from "@/features/auth/queries"
 import { cn } from "@/lib/utils"
@@ -28,6 +29,13 @@ export function UserMenu() {
   const rootRef = useRef<HTMLDivElement | null>(null)
   // DEF-007 G11: red-dot indicator when outbox non-empty AND last
   // successful push older than 5 minutes (or no push yet this session).
+  // Feed the authoritative outbox count into the store's pendingOps (which was
+  // never written in production, so the dot never showed).
+  const { data: outboxCount } = useOutboxCount()
+  const setPendingOps = useSyncStatusStore((s) => s.setPendingOps)
+  useEffect(() => {
+    if (typeof outboxCount === "number") setPendingOps(outboxCount)
+  }, [outboxCount, setPendingOps])
   const pendingOps = useSyncStatusStore((s) => s.pendingOps)
   const lastPushedAt = useSyncStatusStore((s) => s.lastPushedAt)
   const [now, setNow] = useState(() => Date.now())

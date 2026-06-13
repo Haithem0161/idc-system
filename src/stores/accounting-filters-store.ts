@@ -82,7 +82,25 @@ export const useAccountingFiltersStore = create<AccountingFiltersState>()(
         setIncludeVoided: (v) => set({ includeVoided: v }),
       }
     },
-    { name: "idc.accounting.filters" }
+    {
+      name: "idc.accounting.filters",
+      // Persist only the preset + includeVoided (and the absolute dates ONLY
+      // for a custom range). For preset ranges the dates are recomputed from
+      // the preset on rehydrate, so a "today"/"last_7d" filter never shows
+      // yesterday's data after a day rollover.
+      partialize: (s) => ({
+        preset: s.preset,
+        includeVoided: s.includeVoided,
+        ...(s.preset === "custom" ? { fromDate: s.fromDate, toDate: s.toDate } : {}),
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state && state.preset !== "custom") {
+          const r = presetRange(state.preset)
+          state.fromDate = r.from
+          state.toDate = r.to
+        }
+      },
+    }
   )
 )
 

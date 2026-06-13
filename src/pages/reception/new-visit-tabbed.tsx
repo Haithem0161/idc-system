@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
@@ -7,6 +8,7 @@ import { FeatureToggle } from "@/components/ui/feature-toggle"
 import { OperatorPickerDialog } from "@/components/reception/operator-picker-dialog"
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback"
 import {
+  patientKeys,
   useChecksGrid,
   usePatientCreate,
   usePatientSearch,
@@ -15,6 +17,7 @@ import {
   useVisitLock,
   useVisitUpdateDraft,
 } from "@/features/visits/queries"
+import { invoke } from "@/lib/ipc"
 import { useCheckSubtypes, useDoctors } from "@/features/catalog/queries"
 import {
   selectActiveTab,
@@ -61,6 +64,7 @@ export default function NewVisitTabbedPage () {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
   const [info, setInfo] = useState<string | null>(null)
 
+  const queryClient = useQueryClient()
   const { data: qualifiedOperators } = useQualifiedOperators(
     operatorPickerOpen ? (activeTab?.checkTypeId ?? null) : null,
   )
@@ -90,7 +94,23 @@ export default function NewVisitTabbedPage () {
     setInfo(null)
   }
 
-  async function flushSave () {
+  // Single-flight guard: onFinishClick calls scheduleFlush.flush() (which
+  // fires flushSave synchronously, discarding the promise) and then awaits a
+  // second flushSave(). Without this guard both calls could observe
+  // draftVisitId === undefined and each create a draft visit. Coalescing onto
+  // one in-flight promise makes the second caller await the first.
+  const inFlightSave = useRef<Promise<void> | null>(null)
+
+  function flushSave (): Promise<void> {
+    if (inFlightSave.current) return inFlightSave.current
+    const p = flushSaveInner().finally(() => {
+      inFlightSave.current = null
+    })
+    inFlightSave.current = p
+    return p
+  }
+
+  async function flushSaveInner () {
     const id = tabIdRef.current
     if (!id) return
     const tab = useVisitTabsStore.getState().tabs.find((t) => t.tabId === id)
@@ -149,11 +169,18 @@ export default function NewVisitTabbedPage () {
   ): Promise<PatientRecord | null> {
     const trimmed = name.trim()
     if (trimmed.length === 0) return null
-    const match = patientMatches?.find(
-      (p) => p.name.trim().toLowerCase() === trimmed.toLowerCase(),
-    )
-    if (match) return match
+    // Dedupe against a FRESH authoritative search, not the possibly-stale live
+    // `patientMatches` (which lags behind a just-created patient and races the
+    // in-flight query). Only create when no exact name match exists.
     try {
+      const results = await queryClient.fetchQuery<PatientRecord[]>({
+        queryKey: patientKeys.search(trimmed),
+        queryFn: () => invoke("patients_search", { args: { query: trimmed, limit: 20 } }),
+      })
+      const match = results.find(
+        (p) => p.name.trim().toLowerCase() === trimmed.toLowerCase(),
+      )
+      if (match) return match
       return await patientCreate.mutateAsync({ name: trimmed })
     } catch (e) {
       setError(String((e as Error).message ?? e))
