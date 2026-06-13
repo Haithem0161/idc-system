@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
+import { inventoryKeys } from "@/features/inventory/queries"
 import { invoke, isTauri } from "@/lib/ipc"
 import type {
   ChecksGridCardRecord,
@@ -108,7 +109,10 @@ export function useVisitCreateDraft () {
           report: input.report ?? false,
         },
       }),
-    onSuccess: () => {
+    // Invalidate on settle (success AND error): a failed mutation is exactly
+    // when local optimistic state may have diverged from the server, so the
+    // cache must refetch regardless of outcome.
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: visitKeys.all })
     },
   })
@@ -128,7 +132,7 @@ export function useVisitUpdateDraft () {
           report: input.report,
         },
       }),
-    onSuccess: () => {
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: visitKeys.all })
     },
   })
@@ -139,7 +143,7 @@ export function useVisitDiscard () {
   return useMutation<null, Error, { visit_id: string }>({
     mutationFn: (input) =>
       invoke("visits_discard", { args: { visit_id: input.visit_id } }),
-    onSuccess: () => {
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: visitKeys.all })
     },
   })
@@ -152,8 +156,12 @@ export function useVisitLock () {
       invoke("visits_lock", {
         args: { visit_id: input.visit_id, operator_id: input.operator_id },
       }),
-    onSuccess: () => {
+    // Locking consumes inventory server-side (consume-on-lock), so the
+    // inventory views must refetch too. Invalidate on settle so a failed
+    // lock still reconciles any partially-applied local state.
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: visitKeys.all })
+      void qc.invalidateQueries({ queryKey: inventoryKeys.all })
     },
   })
 }
@@ -165,8 +173,12 @@ export function useVisitVoid () {
       invoke("visits_void", {
         args: { visit_id: input.visit_id, reason: input.reason },
       }),
-    onSuccess: () => {
+    // Voiding writes offsetting inventory adjustments server-side
+    // (offset-on-void), so the inventory views must refetch too. Invalidate
+    // on settle so a failed void still reconciles local state.
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: visitKeys.all })
+      void qc.invalidateQueries({ queryKey: inventoryKeys.all })
     },
   })
 }
@@ -199,10 +211,11 @@ export function usePatientCreate () {
   return useMutation<PatientRecord, Error, { name: string }>({
     mutationFn: (input) =>
       invoke("patients_create", { args: { name: input.name } }),
-    onSuccess: () => {
-      // Invalidate every patient search so a freshly-created patient shows up
-      // immediately and a second commit of the same name resolves the existing
-      // row instead of creating a duplicate.
+    // Invalidate every patient search so a freshly-created patient shows up
+    // immediately and a second commit of the same name resolves the existing
+    // row instead of creating a duplicate. On settle (not just success) so a
+    // failed create still reconciles any stale search cache.
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["patients", "search"] })
     },
   })

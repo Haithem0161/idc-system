@@ -62,8 +62,15 @@ export function ConflictResolverPanel({ conflict, onResolved }: Props) {
       )
       onResolved()
     } catch (err) {
-      const msg = String(err)
-      if (msg.includes("ALREADY_RESOLVED")) {
+      // The Rust IPC layer serializes errors as `{ code, message }` (see
+      // src/lib/schemas/error.ts AppErrorSchema), so `String(err)` would
+      // yield "[object Object]" and never match. Pull `code` / `message`
+      // off the object and fall back to a string only for plain throws.
+      const { code, message } = extractError(err)
+      // An already-resolved op surfaces as AppError::Conflict, whose
+      // serialized `code` is "CONFLICT_PARKED" and whose `message` carries
+      // the "ALREADY_RESOLVED" sentinel (http_client.rs).
+      if (code === "CONFLICT_PARKED" || message.includes("ALREADY_RESOLVED")) {
         emitToast(
           "warning",
           t("sync_conflicts.already_resolved", {
@@ -77,7 +84,7 @@ export function ConflictResolverPanel({ conflict, onResolved }: Props) {
           "error",
           t("sync_conflicts.resolve_failed", {
             defaultValue: "Failed to resolve conflict: {{msg}}",
-            msg,
+            msg: message,
           })
         )
       }
@@ -165,6 +172,24 @@ export function ConflictResolverPanel({ conflict, onResolved }: Props) {
       </div>
     </div>
   )
+}
+
+/**
+ * Normalizes an unknown thrown value into `{ code, message }`.
+ *
+ * Tauri IPC errors arrive as the serialized `AppError` object
+ * (`{ code, message }`); plain `Error` throws (and anything else) fall back
+ * to a readable string so the user never sees "[object Object]".
+ */
+function extractError(err: unknown): { code: string | null; message: string } {
+  if (err && typeof err === "object") {
+    const obj = err as { code?: unknown; message?: unknown }
+    const code = typeof obj.code === "string" ? obj.code : null
+    const message =
+      typeof obj.message === "string" ? obj.message : code ?? String(err)
+    return { code, message }
+  }
+  return { code: null, message: String(err) }
 }
 
 function PayloadColumn({

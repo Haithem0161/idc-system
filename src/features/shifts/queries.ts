@@ -7,6 +7,12 @@ import type {
   ShiftWithMetaRecord,
 } from "@/lib/ipc"
 
+// The qualified-operators set is derived from open shifts (operators currently
+// on an open shift, see src-tauri visit_service.rs). Clocking in/out changes
+// that set, so those mutations must invalidate the visits qualified-operators
+// caches across all check types.
+const QUALIFIED_OPERATORS_ROOT = ["visits", "qualified-operators"] as const
+
 export const shiftKeys = {
   all: ["shifts"] as const,
   open: ["shifts", "open"] as const,
@@ -51,6 +57,7 @@ export function useShiftClockIn () {
       }),
     onSuccess: (_data: ShiftRecord) => {
       void qc.invalidateQueries({ queryKey: shiftKeys.all })
+      void qc.invalidateQueries({ queryKey: QUALIFIED_OPERATORS_ROOT })
     },
   })
 }
@@ -62,6 +69,7 @@ export function useShiftClockOut () {
       invoke("shifts_clock_out", { args: { shift_id: input.shift_id } }),
     onSuccess: (_data: ShiftRecord) => {
       void qc.invalidateQueries({ queryKey: shiftKeys.all })
+      void qc.invalidateQueries({ queryKey: QUALIFIED_OPERATORS_ROOT })
     },
   })
 }

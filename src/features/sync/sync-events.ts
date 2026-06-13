@@ -10,6 +10,8 @@ import {
 } from "@/lib/schemas/sync"
 import { useSyncStatusStore } from "@/stores/sync-status-store"
 
+import { syncKeys } from "./queries"
+
 /**
  * Maps a synced entity table to the React Query key roots whose caches must be
  * invalidated when that entity changes via a pull. Multiple roots per entity
@@ -55,56 +57,80 @@ export function useSyncEvents (): void {
   const queryClient = useQueryClient()
 
   useEffect(() => {
+    // `listenEvent` resolves asynchronously, so under StrictMode the effect's
+    // cleanup can run BEFORE a `.then` pushes its unlisten fn. Track a
+    // `cancelled` flag: any listener that registers after cleanup is removed
+    // immediately, and the cleanup tears down everything already collected.
+    let cancelled = false
     const unsubs: Array<() => void> = []
+
+    const collect = (promise: Promise<() => void>) => {
+      promise
+        .then((unlisten) => {
+          if (cancelled) {
+            unlisten()
+          } else {
+            unsubs.push(unlisten)
+          }
+        })
+        .catch(() => void 0)
+    }
 
     // When a pull applies remote rows, invalidate exactly the affected caches
     // so mounted screens refetch the new data instead of showing stale rows
     // until a remount. This is the missing "auto-update from the server" link.
-    listenEvent<{ entities?: string[] }>(SYNC_EVENTS.APPLIED, (payload) => {
-      const entities = Array.isArray(payload?.entities) ? payload.entities : []
-      for (const root of rootsForEntities(entities)) {
-        void queryClient.invalidateQueries({ queryKey: [root] })
-      }
-    })
-      .then((unlisten) => unsubs.push(unlisten))
-      .catch(() => void 0)
+    collect(
+      listenEvent<{ entities?: string[] }>(SYNC_EVENTS.APPLIED, (payload) => {
+        const entities = Array.isArray(payload?.entities) ? payload.entities : []
+        for (const root of rootsForEntities(entities)) {
+          void queryClient.invalidateQueries({ queryKey: [root] })
+        }
+      })
+    )
 
-    listenEvent<SyncStatus>(SYNC_EVENTS.STATUS, (payload) => {
-      const parsed = SyncStatusSchema.safeParse(payload)
-      if (parsed.success) {
-        setStatus(parsed.data)
-      }
-      if (parsed.success && parsed.data !== "error") setError(null)
-    })
-      .then((unlisten) => unsubs.push(unlisten))
-      .catch(() => void 0)
+    collect(
+      listenEvent<SyncStatus>(SYNC_EVENTS.STATUS, (payload) => {
+        const parsed = SyncStatusSchema.safeParse(payload)
+        if (parsed.success) {
+          setStatus(parsed.data)
+        }
+        if (parsed.success && parsed.data !== "error") setError(null)
+      })
+    )
 
     // DEF-007 G11: stamp lastPushedAt only on a REAL push. The engine emits
     // sync:progress { pushed } when it actually acks ops; the old code stamped
     // it on every idle transition (including idle pulls and no-op cycles), so
     // the UserMenu red dot was permanently suppressed.
-    listenEvent<{ pushed?: number }>(SYNC_EVENTS.PROGRESS, (payload) => {
-      if (typeof payload?.pushed === "number" && payload.pushed > 0) {
-        setLastPushedAt(Date.now())
-      }
-    })
-      .then((unlisten) => unsubs.push(unlisten))
-      .catch(() => void 0)
+    collect(
+      listenEvent<{ pushed?: number }>(SYNC_EVENTS.PROGRESS, (payload) => {
+        if (typeof payload?.pushed === "number" && payload.pushed > 0) {
+          setLastPushedAt(Date.now())
+        }
+      })
+    )
 
-    listenEvent<Conflict>(SYNC_EVENTS.CONFLICT, (payload) => {
-      const parsed = ConflictSchema.safeParse(payload)
-      if (parsed.success) addConflict(parsed.data)
-    })
-      .then((unlisten) => unsubs.push(unlisten))
-      .catch(() => void 0)
+    collect(
+      listenEvent<Conflict>(SYNC_EVENTS.CONFLICT, (payload) => {
+        const parsed = ConflictSchema.safeParse(payload)
+        if (parsed.success) {
+          addConflict(parsed.data)
+          // Mirror the new conflict into the React Query cache so the
+          // resolver page refreshes the moment a conflict arrives, instead
+          // of only when the store-backed badge re-renders.
+          void queryClient.invalidateQueries({ queryKey: syncKeys.conflicts })
+        }
+      })
+    )
 
-    listenEvent<void>(SYNC_EVENTS.AUTH_EXPIRED, () => {
-      setError("session_expired")
-    })
-      .then((unlisten) => unsubs.push(unlisten))
-      .catch(() => void 0)
+    collect(
+      listenEvent<void>(SYNC_EVENTS.AUTH_EXPIRED, () => {
+        setError("session_expired")
+      })
+    )
 
     return () => {
+      cancelled = true
       for (const u of unsubs) {
         try {
           u()

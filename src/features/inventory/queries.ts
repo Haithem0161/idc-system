@@ -9,6 +9,13 @@ import type {
   StockStatusLiteral,
 } from "@/lib/ipc"
 
+// Inventory items live in TWO parallel cache namespaces: these operations
+// hooks (`["inventory", ...]`) and the catalog-scoped hooks in
+// features/catalog (`["catalog", "inventory", ...]`). Stock-changing
+// mutations here must also invalidate the catalog root so the two namespaces
+// stay coherent. Use a literal to avoid a circular import with catalog.
+const CATALOG_ROOT = ["catalog"] as const
+
 export const inventoryKeys = {
   all: ["inventory"] as const,
   list: (filter: {
@@ -90,6 +97,7 @@ export function useInventoryAdjustmentCreate () {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: inventoryKeys.all })
+      void qc.invalidateQueries({ queryKey: CATALOG_ROOT })
     },
   })
 }
@@ -103,6 +111,7 @@ export function useInventoryRecompute () {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: inventoryKeys.all })
+      void qc.invalidateQueries({ queryKey: CATALOG_ROOT })
     },
   })
 }

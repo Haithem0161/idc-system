@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
+import { inventoryKeys } from "@/features/inventory/queries"
 import { invoke, isTauri } from "@/lib/ipc"
 import type {
   CheckSubtypeCreateArgs,
@@ -315,12 +316,19 @@ export function useInventoryItem (id: string | null) {
   })
 }
 
+// Inventory items live in TWO parallel cache namespaces: the catalog-scoped
+// hooks here (`["catalog", "inventory", ...]`) and the operations-scoped hooks
+// in features/inventory (`["inventory", ...]`). Mutating via either path must
+// invalidate BOTH roots so the namespaces stay coherent.
 export function useInventoryItemCreate () {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (input: InventoryItemCreateArgs) =>
       invoke("inventory_catalog_create", { args: input }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: catalogKeys.inventoryItems }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: catalogKeys.inventoryItems })
+      void qc.invalidateQueries({ queryKey: inventoryKeys.all })
+    },
   })
 }
 
@@ -332,6 +340,7 @@ export function useInventoryItemUpdate () {
     onSuccess: (data: InventoryItemRecord) => {
       void qc.invalidateQueries({ queryKey: catalogKeys.inventoryItems })
       void qc.invalidateQueries({ queryKey: catalogKeys.inventoryItem(data.id) })
+      void qc.invalidateQueries({ queryKey: inventoryKeys.all })
     },
   })
 }
@@ -340,7 +349,10 @@ export function useInventoryItemSoftDelete () {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => invoke("inventory_catalog_soft_delete", { args: { id } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: catalogKeys.inventoryItems }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: catalogKeys.inventoryItems })
+      void qc.invalidateQueries({ queryKey: inventoryKeys.all })
+    },
   })
 }
 

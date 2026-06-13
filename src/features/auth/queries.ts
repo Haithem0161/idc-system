@@ -14,6 +14,7 @@ export const authKeys = {
 
 export function useLogin () {
   const setAuthenticated = useAuthStore((s) => s.setAuthenticated)
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: async (input: { email: string; password: string }): Promise<AuthLoginResult> => {
       const result = await invoke("auth_login", {
@@ -34,20 +35,26 @@ export function useLogin () {
         role,
         mode: result.mode,
       })
+      // Drop any cache left over from a previous session on this workstation so
+      // the new user never sees the prior user's data.
+      qc.clear()
     },
   })
 }
 
 export function useLogout () {
   const setAnonymous = useAuthStore((s) => s.setAnonymous)
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: async () => {
       await invoke("auth_logout")
     },
     onSuccess: () => {
-      // Wipe in-progress tabs so the next sign-in (possibly a different
-      // receptionist on the same workstation) doesn't inherit them.
+      // Wipe in-progress tabs AND the entire React Query cache so the next
+      // sign-in (possibly a different receptionist on the same workstation)
+      // never inherits the prior user's tabs or cached server data.
       useVisitTabsStore.getState().clearAll()
+      qc.clear()
       setAnonymous()
     },
   })
