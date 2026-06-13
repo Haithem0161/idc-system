@@ -8,6 +8,14 @@ try {
   process.loadEnvFile?.()
 } catch { /* no .env present is fine */ }
 delete process.env.DATABASE_URL
+// Scrub the first-launch bootstrap vars. If they leak from .env, the
+// auth-services plugin fire-and-forgets bootstrapSuperadmin on every app
+// build (auth-services.ts), racing each test's own explicit bootstrap; the
+// loser throws "users already exist" and a DIFFERENT, order-dependent set of
+// auth tests fails on each run.
+delete process.env.BOOTSTRAP_SUPERADMIN_EMAIL
+delete process.env.BOOTSTRAP_SUPERADMIN_PASSWORD
+delete process.env.BOOTSTRAP_TENANT_ID
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
   process.env.JWT_SECRET = 'test-only-shared-secret-with-thirty-two-plus-characters'
 }
@@ -25,6 +33,9 @@ import { app } from '../src/app/app.js'
 // Already scrubbed env at top-of-file. Re-scrub after import-time side effects
 // in case a plugin auto-loads .env.
 delete process.env.DATABASE_URL
+delete process.env.BOOTSTRAP_SUPERADMIN_EMAIL
+delete process.env.BOOTSTRAP_SUPERADMIN_PASSWORD
+delete process.env.BOOTSTRAP_TENANT_ID
 
 export type TestContext = {
   after: typeof test.after
