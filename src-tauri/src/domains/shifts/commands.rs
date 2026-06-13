@@ -133,13 +133,9 @@ pub async fn shifts_list_open(state: State<'_, AppState>) -> AppResult<Vec<Shift
 pub async fn shifts_history_today(state: State<'_, AppState>) -> AppResult<Vec<ShiftWithMeta>> {
     let (_, _, entity_id) = current_actor(&state).await?;
     let svc = service(&state)?;
-    let now = Utc::now();
-    let today_start = now
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .ok_or_else(|| AppError::Internal("date floor".into()))?
-        .and_utc();
-    let today_end = today_start + chrono::Duration::days(1);
+    // Baghdad local day, matching reception and Daily Close (UTC midnight put
+    // the shift day 3 hours behind the local day).
+    let (today_start, today_end) = crate::shared::tz::baghdad_today_utc_range();
     svc.history_today(&entity_id, today_start, today_end).await
 }
 

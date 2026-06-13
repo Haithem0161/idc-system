@@ -4,6 +4,7 @@ pub mod config;
 pub mod db;
 pub mod domains;
 pub mod error;
+pub mod shared;
 pub mod state;
 pub mod sync;
 

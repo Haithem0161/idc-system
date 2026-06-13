@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Datelike, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -843,13 +843,10 @@ fn visit_operator_id_placeholder() -> Option<Uuid> {
 }
 
 fn today_bounds() -> (DateTime<Utc>, DateTime<Utc>) {
-    let now = Utc::now();
-    let start = Utc
-        .with_ymd_and_hms(now.year(), now.month(), now.day(), 0, 0, 0)
-        .single()
-        .unwrap_or(now);
-    let end = start + chrono::Duration::days(1);
-    (start, end)
+    // Use the Baghdad local day so reception "today" matches shifts and Daily
+    // Close. UTC midnight put reception 3 hours behind the local day, so the
+    // first 3 hours of each local day showed yesterday's counts.
+    crate::shared::tz::baghdad_today_utc_range()
 }
 
 // -------------------- BusinessWrite closures -------------------------------
