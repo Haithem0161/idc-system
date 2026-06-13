@@ -6,6 +6,7 @@ import { invoke, isTauri } from "@/lib/ipc"
 import { useDeviceStore } from "@/stores/device-store"
 import { useSyncStatusStore } from "@/stores/sync-status-store"
 import { useSyncEvents } from "@/features/sync/sync-events"
+import { useUpdater } from "@/features/updater/use-updater"
 import { FirstLaunchSetup } from "@/components/setup/first-launch-setup"
 import { IdleWatcher } from "@/components/auth/idle-watcher"
 
@@ -42,7 +43,6 @@ export function AppShell() {
   }, [setDevice])
 
   useSyncEvents()
-  const { t } = useTranslation("common")
   const upgradeRequired = useSyncStatusStore((s) => s.upgradeRequired)
 
   return (
@@ -51,14 +51,7 @@ export function AppShell() {
       <FirstLaunchSetup />
       <IdleWatcher />
       <div className="flex h-screen w-full flex-col bg-paper text-ink">
-        {upgradeRequired ? (
-          <div
-            role="alert"
-            className="shrink-0 bg-crimson px-9 py-2 text-[13px] font-medium text-white"
-          >
-            {t("sync.upgrade_required")}
-          </div>
-        ) : null}
+        {upgradeRequired ? <UpgradeBanner /> : null}
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <div className="flex min-w-0 flex-1 flex-col">
@@ -81,5 +74,35 @@ export function AppShell() {
         <StatusBar />
       </div>
     </RtlBoundary>
+  )
+}
+
+/**
+ * Blocking banner shown when the sync server rejects this app version with 426
+ * (`app:upgrade_required`). Beyond stating the requirement, it offers a one-tap
+ * "Check for update" that runs the binary self-updater -- so the server's
+ * "you must upgrade" turns into an actionable download instead of a dead end.
+ */
+function UpgradeBanner() {
+  const { t } = useTranslation("common")
+  const { state, runCheck, runInstall, canInstall } = useUpdater()
+  const busy = state.status === "checking" || state.status === "installing"
+  const ready = state.status === "available" && canInstall
+
+  return (
+    <div
+      role="alert"
+      className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-crimson px-9 py-2 text-[13px] font-medium text-white"
+    >
+      <span>{t("sync.upgrade_required")}</span>
+      <button
+        type="button"
+        onClick={() => void (ready ? runInstall() : runCheck())}
+        disabled={busy}
+        className="rounded border border-white/40 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-[0.04em] transition-colors hover:bg-white/15 disabled:opacity-60"
+      >
+        {t("sync.upgrade_check_now")}
+      </button>
+    </div>
   )
 }

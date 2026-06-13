@@ -10,6 +10,7 @@ import {
   useSettings,
   useSettingUpdate,
 } from "@/features/settings/queries"
+import { useUpdater } from "@/features/updater/use-updater"
 import type { SettingValueWire } from "@/lib/ipc"
 import { cn } from "@/lib/utils"
 
@@ -118,7 +119,72 @@ export default function SettingsPage () {
           </div>
         </section>
       ))}
+
+      <UpdatesPanel />
     </div>
+  )
+}
+
+function UpdatesPanel () {
+  const { t } = useTranslation()
+  const { state, runCheck, runInstall, canInstall } = useUpdater()
+  const busy = state.status === "checking" || state.status === "installing"
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <span className="panel-title">
+          {t("admin.settings.updates.title", { defaultValue: "App updates" })}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-5 px-5 py-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] text-ink-3">
+            {t("admin.settings.updates.description", {
+              defaultValue: "Check for a newer version of the desktop app.",
+            })}
+          </p>
+          <p className="mt-1.5 text-[12px] text-ink" role="status" aria-live="polite">
+            {state.status === "checking"
+              ? t("admin.settings.updates.checking", { defaultValue: "Checking..." })
+              : state.status === "current"
+                ? t("admin.settings.updates.current", { defaultValue: "You are on the latest version." })
+                : state.status === "unsupported"
+                  ? t("admin.settings.updates.unsupported", {
+                      defaultValue: "Updates are not available on this build.",
+                    })
+                  : state.status === "available"
+                    ? t("admin.settings.updates.available", {
+                        version: state.version,
+                        defaultValue: "An update is available.",
+                      })
+                    : state.status === "installing"
+                      ? t("admin.settings.updates.installing", {
+                          version: state.version,
+                          defaultValue: "Installing...",
+                        })
+                      : state.status === "error"
+                        ? t("admin.settings.updates.error", {
+                            defaultValue: "Could not check for updates.",
+                          })
+                        : null}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {state.status === "available" && canInstall ? (
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => void runInstall()} disabled={busy}>
+              {t("admin.settings.updates.install", { defaultValue: "Download and restart" })}
+            </button>
+          ) : (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => void runCheck()} disabled={busy}>
+              {state.status === "checking"
+                ? t("admin.settings.updates.checking", { defaultValue: "Checking..." })
+                : t("admin.settings.updates.check", { defaultValue: "Check for updates" })}
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
   )
 }
 

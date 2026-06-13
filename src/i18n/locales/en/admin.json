@@ -71,6 +71,18 @@
         "arabic_numerals": "Arabic-Indic numerals",
         "thermal_width": "Thermal printer width",
         "thermal_printer_name": "Thermal printer name"
+      },
+      "updates": {
+        "title": "App updates",
+        "description": "Check for a newer version of the desktop app.",
+        "check": "Check for updates",
+        "checking": "Checking...",
+        "current": "You are on the latest version.",
+        "available": "Version {{version}} is available.",
+        "install": "Download and restart",
+        "installing": "Installing version {{version}}...",
+        "unsupported": "Updates are not available on this build.",
+        "error": "Could not check for updates."
       }
     }
   }

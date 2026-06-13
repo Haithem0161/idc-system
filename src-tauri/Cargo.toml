@@ -52,6 +52,7 @@ argon2 = { version = "0.5.3", default-features = false, features = ["password-ha
 jsonwebtoken = "9.3.1"
 sha2 = "0.10.9"
 tauri-plugin-updater = "2.10.1"
+tauri-plugin-process = "2.3.1"
 
 [dev-dependencies]
 tauri = { version = "2.10.0", features = ["test"] }

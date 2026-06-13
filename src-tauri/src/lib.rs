@@ -132,12 +132,14 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        // App self-updater. Inert until an updater pubkey + endpoints are
-        // configured in tauri.conf.json (see docs/UPDATER-SETUP.md): with no
-        // pubkey, `check()` from the frontend simply finds no update. Wiring it
-        // now means the binary updater works the moment the signing key and an
-        // update endpoint are provisioned, with no further code change.
+        // App self-updater. The signing pubkey is configured in tauri.conf.json
+        // (`plugins.updater`); see docs/UPDATER-SETUP.md. `check()` from the
+        // frontend goes live the moment a reachable update endpoint serves a
+        // signed manifest -- no further code change is needed.
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Required by the updater flow: after downloadAndInstall(), the frontend
+        // calls relaunch() (plugin:process|restart) to boot the new binary.
+        .plugin(tauri_plugin_process::init())
         .setup({
             let cancel = cancel.clone();
             move |app| {

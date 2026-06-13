@@ -72,6 +72,7 @@
       "error": "Sync error"
     },
     "upgrade_required": "A newer version of the app is required to keep syncing. Please update to continue.",
+    "upgrade_check_now": "Check for update",
     "pending_aria": "Pending operations",
     "pill": {
       "tooltip_view_conflicts": "View parked conflicts",

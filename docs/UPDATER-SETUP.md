@@ -1,37 +1,53 @@
 # App self-updater setup (tauri-plugin-updater)
 
-The desktop app ships with `tauri-plugin-updater` wired in (`src-tauri/src/lib.rs`)
-and the `updater:default` capability granted (`src-tauri/capabilities/default.json`).
-It is **inert until you provision a signing key and an update endpoint** — with no
-`plugins.updater` config block, `check()` simply finds no update. This document is
-the checklist to make it live. Nothing here is committed as a secret.
+The desktop app is **wired end-to-end** for self-update:
+
+- `tauri-plugin-updater` + `tauri-plugin-process` registered (`src-tauri/src/lib.rs`),
+  with `updater:default` and `process:default` capabilities granted
+  (`src-tauri/capabilities/default.json`).
+- A real signing **public key** is configured in `src-tauri/tauri.conf.json`
+  (`plugins.updater.pubkey`). The matching **private key was generated to
+  `~/.idc/updater.key`** on the build machine — it is a credential and is NOT in
+  the repo.
+- The frontend trigger is live: a "Check for updates" action in **Settings → App
+  updates** (`src/pages/admin/settings.tsx`) and a "Check for update" button on
+  the 426 upgrade banner (`src/components/shell/app-shell.tsx`), both driven by
+  `src/features/updater/`.
+
+The **one remaining step is operational, not code**: the `endpoints` URL in
+`tauri.conf.json` is still the placeholder `https://RELEASES_HOST_TODO.invalid/...`.
+Until it points at a host that serves a signed manifest, `checkForUpdate()`
+short-circuits to a neutral "updates not available" state (it recognises the
+`.invalid` placeholder and does not surface a network error). Point it at a real
+host (steps 2–4 below) and the whole flow goes live with no further code change.
 
 This pairs with the server-side version gate (`MIN_CLIENT_VERSION`, see the
 `version-gate` plugin in `sync-server/`): the gate tells an outdated client to
 upgrade (HTTP 426 → in-app banner); the updater is how that client actually pulls
 the new binary.
 
-## 1. Generate a signing keypair (once)
+## 1. Signing keypair (DONE on this machine)
+
+Already generated:
 
 ```bash
-# From the repo root:
-pnpm tauri signer generate -w ~/.idc/updater.key
+pnpm tauri signer generate -w ~/.idc/updater.key --password ""
 ```
 
-This prints a **public key** and writes the **private key** to `~/.idc/updater.key`.
-- The private key is a CREDENTIAL. Never commit it. Store it in the CI secret store.
-- The optional password is set via `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+- Private key: `~/.idc/updater.key` — a CREDENTIAL. Never commit it. Move it into
+  the CI secret store (`TAURI_SIGNING_PRIVATE_KEY`) for release builds.
+- Public key: already pasted into `plugins.updater.pubkey` in `tauri.conf.json`.
+- To rotate, regenerate and replace the pubkey in `tauri.conf.json`.
 
-## 2. Add the updater config to `src-tauri/tauri.conf.json`
+## 2. Point the endpoint at a real host (`src-tauri/tauri.conf.json`)
 
-Add a `plugins.updater` block with the public key from step 1 and your update
-endpoint(s):
+Replace the placeholder host in the existing `plugins.updater.endpoints` entry:
 
 ```jsonc
 {
   "plugins": {
     "updater": {
-      "pubkey": "<PUBLIC KEY FROM STEP 1>",
+      "pubkey": "<already set — do not change unless rotating keys>",
       "endpoints": [
         "https://releases.example.com/idc/{{target}}/{{arch}}/{{current_version}}"
       ]
@@ -79,10 +95,21 @@ Serve a `latest.json` per platform/arch at the endpoint, e.g.:
 
 GitHub Releases works as the host (point the endpoint at the release asset URL).
 
-## 5. Frontend trigger
+## 5. Frontend trigger (DONE)
 
-Once configured, call the updater from the frontend (the plugin's JS API is
-already permitted by `updater:default`):
+Already wired — no further code needed. The plugin JS API (`updater:default` +
+`process:default`) is called through `src/features/updater/`:
+
+- `updater.ts` — `checkForUpdate()` wraps `check()` + `relaunch()`, guards
+  against running outside Tauri and against the placeholder host.
+- `use-updater.ts` — `useUpdater()` drives the UI state machine (single in-flight
+  check/install, terminal states).
+- **Settings → App updates** (`src/pages/admin/settings.tsx`) exposes a manual
+  "Check for updates" button that offers "Download and restart" when one is found.
+- The **426 upgrade banner** (`src/components/shell/app-shell.tsx`) carries a
+  "Check for update" button so the server's `app:upgrade_required` is actionable.
+
+The underlying call is the standard pattern:
 
 ```ts
 import { check } from "@tauri-apps/plugin-updater"
@@ -95,14 +122,11 @@ if (update) {
 }
 ```
 
-Wire this behind a "Check for updates" action in Settings, and/or trigger it
-automatically when the server returns 426 (the app already shows the upgrade
-banner on `app:upgrade_required`).
-
 ## Status
 
-- [x] Plugin wired and capability granted (inert without config).
-- [ ] Signing keypair generated and private key in CI secrets.
-- [ ] `plugins.updater` block added with pubkey + endpoint.
-- [ ] Release pipeline builds, signs, and publishes bundles + `latest.json`.
-- [ ] Frontend "Check for updates" action / auto-check on 426.
+- [x] Plugins wired (`updater` + `process`) and capabilities granted.
+- [x] Signing keypair generated; private key at `~/.idc/updater.key` (move to CI secrets).
+- [x] `plugins.updater` block added with real pubkey (endpoint is a placeholder).
+- [x] Frontend "Check for updates" action (Settings) + actionable 426 banner.
+- [ ] Point `plugins.updater.endpoints` at a real host (replace `RELEASES_HOST_TODO.invalid`).
+- [ ] Release pipeline builds, signs, and publishes bundles + `latest.json` to that host.

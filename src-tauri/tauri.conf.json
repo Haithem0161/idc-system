@@ -43,5 +43,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFEMzc0QzY3RDVBNzA2NkIKUldSckJxZlZaMHczSFNENkJEUHlGbVJ6WkJ0aUkraDBYRUlLYVZyaldSWjdTV2p2OUNsSTdTcmUK",
+      "endpoints": [
+        "https://RELEASES_HOST_TODO.invalid/idc/{{target}}/{{arch}}/{{current_version}}"
+      ]
+    }
   }
 }
