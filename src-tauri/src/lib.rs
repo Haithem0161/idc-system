@@ -341,6 +341,8 @@ async fn bootstrap(
             initial_server_url: initial_server_url.clone(),
             initial_token: None,
             entity_id_tenant: entity_id_tenant.clone(),
+            // Installed after AppState is managed (set_refresh_hook below).
+            refresh_hook: None,
         },
         app.clone(),
         cancel.clone(),
@@ -491,6 +493,37 @@ async fn bootstrap(
         sync_server_url: initial_server_url,
     });
     app.manage(state);
+
+    // Install the sync 401 refresh hook now that AppState is managed. On a
+    // sync 401 the engine calls this once: it rotates the access + refresh
+    // tokens via /auth/refresh and returns the new access token, so a session
+    // is only surfaced as expired after the REFRESH itself fails (offline-first
+    // rule: refresh once, then surface). Without it sync died 15 minutes after
+    // every login despite a valid 30-day refresh token.
+    {
+        let hook_app = app.clone();
+        let hook: crate::sync::engine::RefreshHook = std::sync::Arc::new(move || {
+            let hook_app = hook_app.clone();
+            Box::pin(async move {
+                use tauri::{Emitter, Manager};
+                let state = hook_app.state::<AppState>();
+                match crate::domains::auth::commands::auth_refresh_impl(&state).await {
+                    Ok(_) => {
+                        let _ = hook_app.emit("auth:refreshed", ());
+                        state.get_current_token().await
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "sync 401 refresh failed; session expired");
+                        None
+                    }
+                }
+            })
+        });
+        app.state::<AppState>()
+            .sync_engine()
+            .set_refresh_hook(hook)
+            .await;
+    }
 
     // Warm the in-memory settings cache from SQLite. Without this, every
     // consumer that reads through `state.get_setting(...)` (notably visit-lock

@@ -98,6 +98,7 @@ async fn p3_mariam_the_superadmin_phase02_day() {
             initial_server_url: None,
             initial_token: None,
             entity_id_tenant: "tenant-1".into(),
+            refresh_hook: None,
         },
         handle,
         cancel.clone(),

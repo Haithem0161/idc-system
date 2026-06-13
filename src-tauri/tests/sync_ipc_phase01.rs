@@ -29,9 +29,12 @@ use app_lib::state::AppState;
 use app_lib::sync::{SyncEngine, SyncEngineConfig, SyncEngineHandle};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::test::{mock_app, MockRuntime};
 use tauri::App;
 use tokio_util::sync::CancellationToken;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 async fn fresh_pool() -> SqlitePool {
     let opts = SqliteConnectOptions::from_str("sqlite::memory:")
@@ -75,6 +78,7 @@ async fn rig(server_url: Option<&str>) -> TestRig {
             initial_server_url: server_url.map(|s| s.to_string()),
             initial_token: None,
             entity_id_tenant: "tenant-x".into(),
+            refresh_hook: None,
         },
         handle,
         cancel.clone(),
@@ -354,4 +358,77 @@ async fn sync_list_conflicts_serializes_each_conflict_with_camelCase_field_names
     assert_eq!(reshaped["entityId"], "row-1");
     assert_eq!(reshaped["serverPayload"]["v"], 2);
     let _ = &r; // keep rig alive for symmetry with other tests
+}
+
+// --- H6/H12: 401 triggers refresh-once before surfacing session-expired ----
+
+#[tokio::test]
+async fn push_401_invokes_the_refresh_hook_exactly_once() {
+    // The server always 401s. The engine must call the refresh hook ONCE
+    // (refresh-once-then-surface), not zero times (old bug: straight to
+    // session-expired) and not in a retry loop.
+    let pool = fresh_pool().await;
+    let outbox_repo: Arc<dyn OutboxRepo> = Arc::new(SqliteOutboxRepo::new(pool.clone()));
+    let audit_repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
+    let state_repo: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/sync/push"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+
+    // Seed an op so the push actually hits the server.
+    let op = OutboxOp::new("audit_log", "row-1", b"x".to_vec());
+    let mut tx = pool.begin().await.unwrap();
+    outbox_repo.enqueue(&mut tx, &op).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_hook = calls.clone();
+    let hook: app_lib::sync::engine::RefreshHook = Arc::new(move || {
+        let calls = calls_for_hook.clone();
+        Box::pin(async move {
+            calls.fetch_add(1, Ordering::SeqCst);
+            // Refresh itself fails -> session genuinely expired, no retry storm.
+            None
+        })
+    });
+
+    let mock = mock_app();
+    let handle = mock.handle().clone();
+    let cancel = CancellationToken::new();
+    let engine: SyncEngineHandle = SyncEngine::spawn(
+        SyncEngineConfig {
+            pool: pool.clone(),
+            outbox_repo: outbox_repo.clone(),
+            audit_repo,
+            state_repo,
+            device_id: "test-device".into(),
+            app_version: "0.1.0".into(),
+            initial_server_url: Some(server.uri()),
+            initial_token: Some("expired-token".into()),
+            entity_id_tenant: "tenant-x".into(),
+            refresh_hook: Some(hook),
+        },
+        handle,
+        cancel.clone(),
+    );
+
+    engine.trigger_push().await;
+    // Give the background task time to run the push + refresh attempt.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // The hook fires on a 401 (the fix; old code went straight to
+    // session-expired with zero refresh attempts). It is called at most ONCE
+    // per push attempt -- never in a retry storm -- so across the manual
+    // trigger plus the engine's immediate first tick it stays small.
+    let n = calls.load(Ordering::SeqCst);
+    assert!(n >= 1, "refresh hook must be called on a 401, was {n}");
+    assert!(
+        n <= 2,
+        "refresh must be once per attempt, not a loop, was {n}"
+    );
+    cancel.cancel();
 }

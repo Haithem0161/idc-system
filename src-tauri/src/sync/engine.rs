@@ -55,9 +55,16 @@ pub struct SyncEngineHandle {
     status: Arc<RwLock<SyncStatus>>,
     outbox_repo: Arc<dyn OutboxRepo>,
     state_repo: Arc<dyn SyncStateRepo>,
+    refresh_hook: Arc<RwLock<Option<RefreshHook>>>,
 }
 
 impl SyncEngineHandle {
+    /// Install the 401 refresh hook after `AppState` is built (the engine
+    /// spawns before AppState exists, so the hook is set out-of-band).
+    pub async fn set_refresh_hook(&self, hook: RefreshHook) {
+        *self.refresh_hook.write().await = Some(hook);
+    }
+
     pub async fn trigger_push(&self) {
         let _ = self.tx.send(Cmd::TriggerPush).await;
     }
@@ -119,6 +126,18 @@ impl SyncEngineHandle {
     }
 }
 
+/// Refresh hook: on a sync 401 the engine calls this once. It performs the
+/// `/auth/refresh` round-trip, persists the new tokens in `AppState`, and
+/// returns the new access token. `None` means the refresh itself failed
+/// (revoked / expired refresh token) -- the session is then genuinely
+/// expired. Kept as a boxed async closure so the engine stays decoupled from
+/// the auth domain.
+pub type RefreshHook = Arc<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send>>
+        + Send
+        + Sync,
+>;
+
 pub struct SyncEngineConfig {
     pub pool: SqlitePool,
     pub outbox_repo: Arc<dyn OutboxRepo>,
@@ -129,6 +148,9 @@ pub struct SyncEngineConfig {
     pub initial_server_url: Option<String>,
     pub initial_token: Option<String>,
     pub entity_id_tenant: String,
+    /// Optional: when set, a 401 triggers one refresh+retry before the engine
+    /// surfaces session-expired (offline-first rule: refresh once then surface).
+    pub refresh_hook: Option<RefreshHook>,
 }
 
 pub struct SyncEngine {
@@ -143,6 +165,9 @@ pub struct SyncEngine {
     entity_id_tenant: String,
     token: Arc<RwLock<Option<String>>>,
     status: Arc<RwLock<SyncStatus>>,
+    // Set after AppState is built (the engine spawns first), so it lives
+    // behind a lock and starts empty.
+    refresh_hook: Arc<RwLock<Option<RefreshHook>>>,
 }
 
 impl SyncEngine {
@@ -167,6 +192,9 @@ impl SyncEngine {
             _ => None,
         };
 
+        let refresh_hook: Arc<RwLock<Option<RefreshHook>>> =
+            Arc::new(RwLock::new(config.refresh_hook));
+
         let engine = Self {
             pool: config.pool,
             outbox_repo: config.outbox_repo.clone(),
@@ -178,6 +206,7 @@ impl SyncEngine {
             entity_id_tenant: config.entity_id_tenant,
             token: Arc::new(RwLock::new(config.initial_token)),
             status: status.clone(),
+            refresh_hook: refresh_hook.clone(),
         };
 
         let handle = SyncEngineHandle {
@@ -185,6 +214,7 @@ impl SyncEngine {
             status: status.clone(),
             outbox_repo: config.outbox_repo,
             state_repo: config.state_repo,
+            refresh_hook,
         };
 
         tokio::spawn(async move {
@@ -278,44 +308,72 @@ impl SyncEngine {
         }
     }
 
+    /// Offline-first 401 handling: attempt ONE token refresh. Returns the new
+    /// access token on success (and stores it on the engine), or `None` if no
+    /// hook is configured or the refresh failed (genuinely expired session).
+    async fn try_refresh(&self) -> Option<String> {
+        let hook = self.refresh_hook.read().await.clone()?;
+        match hook().await {
+            Some(new_token) => {
+                *self.token.write().await = Some(new_token.clone());
+                info!("sync: refreshed access token after 401");
+                Some(new_token)
+            }
+            None => None,
+        }
+    }
+
     async fn do_push<R: Runtime>(&self, app: &AppHandle<R>) {
         let Some(http) = self.current_http().await else {
             self.set_status(app, SyncStatus::Offline).await;
             return;
         };
-        let token = self.token.read().await.clone();
-
         self.set_status(app, SyncStatus::Pushing).await;
-        match crate::sync::pusher::run_step(
-            &self.pool,
-            self.outbox_repo.clone(),
-            self.state_repo.clone(),
-            &http,
-            token.as_deref(),
-            &self.entity_id_tenant,
-        )
-        .await
-        {
-            Ok(outcome) => {
-                if outcome.session_expired {
-                    let _ = app.emit(AUTH_EXPIRED_EVENT, ());
+
+        // Refresh-once-then-surface: on a 401 we refresh the token and retry
+        // the same step exactly once before declaring the session expired.
+        let mut attempted_refresh = false;
+        loop {
+            let token = self.token.read().await.clone();
+            match crate::sync::pusher::run_step(
+                &self.pool,
+                self.outbox_repo.clone(),
+                self.state_repo.clone(),
+                &http,
+                token.as_deref(),
+                &self.entity_id_tenant,
+            )
+            .await
+            {
+                Ok(outcome) => {
+                    if outcome.session_expired {
+                        if !attempted_refresh {
+                            attempted_refresh = true;
+                            if self.try_refresh().await.is_some() {
+                                continue; // retry the push once with the new token
+                            }
+                        }
+                        let _ = app.emit(AUTH_EXPIRED_EVENT, ());
+                        self.set_status(app, SyncStatus::Error).await;
+                        return;
+                    }
+                    for conflict in &outcome.conflicts {
+                        let _ = app.emit(CONFLICT_EVENT, conflict);
+                    }
+                    if outcome.pushed > 0 {
+                        let _ = app.emit(
+                            PROGRESS_EVENT,
+                            serde_json::json!({ "pushed": outcome.pushed }),
+                        );
+                    }
+                    self.set_status(app, SyncStatus::Idle).await;
+                    return;
+                }
+                Err(e) => {
+                    error!(error = %e, "push step failed");
                     self.set_status(app, SyncStatus::Error).await;
                     return;
                 }
-                for conflict in &outcome.conflicts {
-                    let _ = app.emit(CONFLICT_EVENT, conflict);
-                }
-                if outcome.pushed > 0 {
-                    let _ = app.emit(
-                        PROGRESS_EVENT,
-                        serde_json::json!({ "pushed": outcome.pushed }),
-                    );
-                }
-                self.set_status(app, SyncStatus::Idle).await;
-            }
-            Err(e) => {
-                error!(error = %e, "push step failed");
-                self.set_status(app, SyncStatus::Error).await;
             }
         }
     }
@@ -325,37 +383,49 @@ impl SyncEngine {
             self.set_status(app, SyncStatus::Offline).await;
             return;
         };
-        let token = self.token.read().await.clone();
-
         self.set_status(app, SyncStatus::Pulling).await;
-        match crate::sync::puller::run_step(
-            &self.pool,
-            self.state_repo.clone(),
-            &http,
-            token.as_deref(),
-            &self.entity_id_tenant,
-        )
-        .await
-        {
-            Ok(outcome) => {
-                if outcome.session_expired {
-                    let _ = app.emit(AUTH_EXPIRED_EVENT, ());
+
+        // Refresh-once-then-surface on 401 (mirrors do_push).
+        let mut attempted_refresh = false;
+        loop {
+            let token = self.token.read().await.clone();
+            match crate::sync::puller::run_step(
+                &self.pool,
+                self.state_repo.clone(),
+                &http,
+                token.as_deref(),
+                &self.entity_id_tenant,
+            )
+            .await
+            {
+                Ok(outcome) => {
+                    if outcome.session_expired {
+                        if !attempted_refresh {
+                            attempted_refresh = true;
+                            if self.try_refresh().await.is_some() {
+                                continue; // retry the pull once with the new token
+                            }
+                        }
+                        let _ = app.emit(AUTH_EXPIRED_EVENT, ());
+                        self.set_status(app, SyncStatus::Error).await;
+                        return;
+                    }
+                    // Tell the UI exactly which entities changed so it can
+                    // invalidate the matching React Query caches.
+                    if !outcome.affected_entities.is_empty() {
+                        let _ = app.emit(
+                            APPLIED_EVENT,
+                            serde_json::json!({ "entities": outcome.affected_entities }),
+                        );
+                    }
+                    self.set_status(app, SyncStatus::Idle).await;
+                    return;
+                }
+                Err(e) => {
+                    error!(error = %e, "pull step failed");
                     self.set_status(app, SyncStatus::Error).await;
                     return;
                 }
-                // Tell the UI exactly which entities changed so it can
-                // invalidate the matching React Query caches.
-                if !outcome.affected_entities.is_empty() {
-                    let _ = app.emit(
-                        APPLIED_EVENT,
-                        serde_json::json!({ "entities": outcome.affected_entities }),
-                    );
-                }
-                self.set_status(app, SyncStatus::Idle).await;
-            }
-            Err(e) => {
-                error!(error = %e, "pull step failed");
-                self.set_status(app, SyncStatus::Error).await;
             }
         }
     }

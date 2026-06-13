@@ -79,6 +79,7 @@ async fn mariam_superadmin_phase01_day_script() {
             initial_server_url: None,
             initial_token: None,
             entity_id_tenant: "tenant-idc".into(),
+            refresh_hook: None,
         },
         handle,
         cancel.clone(),

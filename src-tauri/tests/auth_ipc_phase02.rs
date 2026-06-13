@@ -112,6 +112,7 @@ async fn rig(server_url: Option<&str>) -> Rig {
             initial_server_url: server_url.map(|s| s.to_string()),
             initial_token: None,
             entity_id_tenant: "tenant-1".into(),
+            refresh_hook: None,
         },
         handle,
         cancel.clone(),
@@ -1009,12 +1010,16 @@ async fn settings_update_happy_path_for_superadmin_persists_caches_and_bumps_ver
     assert_eq!(updated.value, SettingValue::Int(12_000));
     assert!(updated.version >= 1);
 
-    // settings_cache populated.
+    // settings_cache populated with the BARE scalar (not the tagged-enum
+    // serialization) so money/receipt reads via get_setting(..).as_i64()
+    // resolve. Storing the tagged object would make as_i64() None and zero
+    // every visit-lock money snapshot (the C8 fix).
     let cached = rig.state.get_setting("dye_cost_iqd").await.unwrap();
-    // The cache stores SettingValue serialized as JSON. We just confirm it's
-    // present and round-trips back to a SettingValue.
-    let back: SettingValue = serde_json::from_value(cached).unwrap();
-    assert_eq!(back, SettingValue::Int(12_000));
+    assert_eq!(
+        cached.as_i64(),
+        Some(12_000),
+        "cache must hold a bare integer scalar, got: {cached}"
+    );
 }
 
 #[tokio::test]
