@@ -13,7 +13,9 @@ export type CommandMap = {
   sync_trigger_push: { args: void; result: null }
   sync_trigger_pull: { args: void; result: null }
   sync_list_stuck: { args: void; result: StuckOpRecord[] }
-  sync_requeue_op: { args: { op_id: string }; result: null }
+  // Tauri v2 maps the Rust snake_case param `op_id` to camelCase `opId` on
+  // the JS side (top-level command args only -- inner structs do NOT convert).
+  sync_requeue_op: { args: { opId: string }; result: null }
   sync_list_conflicts: {
     args: { limit?: number; offset?: number }
     result: ConflictRecord[]

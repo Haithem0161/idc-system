@@ -133,7 +133,7 @@ export function useRequeueOp () {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (opId: string) => {
-      await invoke("sync_requeue_op", { op_id: opId })
+      await invoke("sync_requeue_op", { opId })
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: syncKeys.stuck })

@@ -246,7 +246,14 @@ impl SyncEngine {
                 reply,
             } => {
                 let result = self.resolve_conflict_inner(op_id, choice, merged).await;
+                let ok = result.is_ok();
                 let _ = reply.send(result);
+                // Pull the canonical resolved row (server bumped its version)
+                // straight back so the local entity reflects the resolution
+                // without waiting for the periodic pull tick.
+                if ok {
+                    self.do_pull(app).await;
+                }
             }
             Cmd::ListConflicts { reply } => {
                 let result = self.list_conflicts_inner().await;
@@ -358,10 +365,17 @@ impl SyncEngine {
         let resolve_op_id = stable_resolve_op_id(&op_id, &choice, merged.as_ref());
         http.resolve_conflict(&token, &op_id, &resolve_op_id, &choice, merged)
             .await?;
-        // Release the parked outbox row so it can be re-pushed under the
-        // chosen resolution.
+        // The server has now APPLIED the chosen payload (local/merged) at a
+        // bumped version, or kept its own (server). Either way the parked
+        // outbox op is fully resolved server-side, so we delete it locally.
+        // The canonical resolved row -- including the version bump -- flows
+        // back on the next pull, so trigger one immediately rather than
+        // waiting for the periodic tick, otherwise the local row stays on its
+        // stale pre-resolution value until then.
         if let Ok(parsed) = uuid::Uuid::parse_str(&op_id) {
-            let _ = self.outbox_repo.delete_acked(&[parsed]).await;
+            if let Err(e) = self.outbox_repo.delete_acked(&[parsed]).await {
+                warn!(op_id = %op_id, error = %e, "resolve: failed to clear parked op");
+            }
         }
         Ok(())
     }

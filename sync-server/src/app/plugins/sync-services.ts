@@ -72,6 +72,7 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
     conflictRepo,
     processedRepo,
     auditRepo,
+    entityStore,
     fastify.prisma ?? null,
   )
 

@@ -188,6 +188,30 @@ async fn sync_trigger_push_idempotent_under_rapid_repeated_calls() {
 
 // --- sync_resolve_conflict -----------------------------------------------
 
+#[test]
+fn resolve_conflict_args_deserialize_from_camelcase_wire_shape() {
+    // The frontend sends the inner struct as camelCase (`opId`). Tauri v2 does
+    // NOT camelCase-convert inner struct fields, so without
+    // #[serde(rename_all="camelCase")] this fails with "missing field `op_id`"
+    // and every conflict resolution is rejected at the IPC boundary.
+    let json = serde_json::json!({
+        "opId": "01HZ0000000000000000000abc",
+        "choice": "local",
+        "merged": null,
+    });
+    let args: ResolveConflictArgs =
+        serde_json::from_value(json).expect("camelCase opId must deserialize");
+    assert_eq!(args.op_id, "01HZ0000000000000000000abc");
+    assert_eq!(args.choice, "local");
+
+    // The old snake_case wire shape must now be rejected (proves the rename).
+    let snake = serde_json::json!({ "op_id": "x", "choice": "local" });
+    assert!(
+        serde_json::from_value::<ResolveConflictArgs>(snake).is_err(),
+        "snake_case op_id must no longer deserialize"
+    );
+}
+
 #[tokio::test]
 async fn sync_resolve_conflict_rejects_unknown_choice_with_validation_error() {
     let r = rig(None).await;

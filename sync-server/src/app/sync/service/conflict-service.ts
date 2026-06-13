@@ -10,8 +10,14 @@ import type {
   ProcessedOpResponse,
 } from '../domain/repositories'
 import type { AuditPayload } from '../domain/types'
+import type { SyncEntityStore } from '../domain/sync-store'
+import type {
+  SettingSyncRecord,
+  VisitSyncRecord,
+} from '../infrastructure/memory/store'
 import { PrismaAuditLogRepo } from '../infrastructure/prisma/audit-repo'
 import { PrismaConflictParkedRepo } from '../infrastructure/prisma/conflict-parked-repo'
+import { PrismaEntityStore } from '../infrastructure/prisma/entity-store'
 import { PrismaProcessedOpRepo } from '../infrastructure/prisma/processed-op-repo'
 
 export interface ResolveInput {
@@ -36,11 +42,17 @@ export class ConflictResolveService {
     private readonly processed: ProcessedOpRepository,
     private readonly audit: AuditLogRepository,
     /**
-     * When set, the three resolve-time writes (conflict resolve, audit row,
-     * processed-op cache) run in a single Prisma `$transaction` to satisfy
-     * the phase-09 BLOCKER-6 atomicity invariant. When null (test/memory
-     * path), the writes run sequentially — memory store is single-threaded
-     * so partial-failure rollback is not a hazard.
+     * The entity store used to APPLY the chosen payload. Without this a
+     * 'local'/'merged' resolution would only stamp the audit row and discard
+     * the user's choice, leaving the server on its losing version forever.
+     */
+    private readonly store: SyncEntityStore,
+    /**
+     * When set, the resolve-time writes (apply chosen payload, conflict
+     * resolve, audit row, processed-op cache) run in a single Prisma
+     * `$transaction` to satisfy the phase-09 BLOCKER-6 atomicity invariant.
+     * When null (test/memory path), the writes run sequentially — memory
+     * store is single-threaded so partial-failure rollback is not a hazard.
      */
     private readonly prisma: PrismaClient | null = null
   ) {}
@@ -119,7 +131,7 @@ export class ConflictResolveService {
       : null
 
     if (this.prisma) {
-      // Production path: all three writes commit atomically.
+      // Production path: all writes commit atomically.
       // Phase-09 BLOCKER-6 — a network drop between the resolve and the
       // audit-row insert MUST NOT leave the conflict marked resolved
       // without the audit trail row that documents how it was resolved.
@@ -128,6 +140,10 @@ export class ConflictResolveService {
       const auditTx = new PrismaAuditLogRepo(prisma, null as unknown as never)
       const processedTx = new PrismaProcessedOpRepo(prisma)
       await prisma.$transaction(async (tx) => {
+        // Apply the chosen payload to the entity store FIRST so the resolution
+        // is meaningless-free: choosing 'local'/'merged' actually overwrites
+        // the server's losing version. A txn-scoped store keeps it atomic.
+        await this.applyChosen(parked, input, new PrismaEntityStore(tx as unknown as PrismaClient))
         await conflictsTx.resolveTx(tx, opId, tenantId, userId)
         await auditTx.insertManyTx(tx, [auditRow])
         if (input.resolveOpId && response) {
@@ -136,6 +152,7 @@ export class ConflictResolveService {
       })
     } else {
       // Memory / test path: sequential is sufficient (single-threaded).
+      await this.applyChosen(parked, input, this.store)
       await this.conflicts.resolve(opId, tenantId, userId)
       await this.audit.insertMany([auditRow])
       if (input.resolveOpId && response) {
@@ -145,4 +162,60 @@ export class ConflictResolveService {
 
     return { status: 'applied' }
   }
+
+  /**
+   * Apply the user's chosen payload to the entity store.
+   * - 'server': the server row already wins; nothing to write.
+   * - 'local': re-apply the parked client payload.
+   * - 'merged': apply the supplied merged payload.
+   * The chosen payload's version is bumped above BOTH the server and local
+   * versions so the LWW upsert always accepts it and the resolution
+   * propagates to every other device on its next pull.
+   * Only `settings` and `visits` are ever parked (the manual-policy
+   * entities), so only those are dispatched.
+   */
+  private async applyChosen (
+    parked: { entity: string, serverPayload: unknown, localPayload: unknown },
+    input: ResolveInput,
+    store: SyncEntityStore
+  ): Promise<void> {
+    if (input.choice === 'server') return
+
+    const source = input.choice === 'merged' ? input.merged : parked.localPayload
+    if (!source || typeof source !== 'object') {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        `cannot resolve ${parked.entity}: chosen payload is missing or not an object`,
+        422
+      )
+    }
+
+    const winning = { ...(source as Record<string, unknown>) }
+    const serverVersion = versionOf(parked.serverPayload)
+    const localVersion = versionOf(parked.localPayload)
+    winning.version = Math.max(serverVersion, localVersion) + 1
+
+    switch (parked.entity) {
+      case 'settings':
+        await store.upsertSetting(winning as unknown as SettingSyncRecord)
+        break
+      case 'visits':
+        await store.upsertVisit(winning as unknown as VisitSyncRecord)
+        break
+      default:
+        throw new DomainError(
+          'VALIDATION_ERROR',
+          `conflict resolution not supported for entity ${parked.entity}`,
+          422
+        )
+    }
+  }
+}
+
+function versionOf (payload: unknown): number {
+  if (payload && typeof payload === 'object') {
+    const v = (payload as Record<string, unknown>).version
+    if (typeof v === 'number' && Number.isFinite(v)) return v
+  }
+  return 0
 }

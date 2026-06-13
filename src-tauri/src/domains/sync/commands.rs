@@ -214,7 +214,12 @@ pub async fn sync_list_conflicts(
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResolveConflictArgs {
+    // The frontend sends this inner struct under the `args` key as camelCase
+    // (`opId`). Tauri v2 only camelCase-converts TOP-LEVEL command params, not
+    // inner struct fields, so without rename_all serde fails with
+    // "missing field `op_id`" and every conflict resolution is rejected.
     pub op_id: String,
     pub choice: String,
     #[serde(default)]
