@@ -467,6 +467,36 @@ pub async fn receipts_reprint(
         .await
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ReceiptContent {
+    pub a5: String,
+    pub thermal: String,
+}
+
+/// Render the receipt and return the rendered TEXT of both formats so the UI
+/// can preview/print it. The MVP renderer emits plain-text artifacts; without
+/// this the generated a5_path / thermal_path were never consumed and there was
+/// no way to view or print a receipt from the UI.
+#[instrument(skip(state))]
+#[tauri::command]
+pub async fn receipts_read(
+    args: VisitIdArgs,
+    state: State<'_, AppState>,
+) -> AppResult<ReceiptContent> {
+    let svc = service(state.inner())?;
+    let receipt = receipt_options(state.inner()).await;
+    let artifacts = svc
+        .render_receipt(Uuid::parse_str(&args.visit_id)?, receipt)
+        .await?;
+    let a5 = tokio::fs::read_to_string(&artifacts.a5_path)
+        .await
+        .map_err(|e| AppError::Internal(format!("read a5 receipt: {e}")))?;
+    let thermal = tokio::fs::read_to_string(&artifacts.thermal_path)
+        .await
+        .map_err(|e| AppError::Internal(format!("read thermal receipt: {e}")))?;
+    Ok(ReceiptContent { a5, thermal })
+}
+
 // ---- lines run today (phase-04 §7.25) -------------------------------------
 
 #[derive(Debug, Deserialize)]

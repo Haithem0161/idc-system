@@ -133,7 +133,12 @@
         "thermal_label": "Thermal receipt"
       },
       "audit_empty": "No audit entries yet.",
-      "reprinted": "Receipts re-rendered."
+      "reprinted": "Receipts re-rendered.",
+      "receipt_preview": {
+        "title": "Receipt preview",
+        "close": "Close",
+        "print": "Print"
+      }
     },
     "crumb": {
       "checks": "Checks",

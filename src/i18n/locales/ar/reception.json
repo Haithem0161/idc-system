@@ -133,7 +133,12 @@
         "thermal_label": "إيصال حراري"
       },
       "audit_empty": "لا توجد سجلات بعد.",
-      "reprinted": "تم إعادة إصدار الإيصالات."
+      "reprinted": "تم إعادة إصدار الإيصالات.",
+      "receipt_preview": {
+        "title": "معاينة الإيصال",
+        "close": "إغلاق",
+        "print": "طباعة"
+      }
     },
     "crumb": {
       "checks": "الفحوصات",

@@ -337,6 +337,10 @@ export type CommandMap = {
     args: { args: { visit_id: string } }
     result: ReceiptArtifactsRecord
   }
+  receipts_read: {
+    args: { args: { visit_id: string } }
+    result: ReceiptContentRecord
+  }
   // ---- Phase 6: inventory operations ----
   inventory_list_items: {
     args: {
@@ -807,6 +811,11 @@ export interface QualifiedOperatorRecord {
 export interface ReceiptArtifactsRecord {
   a5_path: string
   thermal_path: string
+}
+
+export interface ReceiptContentRecord {
+  a5: string
+  thermal: string
 }
 
 export interface LockResultRecord {

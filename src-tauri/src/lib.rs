@@ -102,10 +102,10 @@ use crate::domains::sync::infrastructure::{
     SqliteAuditRepo, SqliteOutboxRepo, SqliteSyncStateRepo,
 };
 use crate::domains::visits::commands::{
-    receipts_reprint, shifts_lines_run_today, visits_checks_grid, visits_create_draft,
-    visits_discard, visits_get, visits_list_drafts_by_check, visits_list_today_by_check,
-    visits_list_workspace, visits_lock, visits_pricing_resolve, visits_qualified_operators,
-    visits_update_draft, visits_void,
+    receipts_read, receipts_reprint, shifts_lines_run_today, visits_checks_grid,
+    visits_create_draft, visits_discard, visits_get, visits_list_drafts_by_check,
+    visits_list_today_by_check, visits_list_workspace, visits_lock, visits_pricing_resolve,
+    visits_qualified_operators, visits_update_draft, visits_void,
 };
 use crate::domains::visits::domain::repositories::{InventoryAdjustmentRepo, VisitRepo};
 use crate::domains::visits::infrastructure::{SqliteInventoryAdjustmentRepo, SqliteVisitRepo};
@@ -262,6 +262,7 @@ pub fn run() {
             visits_void,
             visits_pricing_resolve,
             receipts_reprint,
+            receipts_read,
             // inventory operations
             inventory_list_items,
             inventory_get_item,

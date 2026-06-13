@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import { AdminHeader, ErrorBanner } from "@/components/admin/admin-panel"
 import {
+  useReceiptRead,
   useReceiptReprint,
   useVisit,
   useVisitVoid,
@@ -22,10 +23,12 @@ export default function VisitDetailPage () {
   const [info, setInfo] = useState<string | null>(null)
   const [voidOpen, setVoidOpen] = useState(false)
   const [voidReason, setVoidReason] = useState("")
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null)
 
   const { data: visit } = useVisit(visitId)
   const voidMutation = useVisitVoid()
   const reprint = useReceiptReprint()
+  const receiptRead = useReceiptRead()
 
   const snap = visit?.snapshots ?? null
 
@@ -48,7 +51,12 @@ export default function VisitDetailPage () {
   async function onReprint () {
     if (!visitId) return
     try {
+      // Regenerate the artifacts on disk AND read the rendered content so the
+      // receipt can actually be viewed/printed (the generated paths used to be
+      // dropped, leaving no way to see a receipt).
       await reprint.mutateAsync({ visit_id: visitId })
+      const content = await receiptRead.mutateAsync({ visit_id: visitId })
+      setReceiptPreview(content.a5)
       setInfo(t("reception.visit_detail.reprinted"))
     } catch (e) {
       setError(String((e as Error).message ?? e))
@@ -213,6 +221,39 @@ export default function VisitDetailPage () {
                   onClick={onVoid}
                 >
                   {t("reception.visit_detail.void_modal.submit")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {receiptPreview !== null ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
+          <div className="panel max-w-lg w-full">
+            <div className="panel-head flex items-center justify-between">
+              <span className="panel-title">
+                {t("reception.visit_detail.receipt_preview.title")}
+              </span>
+            </div>
+            <div className="panel-body space-y-3">
+              <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded border border-line bg-paper-2 p-3 font-mono text-[12px] text-ink">
+                {receiptPreview}
+              </pre>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setReceiptPreview(null)}
+                >
+                  {t("reception.visit_detail.receipt_preview.close")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => window.print()}
+                >
+                  {t("reception.visit_detail.receipt_preview.print")}
                 </button>
               </div>
             </div>

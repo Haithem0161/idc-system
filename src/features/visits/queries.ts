@@ -8,6 +8,7 @@ import type {
   PatientRecord,
   QualifiedOperatorRecord,
   ReceiptArtifactsRecord,
+  ReceiptContentRecord,
   VisitRecord,
 } from "@/lib/ipc"
 import type {
@@ -187,6 +188,13 @@ export function useReceiptReprint () {
   return useMutation<ReceiptArtifactsRecord, Error, { visit_id: string }>({
     mutationFn: (input) =>
       invoke("receipts_reprint", { args: { visit_id: input.visit_id } }),
+  })
+}
+
+export function useReceiptRead () {
+  return useMutation<ReceiptContentRecord, Error, { visit_id: string }>({
+    mutationFn: (input) =>
+      invoke("receipts_read", { args: { visit_id: input.visit_id } }),
   })
 }
 
