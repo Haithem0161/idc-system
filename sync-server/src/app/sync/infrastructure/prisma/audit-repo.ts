@@ -50,10 +50,24 @@ export class PrismaAuditLogRepo implements AuditLogRepository {
   ): Promise<{ rows: ChangeRow[], nextCursor: string }> {
     const decoded = cursor ? decodeCursor(cursor) : null
 
+    // Apply the keyset cursor IN THE QUERY, before `take`. Filtering only
+    // in-memory after taking the oldest N rows meant that once a tenant had
+    // more than `limit` audit rows, every row past the limit-th oldest was
+    // never loaded -- so audit_log pull returned nothing forever.
+    const cursorWhere: Prisma.AuditLogWhereInput | undefined = decoded
+      ? {
+          OR: [
+            { updatedAt: { gt: new Date(decoded.at) } },
+            { updatedAt: new Date(decoded.at), id: { gt: decoded.id } },
+          ],
+        }
+      : undefined
+
     const auditRows = await this.prisma.auditLog.findMany({
       where: {
         entityIdTenant: tenantId,
         deletedAt: null,
+        ...(cursorWhere ?? {}),
       },
       orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
       take: Math.max(0, Math.min(limit, 500)),
