@@ -56,44 +56,79 @@ Replace the placeholder host in the existing `plugins.updater.endpoints` entry:
 }
 ```
 
-`{{target}}`, `{{arch}}`, `{{current_version}}` are substituted by the plugin.
-The endpoint must return a signed update manifest (`latest.json`) or 204 when the
-client is current.
+`{{target}}` and `{{arch}}` are substituted by the plugin; the resulting URL is
+a **static `latest.json`**. The plugin downloads it, compares its `version` to
+the running app, and (if newer) downloads the bundle and verifies its signature
+against the pubkey before installing. A static file host (nginx) is all you need
+-- there is no dynamic server to write.
 
-## 3. Build + sign release bundles
+The endpoint MUST be HTTPS (the plugin refuses plain HTTP).
 
-Set the private key in the environment and run the release build; the bundler
-signs the artifacts automatically:
+## 2b. VPS: serve the update files (one-time)
+
+The desktop updates are static files; serve them from the same VPS as the
+sync-server. On the VPS:
 
 ```bash
-export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.idc/updater.key)"
-export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<password or empty>"
-pnpm tauri build
+sudo mkdir -p /var/www/idc-updates/idc
+# allow your deploy user to write into it (the release script scps here)
+sudo chown -R "$USER" /var/www/idc-updates
 ```
 
-The build emits a `.sig` next to each bundle. The release pipeline (see the
-separate "no release pipeline" build-health finding — `.github/workflows/`)
-publishes the bundles + the `latest.json` manifest to the endpoint from step 2.
+Add an nginx `location /idc/` that serves `/var/www/idc-updates` -- a ready
+example (dedicated subdomain OR a path next to the proxied sync-server) is in
+[`updater-nginx.conf.example`](./updater-nginx.conf.example). Issue a TLS cert
+for the host (`certbot`) and reload nginx. Verify:
 
-## 4. Host the update manifest
+```bash
+curl -I https://<your-host>/idc/   # 403/404 is fine; TLS must be valid
+```
 
-Serve a `latest.json` per platform/arch at the endpoint, e.g.:
+Then set the host in `tauri.conf.json` (replace `RELEASES_HOST_TODO.invalid`):
+
+```jsonc
+"endpoints": [ "https://<your-host>/idc/{{target}}/{{arch}}/latest.json" ]
+```
+
+## 3 + 4. Build, sign, and publish a release (`tools/release-update.sh`)
+
+`tools/release-update.sh` does the build + sign + manifest + upload in one shot.
+It builds for the OS it RUNS on (Linux -> AppImage, Windows -> installer) --
+Tauri cannot cross-build these, so run it once per target OS. Each run only
+updates its own platform's directory, so Linux and Windows releases coexist.
+
+```bash
+# From the repo root, on each target OS:
+UPDATE_HOST=<your-host> \
+DEPLOY_SSH=deploy@<vps-ip> \
+DEPLOY_DOCROOT=/var/www/idc-updates \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+./tools/release-update.sh
+```
+
+It reads the private key from `~/.idc/updater.key` (override with
+`TAURI_SIGNING_PRIVATE_KEY`), reads the version from `tauri.conf.json`, writes
+`latest.json`, and scps the bundle + manifest to
+`<docroot>/idc/<target>/<arch>/` on the VPS.
+
+**Release checklist:** bump `version` in `src-tauri/tauri.conf.json`, commit,
+then run the script on a Linux box and (for clinic Windows PCs) on a Windows box.
+
+The manifest it writes looks like:
 
 ```json
 {
   "version": "0.2.0",
-  "notes": "...",
+  "notes": "IDC System 0.2.0",
   "pub_date": "2026-06-13T00:00:00Z",
   "platforms": {
     "linux-x86_64": {
       "signature": "<contents of the .sig file>",
-      "url": "https://releases.example.com/idc/idc_0.2.0_amd64.AppImage"
+      "url": "https://<your-host>/idc/linux/x86_64/idc_0.2.0_amd64.AppImage"
     }
   }
 }
 ```
-
-GitHub Releases works as the host (point the endpoint at the release asset URL).
 
 ## 5. Frontend trigger (DONE)
 
@@ -124,9 +159,16 @@ if (update) {
 
 ## Status
 
+Done in code (no further changes needed):
+
 - [x] Plugins wired (`updater` + `process`) and capabilities granted.
-- [x] Signing keypair generated; private key at `~/.idc/updater.key` (move to CI secrets).
-- [x] `plugins.updater` block added with real pubkey (endpoint is a placeholder).
+- [x] Signing keypair generated; private key at `~/.idc/updater.key`.
+- [x] `plugins.updater` block added with real pubkey + static `latest.json` endpoint shape.
 - [x] Frontend "Check for updates" action (Settings) + actionable 426 banner.
-- [ ] Point `plugins.updater.endpoints` at a real host (replace `RELEASES_HOST_TODO.invalid`).
-- [ ] Release pipeline builds, signs, and publishes bundles + `latest.json` to that host.
+- [x] Release script (`tools/release-update.sh`) + nginx example (`updater-nginx.conf.example`).
+
+Your operational steps (one-time, then per release):
+
+- [ ] One-time: `mkdir /var/www/idc-updates`, add the nginx `/idc/` location, issue a TLS cert.
+- [ ] One-time: replace `RELEASES_HOST_TODO.invalid` in `tauri.conf.json` with your host.
+- [ ] Per release: bump `version`, run `tools/release-update.sh` on Linux and on Windows.

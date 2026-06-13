@@ -1,0 +1,58 @@
+# Example nginx config to serve IDC desktop self-updates from the same VPS as
+# the sync-server. Copy the relevant `location` block into your existing server
+# block (the one with the TLS cert for your domain), or use this as a standalone
+# vhost. Replace releases.example.com and the docroot to match your setup.
+#
+# The release script (tools/release-update.sh) uploads files into:
+#   <docroot>/idc/<target>/<arch>/latest.json
+#   <docroot>/idc/<target>/<arch>/<bundle>.AppImage   (or the Windows installer)
+# so the app's endpoint  https://<host>/idc/{{target}}/{{arch}}/latest.json
+# resolves to a static file.
+
+# --- Option A: a dedicated subdomain (releases.example.com) ------------------
+server {
+    listen 443 ssl http2;
+    server_name releases.example.com;
+
+    # Use the cert you already issued (certbot / Let's Encrypt).
+    ssl_certificate     /etc/letsencrypt/live/releases.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/releases.example.com/privkey.pem;
+
+    root /var/www/idc-updates;
+
+    # Static update files. AppImages/installers are large; allow ranged GETs so
+    # the updater can resume, and don't buffer them into memory.
+    location /idc/ {
+        autoindex off;
+        add_header Cache-Control "no-cache";   # always re-fetch latest.json
+        try_files $uri =404;
+    }
+}
+
+# --- Option B: a path on the same host as the sync-server --------------------
+# If the sync-server is already proxied on this domain, just ADD the /idc/
+# location to that existing server block. Static files are served directly;
+# everything else continues to proxy to the sync-server on :3161.
+#
+# server {
+#     listen 443 ssl http2;
+#     server_name api.example.com;
+#     ssl_certificate     /etc/letsencrypt/live/api.example.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
+#
+#     # Static self-update files (served from disk, not proxied).
+#     location /idc/ {
+#         root /var/www/idc-updates;
+#         autoindex off;
+#         add_header Cache-Control "no-cache";
+#         try_files $uri =404;
+#     }
+#
+#     # Everything else -> sync-server.
+#     location / {
+#         proxy_pass http://127.0.0.1:3161;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#     }
+# }
