@@ -47,3 +47,5 @@ docs/idc-system/testing/fixtures/*
 !docs/idc-system/testing/fixtures/clinical-day.sql
 !docs/idc-system/testing/fixtures/scale-12-months.sql
 .audit-worklist.json
+.wl-backend.json
+.wl-frontend.json
