@@ -101,6 +101,36 @@ pub async fn run_step(
     })
 }
 
+/// Apply order respecting foreign-key dependencies. Within a single pull
+/// batch we process entity types in this sequence so a child row (e.g. a
+/// `visits` row referencing a `patients`/`doctors`/`operators` row) is never
+/// inserted before its parent, regardless of the order the server streamed
+/// them. Entities not listed are applied last (after all parents).
+const APPLY_ORDER: &[&str] = &[
+    "users",
+    "settings",
+    "check_types",
+    "check_subtypes",
+    "doctors",
+    "doctor_check_pricing",
+    "operators",
+    "operator_specialties",
+    "inventory_items",
+    "inventory_consumption_map",
+    "operator_shifts",
+    "patients",
+    "visits",
+    "inventory_adjustments",
+    "audit_log",
+];
+
+fn apply_rank(entity: &str) -> usize {
+    APPLY_ORDER
+        .iter()
+        .position(|e| *e == entity)
+        .unwrap_or(APPLY_ORDER.len())
+}
+
 async fn apply_changes(tx: &mut crate::db::Tx<'_>, changes: &[PullChange]) -> AppResult<usize> {
     let mut applied = 0;
     // Phase-06 §7.9 pull-time recompute hook: after applying any
@@ -110,7 +140,13 @@ async fn apply_changes(tx: &mut crate::db::Tx<'_>, changes: &[PullChange]) -> Ap
     // informational only -- the client is canonical for this column per
     // PRD §6.1.12.
     let mut affected_inventory_items: BTreeSet<String> = BTreeSet::new();
-    for change in changes {
+
+    // FK-safe ordering: parents before children. A stable sort by dependency
+    // rank keeps same-entity ordering (and thus version progression) intact.
+    let mut ordered: Vec<&PullChange> = changes.iter().collect();
+    ordered.sort_by_key(|c| apply_rank(&c.entity));
+
+    for change in ordered {
         match change.entity.as_str() {
             "audit_log" => {
                 apply_audit_change(tx, change).await?;
@@ -139,10 +175,64 @@ async fn apply_changes(tx: &mut crate::db::Tx<'_>, changes: &[PullChange]) -> Ap
                     applied += 1;
                 }
             }
-            _ => {
-                // Other entities are not yet pulled into local SQLite in this
-                // phase; skip defensively.
-                continue;
+            // C3/C5: the remaining syncable entities. Previously these were
+            // silently skipped while the cursor advanced past them, so peer
+            // changes to patients/visits/settings/catalog/shifts were dropped
+            // permanently. Each handler is an LWW-gated upsert (see
+            // `puller_entities`).
+            "settings" => {
+                crate::sync::puller_entities::apply_settings_change(tx, change).await?;
+                applied += 1;
+            }
+            "check_types" => {
+                crate::sync::puller_entities::apply_check_types_change(tx, change).await?;
+                applied += 1;
+            }
+            "check_subtypes" => {
+                crate::sync::puller_entities::apply_check_subtypes_change(tx, change).await?;
+                applied += 1;
+            }
+            "doctors" => {
+                crate::sync::puller_entities::apply_doctors_change(tx, change).await?;
+                applied += 1;
+            }
+            "doctor_check_pricing" => {
+                crate::sync::puller_entities::apply_doctor_check_pricing_change(tx, change).await?;
+                applied += 1;
+            }
+            "operators" => {
+                crate::sync::puller_entities::apply_operators_change(tx, change).await?;
+                applied += 1;
+            }
+            "operator_specialties" => {
+                crate::sync::puller_entities::apply_operator_specialties_change(tx, change).await?;
+                applied += 1;
+            }
+            "inventory_consumption_map" => {
+                crate::sync::puller_entities::apply_inventory_consumption_map_change(tx, change)
+                    .await?;
+                applied += 1;
+            }
+            "operator_shifts" => {
+                crate::sync::puller_entities::apply_operator_shifts_change(tx, change).await?;
+                applied += 1;
+            }
+            "patients" => {
+                crate::sync::puller_entities::apply_patients_change(tx, change).await?;
+                applied += 1;
+            }
+            "visits" => {
+                crate::sync::puller_entities::apply_visits_change(tx, change).await?;
+                applied += 1;
+            }
+            other => {
+                // An unknown entity must NOT be silently dropped while the
+                // cursor advances past it (the original C3/C5 defect). Fail
+                // loudly so the gap is visible instead of causing permanent
+                // data loss.
+                return Err(crate::error::AppError::Validation(format!(
+                    "pull: unhandled entity `{other}` (cursor not advanced)"
+                )));
             }
         }
     }

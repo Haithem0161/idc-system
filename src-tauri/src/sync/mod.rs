@@ -9,6 +9,7 @@ pub mod engine;
 pub mod metrics;
 pub mod outbox;
 pub mod puller;
+pub mod puller_entities;
 pub mod pusher;
 
 pub use engine::{SyncEngine, SyncEngineConfig, SyncEngineHandle};

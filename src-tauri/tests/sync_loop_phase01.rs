@@ -776,3 +776,203 @@ async fn def_007_g35_users_pull_apply_with_stale_version_does_not_touch_existing
     assert_eq!(after.version, 5, "stale pull must not bump version");
     assert_eq!(after.password_hash, original_hash);
 }
+
+// --- C3/C5: pull-apply for the previously-dropped entities ----------------
+//
+// Before the fix the puller handled only audit_log / inventory_items /
+// inventory_adjustments / users and SILENTLY skipped everything else while
+// advancing the cursor past it -- so a peer's patient/visit/etc. was fetched
+// once and lost forever. These pin that the new handlers actually land the
+// rows.
+
+#[tokio::test]
+async fn c3_pull_applies_a_patients_row() {
+    let pool = fresh_pool().await;
+    let patient_id = uuid::Uuid::now_v7();
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "entity": "patients",
+                "entity_id": patient_id.to_string(),
+                "payload": {
+                    "id": patient_id.to_string(),
+                    "name": "Mariam",
+                    "created_at": "2026-05-13T10:00:00Z",
+                    "updated_at": "2026-05-13T10:00:00Z",
+                    "version": 1,
+                    "entity_id": "tenant-x",
+                },
+                "updated_at": "2026-05-13T10:00:00Z",
+                "version": 1,
+            }],
+            "next_cursor": "2026-05-13T10:00:00Z|patients-1"
+        })))
+        .mount(&server)
+        .await;
+
+    let outcome = puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("pull ok");
+    assert_eq!(
+        outcome.applied, 1,
+        "the patients row must be applied, not skipped"
+    );
+
+    let (name,): (String,) = sqlx::query_as("SELECT name FROM patients WHERE id = ?")
+        .bind(patient_id.to_string())
+        .fetch_one(&pool)
+        .await
+        .expect("patient row must exist locally after pull");
+    assert_eq!(name, "Mariam");
+}
+
+#[tokio::test]
+async fn c3_pull_applies_a_visit_after_its_fk_parents() {
+    // A draft visit pulled together with its patient + the pre-seeded
+    // check_type / receptionist. FK-safe ordering must insert the parents
+    // first even though the visit arrives before the patient in the batch.
+    let pool = fresh_pool().await;
+
+    // Seed the FK parents that the visit references and that are NOT part of
+    // this pull batch (a real device would already have these from earlier).
+    let user_id = uuid::Uuid::now_v7();
+    let check_type_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO users (id, email, name, password_hash, role, is_active, created_at, \
+         updated_at, version, dirty, entity_id) \
+         VALUES (?, 'r@idc.io', 'Rita', '', 'receptionist', 1, '2026-05-13T09:00:00Z', \
+         '2026-05-13T09:00:00Z', 1, 0, 'tenant-x')",
+    )
+    .bind(user_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO check_types (id, name_ar, has_subtypes, base_price_iqd, created_at, \
+         updated_at, version, dirty, entity_id) \
+         VALUES (?, 'سونار', 0, 25000, '2026-05-13T09:00:00Z', '2026-05-13T09:00:00Z', 1, 0, 'tenant-x')",
+    )
+    .bind(check_type_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let patient_id = uuid::Uuid::now_v7();
+    let visit_id = uuid::Uuid::now_v7();
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [
+                // visit FIRST (out of FK order) to prove the puller reorders.
+                {
+                    "entity": "visits",
+                    "entity_id": visit_id.to_string(),
+                    "payload": {
+                        "id": visit_id.to_string(),
+                        "patient_id": patient_id.to_string(),
+                        "status": "draft",
+                        "receptionist_user_id": user_id.to_string(),
+                        "check_type_id": check_type_id.to_string(),
+                        "dye": false,
+                        "report": false,
+                        "created_at": "2026-05-13T10:00:00Z",
+                        "updated_at": "2026-05-13T10:00:00Z",
+                        "version": 1,
+                        "entity_id": "tenant-x",
+                    },
+                    "updated_at": "2026-05-13T10:00:00Z",
+                    "version": 1,
+                },
+                {
+                    "entity": "patients",
+                    "entity_id": patient_id.to_string(),
+                    "payload": {
+                        "id": patient_id.to_string(),
+                        "name": "Salwa",
+                        "created_at": "2026-05-13T10:00:00Z",
+                        "updated_at": "2026-05-13T10:00:00Z",
+                        "version": 1,
+                        "entity_id": "tenant-x",
+                    },
+                    "updated_at": "2026-05-13T10:00:00Z",
+                    "version": 1,
+                },
+            ],
+            "next_cursor": "2026-05-13T10:00:00Z|visits-1"
+        })))
+        .mount(&server)
+        .await;
+
+    let outcome = puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("pull ok (FK parents applied before the visit)");
+    assert_eq!(outcome.applied, 2);
+
+    let (status, pid): (String, String) =
+        sqlx::query_as("SELECT status, patient_id FROM visits WHERE id = ?")
+            .bind(visit_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .expect("visit row must exist locally after pull");
+    assert_eq!(status, "draft");
+    assert_eq!(pid, patient_id.to_string());
+}
+
+#[tokio::test]
+async fn c3_pull_fails_loudly_on_unknown_entity_instead_of_dropping_it() {
+    // The original defect silently skipped unknown entities while advancing
+    // the cursor. Now an unhandled entity surfaces as an error so the gap is
+    // visible rather than causing permanent data loss.
+    let pool = fresh_pool().await;
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "entity": "some_future_entity",
+                "entity_id": "x",
+                "payload": { "id": "x" },
+                "updated_at": "2026-05-13T10:00:00Z",
+                "version": 1,
+            }],
+            "next_cursor": "2026-05-13T10:00:00Z|x"
+        })))
+        .mount(&server)
+        .await;
+
+    let result = puller::run_step(
+        &pool,
+        state.clone(),
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "unknown entity must error, not be silently skipped"
+    );
+    let cursor = state.get().await.unwrap().pull_cursor;
+    assert!(
+        cursor.is_none(),
+        "cursor must NOT advance past an unapplied change"
+    );
+}
