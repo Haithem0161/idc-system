@@ -733,7 +733,6 @@ function toUserSyncRecord (r: {
   id: string
   email: string
   name: string
-  passwordHash: string
   role: 'superadmin' | 'receptionist' | 'accountant'
   isActive: boolean
   entityId: string
@@ -742,11 +741,14 @@ function toUserSyncRecord (r: {
   deletedAt: Date | null
   originDeviceId: string | null
 }): UserSyncRecord {
+  // SECURITY: never include password_hash in the pull payload. The client's
+  // users pull-apply intentionally preserves the local hash and never reads
+  // this field; shipping it would leak every user's argon2 hash to any
+  // authenticated tenant member who pulls.
   return {
     id: r.id,
     email: r.email,
     name: r.name,
-    password_hash: r.passwordHash,
     role: r.role,
     is_active: r.isActive,
     entity_id: r.entityId,

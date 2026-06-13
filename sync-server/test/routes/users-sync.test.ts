@@ -100,6 +100,39 @@ test('DEF-007 G24: superadmin push of users row applies on first send', async (t
   assert.strictEqual(body.accepted[0].op_id, opId)
 })
 
+test('SECURITY: pulled users payload never leaks password_hash', async (t) => {
+  // A user pushed into the store must NOT come back down the pull feed with
+  // its argon2 hash, or every authenticated tenant member could harvest every
+  // user's credential hash.
+  const app = await build(t)
+  const token = superadminToken(app as unknown as FastifyAppLike)
+  const userId = '00000000-0000-7000-8000-000000000f01'
+  await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-1' },
+    payload: { ops: [makeUserOp('01HZ00000000000000000sec01', makeUserPayload(userId))] },
+  })
+
+  const res = await app.inject({
+    method: 'GET',
+    url: '/sync/pull',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-2' },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  const userChange = body.changes.find(
+    (c: { entity: string }) => c.entity === 'users'
+  )
+  assert.ok(userChange, 'the pushed user must appear in the pull feed')
+  assert.strictEqual(
+    userChange.payload.password_hash,
+    undefined,
+    'pull payload must not contain password_hash'
+  )
+  assert.ok(!('password_hash' in userChange.payload), 'password_hash key must be absent')
+})
+
 test('DEF-007 G24: same op_id replay returns duplicate (ProcessedOp dedupe)', async (t) => {
   const app = await build(t)
   const token = superadminToken(app as unknown as FastifyAppLike)

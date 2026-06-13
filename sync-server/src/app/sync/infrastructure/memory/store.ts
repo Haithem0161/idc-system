@@ -537,13 +537,18 @@ export class MemorySyncStore implements
 
     const userChanges: ChangeRow[] = [...this.users.values()]
       .filter((row) => row.entity_id === tenantId)
-      .map((row) => ({
-        entity: 'users',
-        entity_id: row.id,
-        payload: row as unknown as Record<string, unknown>,
-        updated_at: row.updated_at,
-        version: row.version,
-      }))
+      .map((row) => {
+        // SECURITY: strip password_hash from the pull payload (see the Prisma
+        // store's toUserSyncRecord). Never ship credential hashes to peers.
+        const { password_hash: _omit, ...safe } = row
+        return {
+          entity: 'users' as const,
+          entity_id: row.id,
+          payload: safe as unknown as Record<string, unknown>,
+          updated_at: row.updated_at,
+          version: row.version,
+        }
+      })
 
     const settingChanges: ChangeRow[] = [...this.settings.values()]
       .filter((row) => row.entity_id === tenantId && row.deleted_at == null)
