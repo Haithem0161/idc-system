@@ -61,9 +61,11 @@ describe.each(directions)("Phase-01 §2.4 sync feature hooks (dir=%s)", (dir) =>
 
   describe("useSyncStatus", () => {
     it("calls sync_status IPC and returns the snapshot", async () => {
+      // Rust serializes snake_case on the wire; the hook normalizes it.
       vi.mocked(invoke).mockResolvedValueOnce({
         status: "idle",
-        pendingOps: 3,
+        pending_ops: 3,
+        stuck_ops: 0,
       })
       const { wrapper } = makeWrapper()
       const { result } = renderHook(() => useSyncStatus(), { wrapper })

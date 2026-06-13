@@ -29,9 +29,9 @@ export function AppShell() {
     invoke("device_info")
       .then((info) => {
         if (cancelled) return
-        const deviceId = info.deviceId ?? info.device_id ?? ""
-        const appVersion = info.appVersion ?? info.app_version ?? ""
-        setDevice({ deviceId, appVersion })
+        // device_info serializes snake_case on the wire; map to the store's
+        // camelCase DeviceContext.
+        setDevice({ deviceId: info.device_id, appVersion: info.app_version })
       })
       .catch(() => undefined)
     return () => {

@@ -863,12 +863,14 @@ export interface SettingRecord {
 
 export type SyncStatus = "idle" | "pushing" | "pulling" | "offline" | "error"
 
+// The Rust structs serialize snake_case (default serde). The types reflect
+// the actual wire shape; the normalizeSnapshot helper in features/sync maps
+// them to the camelCase the UI uses.
 export interface SyncStatusSnapshot {
   status: SyncStatus
-  pendingOps: number
-  pending_ops?: number
-  /** Ops stranded after a server rejection or attempts cap (snake_case wire). */
-  stuck_ops?: number
+  pending_ops: number
+  /** Ops stranded after a server rejection or attempts cap. */
+  stuck_ops: number
 }
 
 export interface StuckOpRecord {
@@ -882,10 +884,8 @@ export interface StuckOpRecord {
 }
 
 export interface DeviceInfo {
-  deviceId: string
-  appVersion: string
-  device_id?: string
-  app_version?: string
+  device_id: string
+  app_version: string
 }
 
 export interface ConflictRecord {

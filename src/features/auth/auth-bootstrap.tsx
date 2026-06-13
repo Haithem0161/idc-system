@@ -27,7 +27,7 @@ export function AuthBootstrap() {
     let cancelled = false
 
     invoke("auth_current_user")
-      .then((user) => {
+      .then(async (user) => {
         if (cancelled) return
         if (!user) {
           setAnonymous()
@@ -39,6 +39,14 @@ export function AuthBootstrap() {
           role,
           mode: "online",
         })
+        // Restore the lock state on reload, otherwise reloading the webview
+        // (or a crash-restart) silently bypasses the lock screen.
+        try {
+          const locked = await invoke("auth_is_locked")
+          if (!cancelled && locked) setLocked(true)
+        } catch {
+          // a failed lock probe must not block auth restore
+        }
       })
       .catch(() => {
         if (!cancelled) setAnonymous()
