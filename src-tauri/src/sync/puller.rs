@@ -68,8 +68,13 @@ pub async fn run_step(
     };
 
     if resp.changes.is_empty() {
-        // Empty pull -- still advance the cursor server-side (the server is
-        // authoritative) but it should already match.
+        // Empty pull -- nothing to apply and the cursor already matches, but a
+        // successful round-trip still happened. Stamp `last_pulled_at` so the
+        // "last pulled" diagnostic doesn't go stale on a quiet day while sync
+        // is healthy (without this it froze at the last non-empty pull).
+        if let Err(e) = state_repo.mark_pulled().await {
+            tracing::warn!(error = %e, "empty pull: failed to stamp last_pulled_at");
+        }
         return Ok(PullOutcome {
             applied: 0,
             session_expired: false,

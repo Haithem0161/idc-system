@@ -8,6 +8,13 @@ use uuid::Uuid;
 
 pub const PRICING_CHANGED: &str = "catalog:pricing_changed";
 
+// NOTE: this event is currently consumer-side-unwired -- no frontend listener
+// subscribes to `catalog:pricing_changed`. Catalog/pricing cache refresh is
+// instead driven by the pull-side `sync:applied` invalidation, which already
+// covers the entity tables a pricing change touches. The emit is retained as a
+// forward hook for a future in-app "active draft needs recompute" prompt; when
+// a consumer ships it must bind against the camelCase payload below.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PricingChangeKind {
@@ -18,6 +25,7 @@ pub enum PricingChangeKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PricingChangedPayload {
     pub kind: PricingChangeKind,
     pub changed_entity_id: Uuid,

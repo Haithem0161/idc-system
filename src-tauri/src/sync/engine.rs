@@ -21,6 +21,11 @@ use crate::error::{AppError, AppResult};
 
 pub const STATUS_EVENT: &str = "sync:status";
 pub const CONFLICT_EVENT: &str = "sync:conflict";
+/// Emitted after a push that accepted at least one op, carrying the pushed
+/// count. NOTE: currently has no in-app listener -- the frontend reflects sync
+/// progress via `sync:status` transitions and `sync:applied`. Retained as a
+/// forward hook for a dedicated progress indicator; do not assume a live
+/// subscriber drives `lastPushedAt` from it.
 pub const PROGRESS_EVENT: &str = "sync:progress";
 pub const AUTH_EXPIRED_EVENT: &str = "auth:session_expired";
 /// Emitted after a pull applies remote rows, carrying the distinct entity
@@ -331,6 +336,25 @@ impl SyncEngine {
             self.set_status(app, SyncStatus::Offline).await;
             return;
         };
+
+        // Avoid status churn: don't flash Pushing on an idle tick when the
+        // outbox is empty. With nothing to push we leave the status untouched
+        // (Idle from the previous settle) instead of emitting Pushing->Idle on
+        // every 15s tick, which the frontend would otherwise read as a fresh
+        // successful push and re-stamp `lastPushedAt`.
+        let pending = self.outbox_repo.pending_count().await.unwrap_or(0);
+        if pending == 0 {
+            return;
+        }
+
+        // Pending ops but no token: sync is blocked on auth, not idle. Surface
+        // Offline so the user can see the queue is stranded rather than
+        // silently dropping back to Idle (which reads as "all synced").
+        if self.token.read().await.is_none() {
+            self.set_status(app, SyncStatus::Offline).await;
+            return;
+        }
+
         self.set_status(app, SyncStatus::Pushing).await;
 
         // Refresh-once-then-surface: on a 401 we refresh the token and retry
@@ -403,6 +427,14 @@ impl SyncEngine {
             self.set_status(app, SyncStatus::Offline).await;
             return;
         };
+
+        // No token -> nothing to pull. Skip the Pulling->Idle status flash on
+        // every tick (the puller would early-return applied:0 anyway) so the
+        // frontend doesn't churn on a quiet, unauthenticated engine.
+        if self.token.read().await.is_none() {
+            return;
+        }
+
         self.set_status(app, SyncStatus::Pulling).await;
 
         // Refresh-once-then-surface on 401 (mirrors do_push).

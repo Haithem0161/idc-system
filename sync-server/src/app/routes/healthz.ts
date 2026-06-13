@@ -2,6 +2,8 @@ import type { FastifyPluginAsync } from 'fastify'
 import { Type } from '@sinclair/typebox'
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 
+import { SERVER_VERSION } from '../common/version.js'
+
 /**
  * Liveness probe enriched per phase-08 §7.17 and phase-09 §3 (healthz wiring).
  *
@@ -82,7 +84,7 @@ No auth required. Probes Postgres via Prisma when wired, falls back to
       db: (dbOk ? 'ok' : 'fail') as 'ok' | 'fail',
       redis: redisOk,
       migrationsApplied,
-      version: '0.1.0',
+      version: SERVER_VERSION,
     }
   })
 }

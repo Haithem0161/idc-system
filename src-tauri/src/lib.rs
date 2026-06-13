@@ -287,8 +287,21 @@ pub fn run() {
             audit_vacuum_now,
             diagnostics_summary,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(move |_app_handle, event| {
+            // Graceful shutdown: cancel the background tasks (sync engine,
+            // audit-vacuum scheduler) the moment the app is asked to exit, so
+            // their `tokio::select!` cancellation branches fire and the
+            // in-flight HTTP / SQLite work unwinds cleanly instead of being
+            // killed mid-flight when the process tears down.
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                cancel.cancel();
+            }
+        });
 }
 
 async fn bootstrap(

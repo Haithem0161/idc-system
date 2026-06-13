@@ -42,8 +42,10 @@ pub async fn run_step(
     let token = match token {
         Some(t) if !t.is_empty() => t,
         _ => {
-            // No token yet -- defer until auth lands. The engine sets status
-            // to Offline / Error so the user can see it.
+            // No token yet -- defer until auth lands. The engine now checks the
+            // token (and pending count) BEFORE calling this step and surfaces
+            // SyncStatus::Offline when ops are queued without auth, so this
+            // branch is a defensive no-op for direct/test callers.
             return Ok(PushOutcome {
                 pushed: 0,
                 conflicts: vec![],

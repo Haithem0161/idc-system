@@ -166,6 +166,18 @@ impl SyncHttpClient {
         resp.json().await.map_err(AppError::from)
     }
 
+    /// Reconcile in-flight outbox rows whose push ack was lost (e.g. the app
+    /// crashed between the server applying an op and the client deleting the
+    /// outbox row). Given the candidate `op_ids` (outbox rows with
+    /// `attempts > 0`), returns those the server has already processed so the
+    /// caller can drop them via `reconcile_outbox_lookup_response` instead of
+    /// replaying. Pairs with the server's `/sync/lookup-op` route.
+    ///
+    /// NOTE: not yet wired into a boot-time reconciliation pass -- a tracked
+    /// follow-up. The additive-entity poison this would have guarded against is
+    /// already neutralized server-side (idempotent `INSERT OR IGNORE` plus the
+    /// `processed_ops` dedupe table), so this is a defense-in-depth hardening,
+    /// not a correctness gap. Retained as the ready transport for that pass.
     pub async fn lookup_op(&self, token: &str, op_ids: &[String]) -> AppResult<Vec<String>> {
         #[derive(Serialize)]
         struct Body<'a> {
@@ -196,9 +208,25 @@ impl SyncHttpClient {
         Ok(body.found)
     }
 
+    /// Lightweight connectivity probe against the server's `/healthz` route.
+    /// Carries the same `X-Device-Id` / `X-App-Version` headers as every other
+    /// sync call (offline-first invariant: all sync HTTP is identified).
+    ///
+    /// NOTE: reserved for a future boot/pre-push connectivity check that would
+    /// distinguish Offline from Online before issuing the first push -- a
+    /// tracked follow-up. The push/pull loops already classify reqwest
+    /// connect/timeout errors as Offline, so this is an accuracy refinement
+    /// rather than a correctness gap.
     pub async fn healthz(&self) -> AppResult<bool> {
         let url = format!("{}/healthz", self.base_url);
-        match self.client.get(&url).send().await {
+        match self
+            .client
+            .get(&url)
+            .header("X-Device-Id", &self.device_id)
+            .header("X-App-Version", &self.app_version)
+            .send()
+            .await
+        {
             Ok(r) => Ok(r.status().is_success()),
             Err(_) => Ok(false),
         }

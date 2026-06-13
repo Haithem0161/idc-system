@@ -69,6 +69,10 @@ model ConflictParked {
   entityId         String    @map("entity_id")
   localPayload     Json      @map("local_payload")
   serverPayload    Json      @map("server_payload")
+  // Why the op was parked (e.g. manual_policy_version_divergence /
+  // manual_policy_visit_divergence). Surfaced to the client resolver UI.
+  // Defaults to 'persisted' for rows written before this column existed.
+  reason           String    @default("persisted")
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
   resolvedAt       DateTime? @map("resolved_at") @db.Timestamptz
   resolvedByUserId String?   @map("resolved_by_user_id")

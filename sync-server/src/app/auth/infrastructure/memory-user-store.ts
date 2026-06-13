@@ -23,6 +23,14 @@ export class MemoryUserStore implements UserRepository, RefreshTokenRepository {
   readonly tokens = new Map<string, RefreshTokenRecord>()
   readonly tokenHashes = new Map<string, string>()
 
+  // Refresh-token TTL used by rotate(); defaults to 30d, overridable from
+  // JWT_REFRESH_TTL_SECONDS at wiring time (previously hardcoded here).
+  private readonly refreshTtlSec: number
+
+  constructor (refreshTtlSec: number = 60 * 60 * 24 * 30) {
+    this.refreshTtlSec = refreshTtlSec
+  }
+
   async getByEmail (email: string, entityId: string): Promise<UserRecord | null> {
     const lower = email.trim().toLowerCase()
     for (const u of this.users.values()) {
@@ -129,7 +137,7 @@ export class MemoryUserStore implements UserRepository, RefreshTokenRepository {
       userId: current.userId,
       entityIdTenant: current.entityIdTenant,
       deviceId,
-      ttlSeconds: 60 * 60 * 24 * 30,
+      ttlSeconds: this.refreshTtlSec,
     })
     return {
       ...issued,

@@ -24,7 +24,16 @@ import type {
  *     plain `Error`, so the global error handler returns the right code.
  */
 export class PrismaUserStore implements UserRepository, RefreshTokenRepository {
-  constructor (private readonly prisma: PrismaClient) {}
+  // Refresh-token TTL used by rotate(); defaults to 30d, overridable from
+  // JWT_REFRESH_TTL_SECONDS at wiring time (previously hardcoded here).
+  private readonly refreshTtlSec: number
+
+  constructor (
+    private readonly prisma: PrismaClient,
+    refreshTtlSec: number = 60 * 60 * 24 * 30
+  ) {
+    this.refreshTtlSec = refreshTtlSec
+  }
 
   async getByEmail (email: string, entityId: string): Promise<UserRecord | null> {
     const lower = email.trim().toLowerCase()
@@ -127,7 +136,7 @@ export class PrismaUserStore implements UserRepository, RefreshTokenRepository {
     const plaintext = randomBytes(32).toString('hex')
     const newHash = sha256(plaintext)
     const newId = randomUUID()
-    const ttlSeconds = 60 * 60 * 24 * 30
+    const ttlSeconds = this.refreshTtlSec
     const expiresAt = new Date(Date.now() + ttlSeconds * 1000)
 
     await this.prisma.$transaction([

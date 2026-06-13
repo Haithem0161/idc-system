@@ -97,10 +97,16 @@ pub async fn sync_trigger_pull_impl(state: &AppState) -> AppResult<()> {
 
 pub async fn sync_list_conflicts_impl(
     state: &AppState,
-    _limit: Option<i64>,
-    _offset: Option<i64>,
+    limit: Option<i64>,
+    offset: Option<i64>,
 ) -> AppResult<Vec<serde_json::Value>> {
     let conflicts = state.sync_engine().list_conflicts().await?;
+    // The engine returns the full open-conflict set; honor the IPC pagination
+    // by slicing here (skip(offset).take(limit)). Negative values clamp to 0;
+    // a missing/zero limit means "no cap" so existing callers that pass
+    // limit: 100 keep working and an unspecified call returns everything.
+    let offset = offset.unwrap_or(0).max(0) as usize;
+    let limit = limit.filter(|l| *l > 0).map(|l| l as usize);
     Ok(conflicts
         .into_iter()
         .map(|c| {
@@ -113,6 +119,8 @@ pub async fn sync_list_conflicts_impl(
                 "reason": c.reason,
             })
         })
+        .skip(offset)
+        .take(limit.unwrap_or(usize::MAX))
         .collect())
 }
 

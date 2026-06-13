@@ -127,11 +127,14 @@ pub async fn settings_update(
     args: SettingUpdateArgs,
 ) -> AppResult<SettingResponse> {
     let updated = settings_update_impl(&state, args).await?;
-    // Notify frontend so active drafts can prompt recompute (phase-05).
+    // Single canonical `settings:changed` shape across all emit sites:
+    // `{ keys: [...], version }`. The in-app consumer is the settings-cache
+    // warm + pull-driven query invalidation; emitting one stable shape lets a
+    // subscriber invalidate by key without branching on payload form.
     let _ = app.emit(
         "settings:changed",
         serde_json::json!({
-            "key": updated.key,
+            "keys": [updated.key.clone()],
             "version": updated.version,
         }),
     );
@@ -173,10 +176,11 @@ pub async fn settings_set_locale(
     args: SetLocaleArgs,
 ) -> AppResult<SettingResponse> {
     let updated = settings_set_locale_impl(&state, args).await?;
+    // Same canonical `{ keys, version }` shape as settings_update (see note there).
     let _ = app.emit(
         "settings:changed",
         serde_json::json!({
-            "key": updated.key,
+            "keys": [updated.key.clone()],
             "version": updated.version,
         }),
     );
@@ -243,9 +247,15 @@ pub async fn settings_update_batch(
     args: SettingsUpdateBatchArgs,
 ) -> AppResult<Vec<SettingResponse>> {
     let updated = settings_update_batch_impl(&state, args).await?;
-    // Single composite `settings:changed` event whose `keys` array lets
-    // subscribers know which entries to invalidate.
+    // Canonical `{ keys, version }` shape (see settings_update). The `keys`
+    // array lets subscribers invalidate every entry that landed in one pass;
+    // `version` carries the highest version among them as a coarse generation
+    // marker. The in-app consumer is the settings-cache warm + pull invalidation.
     let keys: Vec<&String> = updated.iter().map(|s| &s.key).collect();
-    let _ = app.emit("settings:changed", serde_json::json!({ "keys": keys }));
+    let max_version = updated.iter().map(|s| s.version).max().unwrap_or(0);
+    let _ = app.emit(
+        "settings:changed",
+        serde_json::json!({ "keys": keys, "version": max_version }),
+    );
     Ok(updated)
 }

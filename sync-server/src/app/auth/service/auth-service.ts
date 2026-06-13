@@ -8,8 +8,12 @@ import type {
 } from '../domain/repositories'
 import type { UserRecord, UserRole } from '../domain/types'
 
-const ACCESS_TOKEN_TTL_SEC = 15 * 60
-const REFRESH_TOKEN_TTL_SEC = 30 * 24 * 60 * 60
+// Defaults match the documented lifetimes (access 15m, refresh 30d). The
+// actual values are read from JWT_ACCESS_TTL_SECONDS / JWT_REFRESH_TTL_SECONDS
+// at wiring time (auth-services plugin) and injected via the constructor; these
+// constants are the fallback when no config is supplied (e.g. unit tests).
+const DEFAULT_ACCESS_TOKEN_TTL_SEC = 15 * 60
+const DEFAULT_REFRESH_TOKEN_TTL_SEC = 30 * 24 * 60 * 60
 
 export interface LoginResult {
   accessToken: string
@@ -31,11 +35,18 @@ export interface TokenSigner {
 }
 
 export class AuthService {
+  private readonly accessTtlSec: number
+  private readonly refreshTtlSec: number
+
   constructor (
     private readonly users: UserRepository,
     private readonly tokens: RefreshTokenRepository,
-    private readonly signer: TokenSigner
-  ) {}
+    private readonly signer: TokenSigner,
+    ttl?: { accessTtlSec?: number; refreshTtlSec?: number }
+  ) {
+    this.accessTtlSec = ttl?.accessTtlSec ?? DEFAULT_ACCESS_TOKEN_TTL_SEC
+    this.refreshTtlSec = ttl?.refreshTtlSec ?? DEFAULT_REFRESH_TOKEN_TTL_SEC
+  }
 
   async login (
     email: string,
@@ -73,12 +84,12 @@ export class AuthService {
     }
     const access = this.signer.sign(
       claimsFor(user),
-      ACCESS_TOKEN_TTL_SEC
+      this.accessTtlSec
     )
     return {
       accessToken: access,
       refreshToken: rotated.plaintextToken,
-      expiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_SEC * 1000).toISOString(),
+      expiresAt: new Date(Date.now() + this.accessTtlSec * 1000).toISOString(),
     }
   }
 
@@ -143,17 +154,17 @@ export class AuthService {
   }
 
   private async issueTokenPair (user: UserRecord, deviceId: string | null): Promise<LoginResult> {
-    const access = this.signer.sign(claimsFor(user), ACCESS_TOKEN_TTL_SEC)
+    const access = this.signer.sign(claimsFor(user), this.accessTtlSec)
     const issued = await this.tokens.issue({
       userId: user.id,
       entityIdTenant: user.entityId,
       deviceId,
-      ttlSeconds: REFRESH_TOKEN_TTL_SEC,
+      ttlSeconds: this.refreshTtlSec,
     })
     return {
       accessToken: access,
       refreshToken: issued.plaintextToken,
-      expiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_SEC * 1000).toISOString(),
+      expiresAt: new Date(Date.now() + this.accessTtlSec * 1000).toISOString(),
       user: {
         id: user.id,
         email: user.email,

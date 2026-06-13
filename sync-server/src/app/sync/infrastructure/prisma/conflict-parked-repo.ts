@@ -26,12 +26,14 @@ export class PrismaConflictParkedRepo implements ConflictParkedRepository {
         entityId: record.entityId,
         localPayload: record.localPayload as Prisma.InputJsonValue,
         serverPayload: record.serverPayload as Prisma.InputJsonValue,
+        reason: record.reason,
       },
       update: {
         entity: record.entity,
         entityId: record.entityId,
         localPayload: record.localPayload as Prisma.InputJsonValue,
         serverPayload: record.serverPayload as Prisma.InputJsonValue,
+        reason: record.reason,
       },
     })
   }
@@ -76,6 +78,7 @@ function toParkedConflict (
     entityId: string
     localPayload: Prisma.JsonValue
     serverPayload: Prisma.JsonValue
+    reason: string
     resolvedAt: Date | null
   },
   tenantId: string
@@ -86,7 +89,9 @@ function toParkedConflict (
     entityId: row.entityId,
     localPayload: row.localPayload as unknown,
     serverPayload: row.serverPayload as unknown,
-    reason: 'persisted',
+    // Persisted park-time reason (e.g. manual_policy_version_divergence);
+    // falls back to the column default 'persisted' for legacy rows.
+    reason: row.reason,
     tenantId,
     resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
   }

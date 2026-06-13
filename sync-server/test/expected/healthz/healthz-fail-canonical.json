@@ -1,1 +1,1 @@
-{"status":"fail","db":"fail","redis":"ok","migrationsApplied":false,"version":"0.1.0"}
+{"status":"fail","db":"fail","redis":"ok","migrationsApplied":false,"version":"1.0.0"}

@@ -21,12 +21,27 @@ import type {
  * Authored per phase-09 §3 Sync Server (auth-services rewrite) and §4
  * (Refresh-token persistence semantics).
  */
+function parsePositiveInt (raw: string | undefined, fallback: number): number {
+  const n = Number.parseInt((raw ?? '').trim(), 10)
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
 async function plugin (fastify: FastifyInstance): Promise<void> {
+  // JWT TTLs from env-validated config. Falls back to the documented defaults
+  // (access 15m / refresh 30d) when unset or non-numeric so dev/test without
+  // env still behaves. Previously JWT_ACCESS_TTL_SECONDS / JWT_REFRESH_TTL_SECONDS
+  // were declared but never read (dead config).
+  const accessTtlSec = parsePositiveInt(fastify.config?.JWT_ACCESS_TTL_SECONDS, 15 * 60)
+  const refreshTtlSec = parsePositiveInt(
+    fastify.config?.JWT_REFRESH_TTL_SECONDS,
+    30 * 24 * 60 * 60
+  )
+
   const users: UserRepository & RefreshTokenRepository = fastify.prisma
-    ? new PrismaUserStore(fastify.prisma)
+    ? new PrismaUserStore(fastify.prisma, refreshTtlSec)
     : (fastify.log.warn(
         'auth-services: Prisma client not available; falling back to MemoryUserStore (test/dev only)'
-      ), new MemoryUserStore())
+      ), new MemoryUserStore(refreshTtlSec))
 
   const signer: TokenSigner = {
     sign (payload, ttlSec) {
@@ -43,7 +58,7 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
       }
     },
   }
-  const auth = new AuthService(users, users, signer)
+  const auth = new AuthService(users, users, signer, { accessTtlSec, refreshTtlSec })
 
   // Optional bootstrap from env (phase-02 §7.21).
   const bootEmail = process.env.BOOTSTRAP_SUPERADMIN_EMAIL
@@ -61,7 +76,7 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
 
 export default fp(plugin, {
   name: 'auth-services',
-  dependencies: ['auth-jwt', 'prisma'],
+  dependencies: ['env', 'auth-jwt', 'prisma'],
 })
 
 declare module 'fastify' {

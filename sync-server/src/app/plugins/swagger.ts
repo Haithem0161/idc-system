@@ -3,6 +3,7 @@ import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
 
 import { ErrorResponseSchema } from '../common/schemas/error'
+import { SERVER_VERSION } from '../common/version.js'
 
 /**
  * OpenAPI + Swagger UI plugin.
@@ -19,7 +20,7 @@ export default fp(async (fastify) => {
         title: 'IDC Sync Server',
         description:
           'Offline-first sync, conflict resolution, and backup endpoints for the IDC desktop app.',
-        version: '0.1.0',
+        version: SERVER_VERSION,
       },
       tags: [
         { name: 'health', description: 'Liveness and version' },

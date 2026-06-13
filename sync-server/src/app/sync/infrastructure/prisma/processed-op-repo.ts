@@ -75,6 +75,14 @@ export class PrismaProcessedOpRepo implements ProcessedOpRepository {
     })
   }
 
+  // Retention sweep for the dedupe table: deletes processed-op rows older than
+  // `cutoff` so the table does not grow unbounded.
+  //
+  // NOTE: not yet scheduled -- there is no BullMQ/cron scheduler in the server
+  // yet (a tracked follow-up). When the job runner lands, a periodic worker
+  // should call this with the documented retention window (the op-dedupe window
+  // only needs to outlive the client's outbox retry horizon). Until then this
+  // is a ready, tested operation callable manually or from a future sweep.
   async purgeOlderThan (cutoff: Date): Promise<number> {
     const result = await this.prisma.processedOp.deleteMany({
       where: { processedAt: { lt: cutoff } },

@@ -65,6 +65,14 @@ impl SyncStateRepo for SqliteSyncStateRepo {
         Ok(())
     }
 
+    async fn mark_pulled(&self) -> AppResult<()> {
+        sqlx::query("UPDATE sync_state SET last_pulled_at = ? WHERE id = 1")
+            .bind(Utc::now().to_rfc3339())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn mark_audit_vacuumed(&self, at: chrono::DateTime<chrono::Utc>) -> AppResult<()> {
         sqlx::query("UPDATE sync_state SET last_audit_vacuum_at = ? WHERE id = 1")
             .bind(at.to_rfc3339())

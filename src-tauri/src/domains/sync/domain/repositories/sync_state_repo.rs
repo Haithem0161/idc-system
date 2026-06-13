@@ -28,6 +28,11 @@ pub trait SyncStateRepo: Send + Sync {
     /// Stamp the last pushed-at moment.
     async fn mark_pushed(&self) -> AppResult<()>;
 
+    /// Stamp `last_pulled_at = now` WITHOUT advancing the pull cursor. Used by
+    /// the puller on a successful empty pull so "last pulled" diagnostics stay
+    /// fresh on a quiet day (the cursor-advancing path is `put_pull_cursor*`).
+    async fn mark_pulled(&self) -> AppResult<()>;
+
     /// Ensure a row exists; create it with a fresh `device_id` if not. Returns
     /// the canonical device_id.
     async fn ensure_device_id(&self, device_id: &str) -> AppResult<String>;

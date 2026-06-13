@@ -692,10 +692,32 @@ interface VersionMeta {
   origin_device_id: string | null
 }
 
+/**
+ * Compare two ISO/RFC3339 timestamps by their instant, not lexicographically.
+ * Returns >0 when `a` is later, <0 when earlier, 0 when equal/unparseable.
+ *
+ * Client timestamps come from chrono (`...T10:00:00.123456789Z`, variable
+ * fractional precision) while server timestamps come from
+ * `Date.toISOString()` (always millisecond, `...T10:00:00.123Z`). A raw
+ * `localeCompare` ranks the higher-precision string BEFORE the truncated one
+ * ('4' < 'Z'), inverting LWW for same-millisecond writes. Parsing both to
+ * epoch ms first normalizes the precision mismatch.
+ */
+function compareTimestamps (a: string, b: string): number {
+  const ta = Date.parse(a)
+  const tb = Date.parse(b)
+  if (Number.isNaN(ta) || Number.isNaN(tb)) {
+    // Unparseable input: fall back to a stable lexicographic order so the
+    // comparison is still deterministic rather than throwing.
+    return a < b ? -1 : a > b ? 1 : 0
+  }
+  return ta - tb
+}
+
 function lwwShouldApply (existing: VersionMeta, incoming: VersionedRow): boolean {
   if (incoming.version > existing.version) return true
   if (incoming.version < existing.version) return false
-  const cmp = incoming.updated_at.localeCompare(existing.updated_at)
+  const cmp = compareTimestamps(incoming.updated_at, existing.updated_at)
   if (cmp > 0) return true
   if (cmp < 0) return false
   const incomingOrigin = incoming.origin_device_id ?? ''
