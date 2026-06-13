@@ -16,6 +16,11 @@ use crate::sync::metrics::{write as write_metric, MetricKind};
 pub struct PullOutcome {
     pub applied: usize,
     pub session_expired: bool,
+    /// Distinct entity tables touched by this pull. The engine emits these in
+    /// a `sync:applied` event so the frontend can invalidate exactly the
+    /// affected React Query caches; without it, pulled peer-device data stays
+    /// invisible on mounted screens until a manual refetch or remount.
+    pub affected_entities: Vec<String>,
 }
 
 pub async fn run_step(
@@ -31,6 +36,7 @@ pub async fn run_step(
             return Ok(PullOutcome {
                 applied: 0,
                 session_expired: false,
+                affected_entities: Vec::new(),
             });
         }
     };
@@ -43,6 +49,7 @@ pub async fn run_step(
             return Ok(PullOutcome {
                 applied: 0,
                 session_expired: true,
+                affected_entities: Vec::new(),
             });
         }
         Err(e) => {
@@ -66,11 +73,12 @@ pub async fn run_step(
         return Ok(PullOutcome {
             applied: 0,
             session_expired: false,
+            affected_entities: Vec::new(),
         });
     }
 
     let mut tx = pool.begin().await.map_err(AppError::from)?;
-    let applied = apply_changes(&mut tx, &resp.changes).await?;
+    let (applied, affected_entities) = apply_changes(&mut tx, &resp.changes).await?;
     // DEF-002 fix: cursor write must share the apply tx's connection,
     // otherwise a real-world file SQLite deadlocks (tx holds the writer,
     // a second connection blocks waiting for the lock). The single-tx
@@ -98,6 +106,7 @@ pub async fn run_step(
     Ok(PullOutcome {
         applied,
         session_expired: false,
+        affected_entities,
     })
 }
 
@@ -131,7 +140,10 @@ fn apply_rank(entity: &str) -> usize {
         .unwrap_or(APPLY_ORDER.len())
 }
 
-async fn apply_changes(tx: &mut crate::db::Tx<'_>, changes: &[PullChange]) -> AppResult<usize> {
+async fn apply_changes(
+    tx: &mut crate::db::Tx<'_>,
+    changes: &[PullChange],
+) -> AppResult<(usize, Vec<String>)> {
     let mut applied = 0;
     // Phase-06 §7.9 pull-time recompute hook: after applying any
     // `inventory_items` or `inventory_adjustments` row, the local on-hand
@@ -140,6 +152,8 @@ async fn apply_changes(tx: &mut crate::db::Tx<'_>, changes: &[PullChange]) -> Ap
     // informational only -- the client is canonical for this column per
     // PRD §6.1.12.
     let mut affected_inventory_items: BTreeSet<String> = BTreeSet::new();
+    // Distinct entity tables actually touched, for the `sync:applied` event.
+    let mut affected_entities: BTreeSet<String> = BTreeSet::new();
 
     // FK-safe ordering: parents before children. A stable sort by dependency
     // rank keeps same-entity ordering (and thus version progression) intact.
@@ -147,6 +161,7 @@ async fn apply_changes(tx: &mut crate::db::Tx<'_>, changes: &[PullChange]) -> Ap
     ordered.sort_by_key(|c| apply_rank(&c.entity));
 
     for change in ordered {
+        let applied_before = applied;
         match change.entity.as_str() {
             "audit_log" => {
                 apply_audit_change(tx, change).await?;
@@ -235,6 +250,11 @@ async fn apply_changes(tx: &mut crate::db::Tx<'_>, changes: &[PullChange]) -> Ap
                 )));
             }
         }
+        // Record the entity only when a row was actually applied (a stale LWW
+        // no-op must not trigger a needless cache invalidation).
+        if applied > applied_before {
+            affected_entities.insert(change.entity.clone());
+        }
     }
 
     // Recompute on-hand for every affected item. We bypass the
@@ -244,7 +264,7 @@ async fn apply_changes(tx: &mut crate::db::Tx<'_>, changes: &[PullChange]) -> Ap
         recompute_item_on_hand(tx, &item_id).await?;
     }
 
-    Ok(applied)
+    Ok((applied, affected_entities.into_iter().collect()))
 }
 
 async fn recompute_item_on_hand(tx: &mut crate::db::Tx<'_>, item_id: &str) -> AppResult<()> {

@@ -23,6 +23,11 @@ pub const STATUS_EVENT: &str = "sync:status";
 pub const CONFLICT_EVENT: &str = "sync:conflict";
 pub const PROGRESS_EVENT: &str = "sync:progress";
 pub const AUTH_EXPIRED_EVENT: &str = "auth:session_expired";
+/// Emitted after a pull applies remote rows, carrying the distinct entity
+/// tables touched so the frontend can invalidate exactly those React Query
+/// caches. Without it, pulled peer-device data stays invisible on mounted
+/// screens until a manual refetch.
+pub const APPLIED_EVENT: &str = "sync:applied";
 
 const PUSH_INTERVAL: Duration = Duration::from_secs(15);
 const PULL_INTERVAL: Duration = Duration::from_secs(30);
@@ -337,6 +342,14 @@ impl SyncEngine {
                     let _ = app.emit(AUTH_EXPIRED_EVENT, ());
                     self.set_status(app, SyncStatus::Error).await;
                     return;
+                }
+                // Tell the UI exactly which entities changed so it can
+                // invalidate the matching React Query caches.
+                if !outcome.affected_entities.is_empty() {
+                    let _ = app.emit(
+                        APPLIED_EVENT,
+                        serde_json::json!({ "entities": outcome.affected_entities }),
+                    );
                 }
                 self.set_status(app, SyncStatus::Idle).await;
             }

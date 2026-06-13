@@ -68,7 +68,7 @@ describe.each(directions)("Phase-01 §2.4 sync feature hooks (dir=%s)", (dir) =>
       const { wrapper } = makeWrapper()
       const { result } = renderHook(() => useSyncStatus(), { wrapper })
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
-      expect(result.current.data).toEqual({ status: "idle", pendingOps: 3 })
+      expect(result.current.data).toEqual({ status: "idle", pendingOps: 3, stuckOps: 0 })
       expect(invoke).toHaveBeenCalledWith("sync_status")
     })
 
@@ -84,7 +84,7 @@ describe.each(directions)("Phase-01 §2.4 sync feature hooks (dir=%s)", (dir) =>
       const { wrapper } = makeWrapper()
       const { result } = renderHook(() => useSyncStatus(), { wrapper })
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
-      expect(result.current.data).toEqual({ status: "pushing", pendingOps: 7 })
+      expect(result.current.data).toEqual({ status: "pushing", pendingOps: 7, stuckOps: 0 })
     })
 
     it("does not run when not in Tauri (web preview / SSR)", async () => {

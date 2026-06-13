@@ -1241,4 +1241,6 @@ export const SYNC_EVENTS = {
   CONFLICT: "sync:conflict",
   PROGRESS: "sync:progress",
   AUTH_EXPIRED: "auth:session_expired",
+  /** Emitted after a pull applies rows; payload `{ entities: string[] }`. */
+  APPLIED: "sync:applied",
 } as const

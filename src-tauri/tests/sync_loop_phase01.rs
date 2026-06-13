@@ -924,6 +924,11 @@ async fn c3_pull_applies_a_visit_after_its_fk_parents() {
     .await
     .expect("pull ok (FK parents applied before the visit)");
     assert_eq!(outcome.applied, 2);
+    // H3/H4/H9: the outcome reports exactly the entities touched so the
+    // engine can emit sync:applied and the frontend invalidates those caches.
+    let mut affected = outcome.affected_entities.clone();
+    affected.sort();
+    assert_eq!(affected, vec!["patients".to_string(), "visits".to_string()]);
 
     let (status, pid): (String, String) =
         sqlx::query_as("SELECT status, patient_id FROM visits WHERE id = ?")

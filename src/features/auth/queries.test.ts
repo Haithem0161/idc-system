@@ -294,28 +294,28 @@ describe.each(directions)("Phase-02 §2.4 auth feature hooks (dir=%s)", (dir) =>
     })
   })
 
-  it("useHasAnyUser returns false on empty users list", async () => {
-    mockOnce([])
+  it("useHasAnyUser returns false when the backend reports no users", async () => {
+    mockOnce(false)
     const { wrapper } = makeWrapper()
     const { result } = renderHook(() => useHasAnyUser(), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toBe(false)
   })
 
-  it("useHasAnyUser returns true when users exist", async () => {
-    mockOnce([userResponseFixture()])
+  it("useHasAnyUser returns true when the backend reports existing users", async () => {
+    mockOnce(true)
     const { wrapper } = makeWrapper()
     const { result } = renderHook(() => useHasAnyUser(), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toBe(true)
   })
 
-  it("useHasAnyUser uses the include_inactive=true variant to count all-users", async () => {
-    mockOnce([])
+  it("useHasAnyUser calls the dedicated auth_has_any_user command", async () => {
+    mockOnce(false)
     const { wrapper } = makeWrapper()
     renderHook(() => useHasAnyUser(), { wrapper })
     await waitFor(() => expect(invoke).toHaveBeenCalled())
-    expect(invoke).toHaveBeenCalledWith("users_list", { args: { include_inactive: true } })
+    expect(invoke).toHaveBeenCalledWith("auth_has_any_user")
   })
 
   // --- DEF-007 G30: useCurrentUser ---------------------------------------
