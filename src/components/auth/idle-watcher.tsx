@@ -22,8 +22,8 @@ const POLL_MS = 15_000
  */
 export function IdleWatcher () {
   const state = useAuthStore((s) => s.state)
-  const lastActivityAt = useIdleStore((s) => s.lastActivityAt)
   const bump = useIdleStore((s) => s.bump)
+  const idleLockMinutes = useIdleStore((s) => s.idleLockMinutes)
   const setIdleLockMinutes = useIdleStore((s) => s.setIdleLockMinutes)
   const navigate = useNavigate()
 
@@ -50,7 +50,10 @@ export function IdleWatcher () {
 
   useEffect(() => {
     if (state.kind !== "authenticated" || state.locked) return
-    const idleLockMinutes = useIdleStore.getState().idleLockMinutes
+    // `idleLockMinutes` is a dependency so a settings change re-arms the
+    // timer immediately. `lastActivityAt` is intentionally NOT a dependency:
+    // reading it via `getState()` inside the tick avoids tearing down and
+    // recreating the interval on every recorded activity.
     const threshold = Math.max(1, idleLockMinutes) * 60_000
     const interval = window.setInterval(() => {
       const idleFor = Date.now() - useIdleStore.getState().lastActivityAt
@@ -62,7 +65,7 @@ export function IdleWatcher () {
       }
     }, POLL_MS)
     return () => window.clearInterval(interval)
-  }, [state, lastActivityAt, navigate])
+  }, [state, idleLockMinutes, navigate])
 
   return null
 }

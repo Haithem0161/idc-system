@@ -5,24 +5,26 @@ import { z } from "zod"
 // Every `#[tauri::command]` in the Rust backend returns
 // `Result<T, AppError>`. Rust's `impl Serialize for AppError` (in
 // `src-tauri/src/error.rs`) emits `{ code, message }` where `code` is
-// one of ten UPPER_SNAKE_CASE strings derived from `AppError::code()`.
+// one of twelve UPPER_SNAKE_CASE strings derived from `AppError::code()`.
 // This schema MUST stay byte-compatible with that serialization --
 // the §3.2 harness asserts the round-trip below.
 //
 // Adding a new variant on the Rust side without updating this enum
 // will fail the static-source diff in `ipc-contract-phase09.test.ts`.
 //
-// The `code` literal union matches the 10 arms of `AppError::code()`:
-//   NotAuthenticated   -> "NOT_AUTHENTICATED"
-//   SessionExpired     -> "SESSION_EXPIRED"
-//   Validation(_)      -> "VALIDATION_ERROR"
-//   Conflict(_)        -> "CONFLICT_PARKED"
-//   NotFound(_)        -> "NOT_FOUND"
-//   Network(_)         -> "NETWORK_OFFLINE"
-//   SyncUnavailable(_) -> "SERVER_UNAVAILABLE"
-//   Database(_)        -> "DATABASE_ERROR"
-//   Configuration(_)   -> "CONFIGURATION_ERROR"
-//   Internal(_)        -> "INTERNAL_ERROR"
+// The `code` literal union matches the 12 arms of `AppError::code()`:
+//   NotAuthenticated     -> "NOT_AUTHENTICATED"
+//   SessionExpired       -> "SESSION_EXPIRED"
+//   Validation(_)        -> "VALIDATION_ERROR"
+//   Conflict(_)          -> "CONFLICT_PARKED"
+//   NotFound(_)          -> "NOT_FOUND"
+//   Network(_)           -> "NETWORK_OFFLINE"
+//   SyncUnavailable(_)   -> "SERVER_UNAVAILABLE"
+//   UpgradeRequired(_)   -> "UPGRADE_REQUIRED"
+//   OfflineNotAllowed(_) -> "OFFLINE_NOT_ALLOWED"
+//   Database(_)          -> "DATABASE_ERROR"
+//   Configuration(_)     -> "CONFIGURATION_ERROR"
+//   Internal(_)          -> "INTERNAL_ERROR"
 //
 // Note the project's `.claude/rules/auth.md` mentions a `kind` field in
 // some documentation. The Rust serializer uses `code` (see error.rs:68
@@ -38,6 +40,7 @@ export const APP_ERROR_CODES = [
   "NOT_FOUND",
   "NETWORK_OFFLINE",
   "SERVER_UNAVAILABLE",
+  "UPGRADE_REQUIRED",
   "OFFLINE_NOT_ALLOWED",
   "DATABASE_ERROR",
   "CONFIGURATION_ERROR",

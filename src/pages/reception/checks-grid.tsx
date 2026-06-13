@@ -2,6 +2,7 @@ import { Link, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 
 import { AdminHeader, ErrorBanner } from "@/components/admin/admin-panel"
+import { formatIpcError } from "@/lib/errors"
 import { useChecksGrid } from "@/features/visits/queries"
 import { useVisitTabsStore, VISIT_TAB_CAP } from "@/stores/visit-tabs-store"
 
@@ -35,7 +36,7 @@ export default function ChecksGridPage () {
           </Link>
         )}
       />
-      <ErrorBanner message={error ? String(error.message ?? error) : null} />
+      <ErrorBanner message={error ? formatIpcError(error, t) : null} />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {(cards ?? []).map((card) => {
           const localized =

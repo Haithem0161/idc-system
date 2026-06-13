@@ -1,10 +1,11 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { RefreshCw } from "lucide-react"
+import { RefreshCw, RotateCw } from "lucide-react"
 
 import { ConflictList } from "@/components/sync/conflict-list"
 import { ConflictResolverPanel } from "@/components/sync/conflict-resolver-panel"
-import { useSyncConflicts } from "@/features/sync/queries"
+import { useSyncConflicts, useTriggerPull, useTriggerPush } from "@/features/sync/queries"
+import { formatIpcError } from "@/lib/errors"
 import type { Conflict } from "@/lib/schemas/sync"
 
 /**
@@ -17,6 +18,17 @@ import type { Conflict } from "@/lib/schemas/sync"
 export default function SyncConflictsPage() {
   const { t } = useTranslation()
   const list = useSyncConflicts()
+  const triggerPush = useTriggerPush()
+  const triggerPull = useTriggerPull()
+  // Force a push then a pull so a superadmin can drain the outbox and pull the
+  // server's resolution without waiting for the background loop, then refresh
+  // the parked-conflict list.
+  const syncNow = async () => {
+    await triggerPush.mutateAsync()
+    await triggerPull.mutateAsync()
+    void list.refetch()
+  }
+  const syncing = triggerPush.isPending || triggerPull.isPending
   // User selection sticks until they pick another row OR the row vanishes
   // from the queue (resolved on this device or another). Default to the
   // first row when nothing is selected -- derived, not effect-driven.
@@ -41,16 +53,32 @@ export default function SyncConflictsPage() {
           <h1 className="text-[30px] font-bold tracking-[-0.026em] text-ink">
             {t("sync_conflicts.title", { defaultValue: "Conflict resolver" })}
           </h1>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => list.refetch()}
-            disabled={list.isFetching}
-            aria-label={t("a11y.icons.refresh", { defaultValue: "Refresh" })}
-          >
-            <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden />
-            <span>{t("common.refresh", { defaultValue: "Refresh" })}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => void syncNow()}
+              disabled={syncing}
+              aria-label={t("sync.sync_now_aria", { defaultValue: "Sync now" })}
+            >
+              <RotateCw
+                className={"h-3.5 w-3.5" + (syncing ? " animate-spin" : "")}
+                strokeWidth={1.8}
+                aria-hidden
+              />
+              <span>{t("sync.sync_now", { defaultValue: "Sync now" })}</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => list.refetch()}
+              disabled={list.isFetching}
+              aria-label={t("a11y.icons.refresh", { defaultValue: "Refresh" })}
+            >
+              <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden />
+              <span>{t("common.refresh", { defaultValue: "Refresh" })}</span>
+            </button>
+          </div>
         </div>
         <p className="mt-1 text-[12px] text-ink-3">
           {t("sync_conflicts.subtitle", {
@@ -64,7 +92,7 @@ export default function SyncConflictsPage() {
         <div className="rounded-md border border-crimson/30 bg-crimson-soft px-4 py-3 text-[13px] text-crimson">
           {t("sync_conflicts.load_error", {
             defaultValue: "Failed to load conflicts: {{msg}}",
-            msg: String(list.error),
+            msg: formatIpcError(list.error, t),
           })}
         </div>
       ) : null}

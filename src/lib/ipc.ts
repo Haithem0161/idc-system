@@ -6,6 +6,16 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event"
  *
  * Every IPC command goes through this helper so the TypeScript compiler can
  * enforce arg shape and return shape from the command map below.
+ *
+ * NOTE (audit L-dead-ipc): a handful of registered commands are typed here
+ * but not yet invoked by any screen -- they are deliberate forward surface
+ * for planned UI (consumption edit form, patient rename dialog, pricing
+ * preview in the lock dialog, server-side workspace filtering): namely
+ * `inventory_consumption_update`, `inventory_consumption_list_by_type`,
+ * `patients_get`, `patients_update`, `pricing_effective`, `settings_set_locale`,
+ * `shifts_lines_run_today`, `visits_list_drafts_by_check`, and
+ * `visits_pricing_resolve`. They are kept (not removed) so the Rust contract
+ * stays stable for those screens; wire or prune them when that work lands.
  */
 export type CommandMap = {
   sync_status: { args: void; result: SyncStatusSnapshot }

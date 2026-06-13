@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router"
 import { Cloud, CloudOff, RotateCw, ArrowDownToLine, AlertCircle } from "lucide-react"
@@ -37,8 +37,20 @@ export function SyncPill() {
   const navigate = useNavigate()
   const queryStatus = useSyncStatus().data?.status ?? "offline"
   const queuedFromStore = useSyncStatusStore((s) => s.status)
+  const setStoreStatus = useSyncStatusStore((s) => s.setStatus)
   const pendingFromQuery = useOutboxCount().data ?? 0
   const liveStatus = queuedFromStore !== "idle" ? queuedFromStore : queryStatus
+
+  // Seed the event-driven store from the polled snapshot. The engine emits its
+  // first `sync:status` during Tauri setup, before any listener exists, so a
+  // freshly mounted shell would otherwise show the store's default "idle"
+  // until the next event. Whenever the store is at its default and the polled
+  // status disagrees, adopt the canonical poll result.
+  useEffect(() => {
+    if (queuedFromStore === "idle" && queryStatus !== "idle") {
+      setStoreStatus(queryStatus)
+    }
+  }, [queuedFromStore, queryStatus, setStoreStatus])
   const role = useAuthStore((s) =>
     s.state.kind === "authenticated" ? s.state.role : null
   )

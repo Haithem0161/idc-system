@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next"
 import { Logo } from "@/components/shell/logo"
 import { useHasAnyUser, useLogin } from "@/features/auth/queries"
 import { useAuthStore } from "@/stores/auth-store"
+import { formatIpcError } from "@/lib/errors"
+import { AppErrorSchema } from "@/lib/schemas/error"
 
 export default function LoginPage () {
   const { t } = useTranslation()
@@ -32,7 +34,14 @@ export default function LoginPage () {
       await login.mutateAsync({ email, password })
       navigate("/", { replace: true })
     } catch (err) {
-      setError((err as { message?: string }).message ?? t("auth.login_failed", { defaultValue: "Login failed" }))
+      // A typed AppError gets a localized code message; anything else falls
+      // back to a generic "login failed" notice rather than a raw English
+      // Rust string.
+      setError(
+        AppErrorSchema.safeParse(err).success
+          ? formatIpcError(err, t)
+          : t("auth.login_failed", { defaultValue: "Login failed" }),
+      )
     }
   }
 

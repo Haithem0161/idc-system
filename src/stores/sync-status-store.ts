@@ -19,6 +19,12 @@ interface SyncStatusState {
   setPendingOps: (count: number) => void
   setError: (msg: string | null) => void
   setLastPushedAt: (epochMs: number | null) => void
+  // NOTE (audit L-dead-store): `conflicts`/`addConflict`/`clearConflicts`,
+  // `lastError`, and `setPendingOps` are currently write-only. The conflict
+  // resolver reads parked conflicts via React Query (syncKeys.conflicts), which
+  // the sync:conflict listener invalidates, so the store array is a redundant
+  // mirror retained only for its dedupe-by-opId unit test. Prefer wiring a
+  // consumer (e.g. a session-expired notice off `lastError`) over deleting.
   addConflict: (c: Conflict) => void
   clearConflicts: () => void
 }

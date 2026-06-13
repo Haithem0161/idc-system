@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 
@@ -18,6 +18,7 @@ import {
   useVisitUpdateDraft,
 } from "@/features/visits/queries"
 import { invoke } from "@/lib/ipc"
+import { formatIpcError } from "@/lib/errors"
 import { useCheckSubtypes, useDoctors } from "@/features/catalog/queries"
 import {
   selectActiveTab,
@@ -68,9 +69,11 @@ export default function NewVisitTabbedPage () {
   const { data: qualifiedOperators } = useQualifiedOperators(
     operatorPickerOpen ? (activeTab?.checkTypeId ?? null) : null,
   )
-  const { data: patientMatches } = usePatientSearch(
-    activeTab?.form.patientName ?? "",
-  )
+  // Defer the search term so the suggestion query trails the keystrokes
+  // (paired with the min-length gate in usePatientSearch) instead of firing
+  // a fresh request on every character.
+  const deferredPatientName = useDeferredValue(activeTab?.form.patientName ?? "")
+  const { data: patientMatches } = usePatientSearch(deferredPatientName)
 
   const patientCreate = usePatientCreate()
   const visitCreate = useVisitCreateDraft()
@@ -145,7 +148,7 @@ export default function NewVisitTabbedPage () {
       setSaveStatus("saved")
     } catch (e) {
       setSaveStatus("error")
-      setError(String((e as Error).message ?? e))
+      setError(formatIpcError(e, t))
     }
   }
 
@@ -183,7 +186,7 @@ export default function NewVisitTabbedPage () {
       if (match) return match
       return await patientCreate.mutateAsync({ name: trimmed })
     } catch (e) {
-      setError(String((e as Error).message ?? e))
+      setError(formatIpcError(e, t))
       return null
     }
   }
@@ -234,7 +237,7 @@ export default function NewVisitTabbedPage () {
       closeTab(activeTab.tabId)
       navigate(`/reception/visits/${result.visit.id}`)
     } catch (e) {
-      setError(String((e as Error).message ?? e))
+      setError(formatIpcError(e, t))
     }
   }
 

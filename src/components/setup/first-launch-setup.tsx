@@ -19,15 +19,29 @@ export function FirstLaunchSetup() {
   useEffect(() => {
     if (!isTauri()) return
     let cancelled = false
-    invoke("config_get_sync_server_url")
-      .then((existing) => {
-        if (cancelled) return
-        setOpen(!existing || existing.trim().length === 0)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setOpen(true)
-      })
+    // Only open first-launch setup when the URL is genuinely absent. A failed
+    // lookup (e.g. the Rust state isn't managed yet during bootstrap) is a
+    // transient error, NOT "no URL configured" -- opening the modal then would
+    // mask the real failure and prompt the user to re-enter a URL they may
+    // already have. Retry once, then leave setup closed and log the error.
+    const probe = (attempt: number) => {
+      invoke("config_get_sync_server_url")
+        .then((existing) => {
+          if (cancelled) return
+          setOpen(!existing || existing.trim().length === 0)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          if (attempt < 1) {
+            window.setTimeout(() => {
+              if (!cancelled) probe(attempt + 1)
+            }, 500)
+            return
+          }
+          console.error("config_get_sync_server_url failed; not opening first-launch setup", err)
+        })
+    }
+    probe(0)
     return () => {
       cancelled = true
     }

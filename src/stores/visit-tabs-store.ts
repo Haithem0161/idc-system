@@ -141,7 +141,29 @@ export const useVisitTabsStore = create<VisitTabsState>()(
     {
       name: "idc.visit-tabs",
       storage: createJSONStorage(() => localStorage),
-      // Skip nothing: every field is needed to restore tabs across reloads.
+      // Persist only the structural tab shape and non-PII form fields.
+      // Patient-identifying data (patientId, patientName) is deliberately
+      // dropped so a logged-in receptionist's in-progress patient names
+      // never land in plaintext webview localStorage. On reload the tab is
+      // restored empty-of-patient; the receptionist re-enters the name,
+      // which the draft (already in SQLite once committed) reconciles.
+      partialize: (state) => ({
+        ownerUserId: state.ownerUserId,
+        activeTabId: state.activeTabId,
+        tabs: state.tabs.map((t) => ({
+          tabId: t.tabId,
+          checkTypeId: t.checkTypeId,
+          draftVisitId: t.draftVisitId,
+          form: {
+            patientId: null,
+            patientName: "",
+            subtypeId: t.form.subtypeId,
+            doctorId: t.form.doctorId,
+            dye: t.form.dye,
+            report: t.form.report,
+          },
+        })),
+      }),
     },
   ),
 )

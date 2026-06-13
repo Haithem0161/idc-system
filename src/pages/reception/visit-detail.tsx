@@ -10,6 +10,7 @@ import {
   useVisitVoid,
 } from "@/features/visits/queries"
 import { selectCurrentRole, useAuthStore } from "@/stores/auth-store"
+import { formatIpcError } from "@/lib/errors"
 
 type Tab = "details" | "audit" | "receipts"
 
@@ -44,7 +45,7 @@ export default function VisitDetailPage () {
       setVoidReason("")
       setInfo(t("reception.visit_detail.actions.void"))
     } catch (e) {
-      setError(String((e as Error).message ?? e))
+      setError(formatIpcError(e, t))
     }
   }
 
@@ -59,7 +60,7 @@ export default function VisitDetailPage () {
       setReceiptPreview(content.a5)
       setInfo(t("reception.visit_detail.reprinted"))
     } catch (e) {
-      setError(String((e as Error).message ?? e))
+      setError(formatIpcError(e, t))
     }
   }
 

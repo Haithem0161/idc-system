@@ -54,6 +54,11 @@ export function useVisitsTodayByCheck (checkTypeId: string | null | undefined) {
   })
 }
 
+// NOTE (audit L-dead-surface): currently unwired. The reception workspace
+// (check-workspace.tsx) filters client-side via useVisitsTodayByCheck. This
+// hook exposes server-side status/doctor/subtype filtering + pagination and
+// is kept as the intended consumer for that screen's next iteration; it is
+// covered by queries.test.ts. Do not remove without removing the test.
 export function useVisitsWorkspace (
   checkTypeId: string | null | undefined,
   filters: {
@@ -205,12 +210,17 @@ export const patientKeys = {
 }
 
 export function usePatientSearch (query: string) {
+  // Gate on a minimum query length so the backend isn't hammered on every
+  // keystroke (especially the first one or two characters, which match
+  // almost every patient). The caller still debounces the input value.
+  const trimmed = query.trim()
   return useQuery<PatientRecord[]>({
     queryKey: patientKeys.search(query),
-    enabled: isTauri(),
+    enabled: isTauri() && trimmed.length >= 2,
     queryFn: () =>
       invoke("patients_search", { args: { query, limit: 20 } }),
     staleTime: 15_000,
+    gcTime: 60_000,
   })
 }
 

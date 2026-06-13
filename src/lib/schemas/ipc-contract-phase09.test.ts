@@ -100,17 +100,20 @@ describe("Phase-09 §3.2 FIXED final case -- AppError envelope shape", () => {
 
   // (1c) Convenience: AppErrorCodeSchema is the closed enum that the
   // discriminator type derives from.
-  it("AppErrorCodeSchema lists exactly 11 codes (matches the Rust enum arms; DEF-007 G31 added OFFLINE_NOT_ALLOWED)", () => {
-    expect(APP_ERROR_CODES.length).toBe(11)
+  it("AppErrorCodeSchema lists exactly 12 codes (matches the Rust enum arms; UPGRADE_REQUIRED + OFFLINE_NOT_ALLOWED)", () => {
+    expect(APP_ERROR_CODES.length).toBe(12)
     // No duplicates.
-    expect(new Set(APP_ERROR_CODES).size).toBe(11)
+    expect(new Set(APP_ERROR_CODES).size).toBe(12)
     // The enum schema rejects anything outside the closed set.
     expect(AppErrorCodeSchema.safeParse("TEAPOT").success).toBe(false)
     for (const code of APP_ERROR_CODES) {
       expect(AppErrorCodeSchema.safeParse(code).success).toBe(true)
     }
-    // The new OFFLINE_NOT_ALLOWED variant for DEF-007 G31 must be present.
+    // The OFFLINE_NOT_ALLOWED variant (DEF-007 G31) must be present.
     expect(AppErrorCodeSchema.safeParse("OFFLINE_NOT_ALLOWED").success).toBe(true)
+    // UPGRADE_REQUIRED was previously emitted by Rust but missing from the TS
+    // enum -- the audit fix added it so a 426 AppError parses and localizes.
+    expect(AppErrorCodeSchema.safeParse("UPGRADE_REQUIRED").success).toBe(true)
   })
 })
 
@@ -142,7 +145,7 @@ describe("Phase-09 §3.2 static-source diff -- Rust AppError <-> TS APP_ERROR_CO
     }
   })
 
-  it("Rust AppError enum has exactly 10 variants (matches APP_ERROR_CODES.length)", () => {
+  it("Rust AppError enum has exactly as many code() arms as APP_ERROR_CODES", () => {
     // Match `#[error("...")]` lines preceding `Variant` lines inside
     // the AppError enum. Simpler: count `Self::` occurrences on the
     // LHS of code() arms.
