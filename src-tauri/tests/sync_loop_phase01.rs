@@ -1046,3 +1046,156 @@ async fn h15_push_ack_marks_pushed_row_clean() {
     // Outbox op is gone too.
     assert_eq!(outbox.pending_count().await.unwrap(), 0);
 }
+
+// --- H7/H8: pull-apply must not clobber dirty rows or inflate versions ----
+
+#[tokio::test]
+async fn h8_pull_recompute_does_not_bump_inventory_item_version() {
+    // recompute_item_on_hand must refresh quantity_on_hand WITHOUT bumping
+    // version/dirty -- otherwise the local version outruns the server's and
+    // the LWW gate silently drops every future server update.
+    let pool = fresh_pool().await;
+    let item_id = uuid::Uuid::now_v7();
+    let user_id = uuid::Uuid::now_v7();
+    // Seed the FK parent user + a clean item at version 1.
+    sqlx::query(
+        "INSERT INTO users (id, email, name, password_hash, role, is_active, created_at, \
+         updated_at, version, dirty, entity_id) \
+         VALUES (?, 'u@idc.io', 'U', '', 'receptionist', 1, '2026-05-13T09:00:00Z', \
+         '2026-05-13T09:00:00Z', 1, 0, 'tenant-x')",
+    )
+    .bind(user_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO inventory_items (id, name_ar, unit, quantity_on_hand, low_stock_threshold, \
+         created_at, updated_at, version, dirty, entity_id) \
+         VALUES (?, 'قفازات', 'box', 0, 0, '2026-05-13T10:00:00Z', '2026-05-13T10:00:00Z', 1, 0, 'tenant-x')",
+    )
+    .bind(item_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let adj_id = uuid::Uuid::now_v7();
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "entity": "inventory_adjustments",
+                "entity_id": adj_id.to_string(),
+                "payload": {
+                    "id": adj_id.to_string(),
+                    "item_id": item_id.to_string(),
+                    "delta": 25,
+                    "reason": "receive",
+                    "by_user_id": user_id.to_string(),
+                    "created_at": "2026-05-13T11:00:00Z",
+                    "updated_at": "2026-05-13T11:00:00Z",
+                    "version": 1,
+                    "entity_id": "tenant-x",
+                },
+                "updated_at": "2026-05-13T11:00:00Z",
+                "version": 1,
+            }],
+            "next_cursor": "2026-05-13T11:00:00Z|adj-1"
+        })))
+        .mount(&server)
+        .await;
+
+    puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("pull ok");
+
+    let (qty, version, dirty): (i64, i64, i64) =
+        sqlx::query_as("SELECT quantity_on_hand, version, dirty FROM inventory_items WHERE id = ?")
+            .bind(item_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        qty, 25,
+        "on-hand must be recomputed from the pulled adjustment"
+    );
+    assert_eq!(version, 1, "recompute must NOT bump version");
+    assert_eq!(dirty, 0, "recompute must NOT mark the row dirty");
+}
+
+#[tokio::test]
+async fn h7_pull_does_not_clobber_an_unpushed_dirty_local_row() {
+    // A dirty local row holds an unpushed edit. A pull with a higher version
+    // must NOT silently overwrite + clean it (which would lose the local edit
+    // before it ever reached the server).
+    let pool = fresh_pool().await;
+    let item_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO inventory_items (id, name_ar, unit, quantity_on_hand, low_stock_threshold, \
+         created_at, updated_at, version, dirty, entity_id) \
+         VALUES (?, 'LOCAL_EDIT', 'box', 0, 0, '2026-05-13T10:00:00Z', '2026-05-13T12:00:00Z', 2, 1, 'tenant-x')",
+    )
+    .bind(item_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "entity": "inventory_items",
+                "entity_id": item_id.to_string(),
+                "payload": {
+                    "id": item_id.to_string(),
+                    "name_ar": "SERVER_VERSION",
+                    "unit": "box",
+                    "low_stock_threshold": 0,
+                    "is_active": true,
+                    "created_at": "2026-05-13T10:00:00Z",
+                    "updated_at": "2026-05-13T11:00:00Z",
+                    "version": 5,
+                    "entity_id": "tenant-x",
+                },
+                "updated_at": "2026-05-13T11:00:00Z",
+                "version": 5,
+            }],
+            "next_cursor": "2026-05-13T11:00:00Z|item-1"
+        })))
+        .mount(&server)
+        .await;
+
+    puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("pull ok");
+
+    let (name, dirty): (String, i64) =
+        sqlx::query_as("SELECT name_ar, dirty FROM inventory_items WHERE id = ?")
+            .bind(item_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        name, "LOCAL_EDIT",
+        "dirty local row must NOT be clobbered by a pull"
+    );
+    assert_eq!(
+        dirty, 1,
+        "the unpushed edit must remain dirty so it still pushes"
+    );
+}

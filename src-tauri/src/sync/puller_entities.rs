@@ -40,7 +40,8 @@ pub(crate) async fn apply_settings_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE settings.version < excluded.version",
+         WHERE settings.version < excluded.version \
+           AND settings.dirty = 0",
     )
     .bind(id)
     .bind(p.get("key").and_then(|v| v.as_str()).unwrap_or(""))
@@ -109,7 +110,8 @@ pub(crate) async fn apply_check_types_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE check_types.version < excluded.version",
+         WHERE check_types.version < excluded.version \
+           AND check_types.dirty = 0",
     )
     .bind(id)
     .bind(p.get("name_ar").and_then(|v| v.as_str()).unwrap_or(""))
@@ -191,7 +193,8 @@ pub(crate) async fn apply_check_subtypes_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE check_subtypes.version < excluded.version",
+         WHERE check_subtypes.version < excluded.version \
+           AND check_subtypes.dirty = 0",
     )
     .bind(id)
     .bind(
@@ -262,7 +265,8 @@ pub(crate) async fn apply_doctors_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE doctors.version < excluded.version",
+         WHERE doctors.version < excluded.version \
+           AND doctors.dirty = 0",
     )
     .bind(id)
     .bind(p.get("name").and_then(|v| v.as_str()).unwrap_or(""))
@@ -331,7 +335,8 @@ pub(crate) async fn apply_doctor_check_pricing_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE doctor_check_pricing.version < excluded.version",
+         WHERE doctor_check_pricing.version < excluded.version \
+           AND doctor_check_pricing.dirty = 0",
     )
     .bind(id)
     .bind(p.get("doctor_id").and_then(|v| v.as_str()).unwrap_or(""))
@@ -403,7 +408,8 @@ pub(crate) async fn apply_operators_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE operators.version < excluded.version",
+         WHERE operators.version < excluded.version \
+           AND operators.dirty = 0",
     )
     .bind(id)
     .bind(p.get("name").and_then(|v| v.as_str()).unwrap_or(""))
@@ -471,7 +477,8 @@ pub(crate) async fn apply_operator_specialties_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE operator_specialties.version < excluded.version",
+         WHERE operator_specialties.version < excluded.version \
+           AND operator_specialties.dirty = 0",
     )
     .bind(id)
     .bind(p.get("operator_id").and_then(|v| v.as_str()).unwrap_or(""))
@@ -541,7 +548,8 @@ pub(crate) async fn apply_inventory_consumption_map_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE inventory_consumption_map.version < excluded.version",
+         WHERE inventory_consumption_map.version < excluded.version \
+           AND inventory_consumption_map.dirty = 0",
     )
     .bind(id)
     .bind(
@@ -622,7 +630,8 @@ pub(crate) async fn apply_operator_shifts_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE operator_shifts.version < excluded.version",
+         WHERE operator_shifts.version < excluded.version \
+           AND operator_shifts.dirty = 0",
     )
     .bind(id)
     .bind(p.get("operator_id").and_then(|v| v.as_str()).unwrap_or(""))
@@ -690,7 +699,8 @@ pub(crate) async fn apply_patients_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE patients.version < excluded.version",
+         WHERE patients.version < excluded.version \
+           AND patients.dirty = 0",
     )
     .bind(id)
     .bind(p.get("name").and_then(|v| v.as_str()).unwrap_or(""))
@@ -783,7 +793,8 @@ pub(crate) async fn apply_visits_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE visits.version < excluded.version",
+         WHERE visits.version < excluded.version \
+           AND visits.dirty = 0",
     )
     .bind(id)
     .bind(p.get("patient_id").and_then(|v| v.as_str()).unwrap_or(""))

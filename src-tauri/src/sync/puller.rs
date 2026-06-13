@@ -268,7 +268,13 @@ async fn apply_changes(
 }
 
 async fn recompute_item_on_hand(tx: &mut crate::db::Tx<'_>, item_id: &str) -> AppResult<()> {
-    let now = chrono::Utc::now().to_rfc3339();
+    // Pull-side derived-column refresh ONLY (phase-06 §7.9). `quantity_on_hand`
+    // is locally canonical, so we recompute it -- but we must NOT bump
+    // `version`/`dirty`/`updated_at`. Those are the row's sync identity; the
+    // local-mutation path bumps them and enqueues an outbox op, but this pull
+    // path enqueues nothing. Bumping version here inflated the local version
+    // above the server's, so the LWW gate then silently dropped every future
+    // server update to the item, and the never-pushed dirty=1 was permanent.
     sqlx::query(
         "UPDATE inventory_items \
          SET quantity_on_hand = ( \
@@ -276,13 +282,9 @@ async fn recompute_item_on_hand(tx: &mut crate::db::Tx<'_>, item_id: &str) -> Ap
              FROM inventory_adjustments \
              WHERE item_id = inventory_items.id \
                AND deleted_at IS NULL \
-         ), \
-         updated_at = ?, \
-         version = version + 1, \
-         dirty = 1 \
+         ) \
          WHERE id = ?",
     )
-    .bind(now)
     .bind(item_id)
     .execute(&mut **tx)
     .await?;
@@ -337,7 +339,8 @@ async fn apply_inventory_item_change(
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE inventory_items.version < excluded.version",
+         WHERE inventory_items.version < excluded.version \
+           AND inventory_items.dirty = 0",
     )
     .bind(id)
     .bind(p.get("name_ar").and_then(|v| v.as_str()).unwrap_or(""))
@@ -539,7 +542,8 @@ async fn apply_users_change(tx: &mut crate::db::Tx<'_>, change: &PullChange) -> 
             last_synced_at = excluded.last_synced_at, \
             origin_device_id = excluded.origin_device_id, \
             entity_id = excluded.entity_id \
-         WHERE users.version < excluded.version",
+         WHERE users.version < excluded.version \
+           AND users.dirty = 0",
     )
     .bind(id)
     .bind(p.get("email").and_then(|v| v.as_str()).unwrap_or(""))
