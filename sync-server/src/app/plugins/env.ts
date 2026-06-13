@@ -28,6 +28,9 @@ const envSchema = {
     BOOTSTRAP_SUPERADMIN_PASSWORD: { type: 'string', default: '' },
     BOOTSTRAP_TENANT_ID: { type: 'string', default: '' },
     METRICS_TOKEN: { type: 'string', default: '' },
+    // Minimum client app version allowed to sync. A client whose
+    // X-App-Version is below this is told to upgrade (426). Empty = no gate.
+    MIN_CLIENT_VERSION: { type: 'string', default: '' },
   },
 } as const
 
@@ -43,6 +46,7 @@ interface ConfigShape {
   BOOTSTRAP_SUPERADMIN_PASSWORD: string
   BOOTSTRAP_TENANT_ID: string
   METRICS_TOKEN: string
+  MIN_CLIENT_VERSION: string
 }
 
 async function plugin (fastify: FastifyInstance): Promise<void> {

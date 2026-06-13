@@ -121,6 +121,12 @@ impl SyncHttpClient {
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(AppError::SessionExpired);
         }
+        if status == reqwest::StatusCode::UPGRADE_REQUIRED {
+            // 426: this app version is too old. Distinct error so the engine
+            // surfaces an upgrade prompt instead of retrying forever.
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::UpgradeRequired(body));
+        }
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             return Err(AppError::SyncUnavailable(format!("push {status}: {body}")));
@@ -146,6 +152,12 @@ impl SyncHttpClient {
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(AppError::SessionExpired);
+        }
+        if status == reqwest::StatusCode::UPGRADE_REQUIRED {
+            // 426: this app version is too old. Distinct error so the engine
+            // surfaces an upgrade prompt instead of retrying forever.
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::UpgradeRequired(body));
         }
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -259,6 +271,12 @@ impl SyncHttpClient {
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(AppError::SessionExpired);
         }
+        if status == reqwest::StatusCode::UPGRADE_REQUIRED {
+            // 426: this app version is too old. Distinct error so the engine
+            // surfaces an upgrade prompt instead of retrying forever.
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::UpgradeRequired(body));
+        }
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             return Err(AppError::SyncUnavailable(format!(
@@ -314,6 +332,12 @@ impl SyncHttpClient {
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(AppError::SessionExpired);
+        }
+        if status == reqwest::StatusCode::UPGRADE_REQUIRED {
+            // 426: this app version is too old. Distinct error so the engine
+            // surfaces an upgrade prompt instead of retrying forever.
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::UpgradeRequired(body));
         }
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();

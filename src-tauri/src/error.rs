@@ -32,6 +32,11 @@ pub enum AppError {
     #[error("sync server unavailable: {0}")]
     SyncUnavailable(String),
 
+    /// The server rejected this app version with HTTP 426. The UI must prompt
+    /// the user to upgrade; retrying the same version will never succeed.
+    #[error("app upgrade required: {0}")]
+    UpgradeRequired(String),
+
     /// DEF-007 G31: an operation that REQUIRES online connectivity
     /// (e.g. `auth::change_password`) was invoked while the device is
     /// offline. Distinct from `Network` (which means the call was attempted
@@ -63,6 +68,7 @@ impl AppError {
             Self::NotFound(_) => "NOT_FOUND",
             Self::Network(_) => "NETWORK_OFFLINE",
             Self::SyncUnavailable(_) => "SERVER_UNAVAILABLE",
+            Self::UpgradeRequired(_) => "UPGRADE_REQUIRED",
             Self::OfflineNotAllowed => "OFFLINE_NOT_ALLOWED",
             Self::Database(_) => "DATABASE_ERROR",
             Self::Configuration(_) => "CONFIGURATION_ERROR",

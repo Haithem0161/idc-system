@@ -1243,4 +1243,6 @@ export const SYNC_EVENTS = {
   AUTH_EXPIRED: "auth:session_expired",
   /** Emitted after a pull applies rows; payload `{ entities: string[] }`. */
   APPLIED: "sync:applied",
+  /** Emitted when the server rejects this app version with 426. */
+  UPGRADE_REQUIRED: "app:upgrade_required",
 } as const

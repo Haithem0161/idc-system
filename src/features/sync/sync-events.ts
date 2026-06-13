@@ -54,6 +54,7 @@ export function useSyncEvents (): void {
   const setError = useSyncStatusStore((s) => s.setError)
   const addConflict = useSyncStatusStore((s) => s.addConflict)
   const setLastPushedAt = useSyncStatusStore((s) => s.setLastPushedAt)
+  const setUpgradeRequired = useSyncStatusStore((s) => s.setUpgradeRequired)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -129,6 +130,12 @@ export function useSyncEvents (): void {
       })
     )
 
+    collect(
+      listenEvent<void>(SYNC_EVENTS.UPGRADE_REQUIRED, () => {
+        setUpgradeRequired(true)
+      })
+    )
+
     return () => {
       cancelled = true
       for (const u of unsubs) {
@@ -139,5 +146,5 @@ export function useSyncEvents (): void {
         }
       }
     }
-  }, [setStatus, setError, addConflict, setLastPushedAt, queryClient])
+  }, [setStatus, setError, addConflict, setLastPushedAt, setUpgradeRequired, queryClient])
 }

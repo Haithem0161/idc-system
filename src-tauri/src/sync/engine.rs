@@ -28,6 +28,9 @@ pub const AUTH_EXPIRED_EVENT: &str = "auth:session_expired";
 /// caches. Without it, pulled peer-device data stays invisible on mounted
 /// screens until a manual refetch.
 pub const APPLIED_EVENT: &str = "sync:applied";
+/// Emitted when the server rejects this app version with 426. The UI must
+/// prompt the user to upgrade; the engine stops hammering the server.
+pub const UPGRADE_REQUIRED_EVENT: &str = "app:upgrade_required";
 
 const PUSH_INTERVAL: Duration = Duration::from_secs(15);
 const PULL_INTERVAL: Duration = Duration::from_secs(30);
@@ -371,6 +374,13 @@ impl SyncEngine {
                 }
                 Err(e) => {
                     error!(error = %e, "push step failed");
+                    // 426: this app version is too old. Surface an upgrade
+                    // prompt and stop -- retrying the same version never works.
+                    if matches!(e, AppError::UpgradeRequired(_)) {
+                        let _ = app.emit(UPGRADE_REQUIRED_EVENT, ());
+                        self.set_status(app, SyncStatus::Error).await;
+                        return;
+                    }
                     // Distinguish "offline" from "broken": a transport-level
                     // failure (connection refused / timeout -- mapped to
                     // `AppError::Network` by `From<reqwest::Error>`) means the
@@ -433,6 +443,11 @@ impl SyncEngine {
                 }
                 Err(e) => {
                     error!(error = %e, "pull step failed");
+                    if matches!(e, AppError::UpgradeRequired(_)) {
+                        let _ = app.emit(UPGRADE_REQUIRED_EVENT, ());
+                        self.set_status(app, SyncStatus::Error).await;
+                        return;
+                    }
                     // Mirror do_push: a transport-level failure (mapped to
                     // `AppError::Network`) means the device is offline -> show
                     // Offline; any other error stays a genuine Error.

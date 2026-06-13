@@ -71,6 +71,7 @@
       "offline": "Offline",
       "error": "Sync error"
     },
+    "upgrade_required": "A newer version of the app is required to keep syncing. Please update to continue.",
     "pending_aria": "Pending operations",
     "pill": {
       "tooltip_view_conflicts": "View parked conflicts",

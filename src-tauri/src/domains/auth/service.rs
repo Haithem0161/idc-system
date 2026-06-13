@@ -97,7 +97,10 @@ impl AuthService {
         let email = normalize_email(email)?;
 
         if let Some(url) = server_url.filter(|u| !u.is_empty()) {
-            match self.online_login(url, &email, password).await {
+            match self
+                .online_login(url, &email, password, entity_id_hint)
+                .await
+            {
                 Ok(result) => return Ok(result),
                 Err(AppError::NotAuthenticated) => return Err(AppError::NotAuthenticated),
                 Err(AppError::Network(_)) | Err(AppError::SyncUnavailable(_)) => {
@@ -177,17 +180,27 @@ impl AuthService {
         server_url: &str,
         email: &str,
         password: &str,
+        entity_id_hint: &str,
     ) -> AppResult<LoginResult> {
         let url = format!("{}/auth/login", server_url.trim_end_matches('/'));
+        // Send entityId so the server keys its (entityId, email) lookup on the
+        // real tenant. Omitting it made the server fall back to its 'unscoped'
+        // default, so any deployment with a real tenant id failed to log in.
+        // When the hint is empty (single-tenant 'unscoped' deploy) we omit it
+        // and let the server apply its default.
+        let mut body = serde_json::json!({
+            "email": email,
+            "password": password,
+            "deviceId": self.device_id,
+        });
+        if !entity_id_hint.is_empty() && entity_id_hint != "unscoped" {
+            body["entityId"] = serde_json::Value::String(entity_id_hint.to_string());
+        }
         let resp = self
             .http
             .post(&url)
             .header("X-Device-Id", &self.device_id)
-            .json(&serde_json::json!({
-                "email": email,
-                "password": password,
-                "deviceId": self.device_id,
-            }))
+            .json(&body)
             .send()
             .await
             .map_err(AppError::from)?;

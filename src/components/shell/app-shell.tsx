@@ -1,8 +1,10 @@
 import { useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import { Outlet } from "react-router"
 
 import { invoke, isTauri } from "@/lib/ipc"
 import { useDeviceStore } from "@/stores/device-store"
+import { useSyncStatusStore } from "@/stores/sync-status-store"
 import { useSyncEvents } from "@/features/sync/sync-events"
 import { FirstLaunchSetup } from "@/components/setup/first-launch-setup"
 import { IdleWatcher } from "@/components/auth/idle-watcher"
@@ -40,6 +42,8 @@ export function AppShell() {
   }, [setDevice])
 
   useSyncEvents()
+  const { t } = useTranslation("common")
+  const upgradeRequired = useSyncStatusStore((s) => s.upgradeRequired)
 
   return (
     <RtlBoundary>
@@ -47,6 +51,14 @@ export function AppShell() {
       <FirstLaunchSetup />
       <IdleWatcher />
       <div className="flex h-screen w-full flex-col bg-paper text-ink">
+        {upgradeRequired ? (
+          <div
+            role="alert"
+            className="shrink-0 bg-crimson px-9 py-2 text-[13px] font-medium text-white"
+          >
+            {t("sync.upgrade_required")}
+          </div>
+        ) : null}
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <div className="flex min-w-0 flex-1 flex-col">

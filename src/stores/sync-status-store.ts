@@ -6,6 +6,10 @@ interface SyncStatusState {
   status: SyncStatus
   pendingOps: number
   lastError: string | null
+  /// Set when the server rejects this app version with 426. The shell shows a
+  /// blocking upgrade banner; sync is paused until the user updates.
+  upgradeRequired: boolean
+  setUpgradeRequired: (v: boolean) => void
   conflicts: Conflict[]
   /// DEF-007 G11: epoch-ms timestamp of the last successful sync push.
   /// `null` when no push has succeeded yet this session. The
@@ -23,6 +27,8 @@ export const useSyncStatusStore = create<SyncStatusState>((set) => ({
   status: "idle",
   pendingOps: 0,
   lastError: null,
+  upgradeRequired: false,
+  setUpgradeRequired: (upgradeRequired) => set({ upgradeRequired }),
   conflicts: [],
   lastPushedAt: null,
   setStatus: (status) => set({ status }),
