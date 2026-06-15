@@ -189,6 +189,60 @@ export function useVisitVoid () {
   })
 }
 
+// ---- Pricing preview (live running total) ----
+//
+// The reception new-visit panel shows a live, itemized running total. The
+// patient-facing total the lock workflow will persist is exactly
+//   total = effective_price + dye_cost + report_cost
+// where `effective_price` is the subtype price (or check-type base) with the
+// selected doctor's price override applied. We read the effective price from
+// the authoritative Rust resolver (`pricing_effective`) so the displayed total
+// is byte-identical to what Finish charges -- no client-side re-derivation of
+// the override, no drift. Dye/report costs come from settings. Both are
+// already cached by other screens; this hook just composes them.
+
+export const pricingKeys = {
+  effective: (
+    checkTypeId: string,
+    subtypeId: string | null,
+    doctorId: string | null
+  ) =>
+    ["visits", "pricing-effective", checkTypeId, subtypeId ?? "", doctorId ?? ""] as const,
+}
+
+export interface PricingPreviewArgs {
+  checkTypeId: string | null
+  subtypeId: string | null
+  doctorId: string | null
+  /** Gate the query while the check type still needs a subtype that isn't picked. */
+  ready: boolean
+}
+
+/**
+ * Resolve the authoritative effective patient price for the current draft
+ * selection (subtype/base price + doctor override). Returns the IQD price as a
+ * number. The dye/report surcharges are layered on in the panel from settings,
+ * mirroring the Rust `money_math` total = price + dye + report.
+ */
+export function usePricingEffective (input: PricingPreviewArgs) {
+  const { checkTypeId, subtypeId, doctorId, ready } = input
+  return useQuery<number>({
+    queryKey: pricingKeys.effective(checkTypeId ?? "", subtypeId, doctorId),
+    enabled: isTauri() && Boolean(checkTypeId) && ready,
+    queryFn: () =>
+      invoke("pricing_effective", {
+        args: {
+          doctor_id: doctorId ?? undefined,
+          check_type_id: checkTypeId!,
+          check_subtype_id: subtypeId ?? undefined,
+        },
+      }),
+    // Catalog pricing changes rarely; keep it fresh-ish but don't refetch on
+    // every toggle. Dye/report toggles don't change this query's inputs.
+    staleTime: 30_000,
+  })
+}
+
 export function useReceiptReprint () {
   return useMutation<ReceiptArtifactsRecord, Error, { visit_id: string }>({
     mutationFn: (input) =>

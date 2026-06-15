@@ -65,7 +65,16 @@ export class AuthService {
     deviceId: string | null
   ): Promise<LoginResult> {
     const normalized = email.trim().toLowerCase()
-    const user = await this.users.getByEmail(normalized, entityId)
+    // The tenant comes FROM the user, not the client. When the caller supplies
+    // an explicit, real tenant we honor it (multi-tenant disambiguation); when
+    // it is omitted/'unscoped' (the single-clinic desktop, which has no reason
+    // to know the tenant UUID) we resolve the user by email alone and read the
+    // tenant off their row. This is what lets "email + password" log in without
+    // the client ever sending a tenant id.
+    const explicit = entityId && entityId !== 'unscoped'
+    const user = explicit
+      ? await this.users.getByEmail(normalized, entityId)
+      : (await this.users.findByEmail(normalized)) ?? (await this.users.getByEmail(normalized, 'unscoped'))
     if (!user || !user.isActive) {
       throw new DomainError('NOT_AUTHENTICATED', 'invalid credentials', 401)
     }

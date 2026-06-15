@@ -14,6 +14,35 @@ import { useUpdater } from "@/features/updater/use-updater"
 import type { SettingValueWire } from "@/lib/ipc"
 import { cn } from "@/lib/utils"
 
+// Every setting key the UI exposes, with its value type and a default. The
+// default is what the seed migration writes under the 'unscoped' row; we carry
+// it here so a tenant with NO row yet still renders an editable field
+// pre-filled with the default, rather than a dead "not seeded" label. Saving
+// creates the tenant's own row (upsert). `unit` is a small trailing hint
+// (e.g. "IQD", "%", "min"); `min`/`max` bound numeric inputs.
+type SettingType = "int" | "text" | "bool"
+
+interface SettingSpec {
+  type: SettingType
+  default: string | number | boolean
+  unit?: string
+  min?: number
+  max?: number
+}
+
+const SETTING_SPECS: Record<string, SettingSpec> = {
+  clinic_display_name_ar: { type: "text", default: "" },
+  clinic_display_name_en: { type: "text", default: "" },
+  currency_symbol: { type: "text", default: "د.ع" },
+  dye_cost_iqd: { type: "int", default: 10000, unit: "IQD", min: 0 },
+  report_cost_iqd: { type: "int", default: 10000, unit: "IQD", min: 0 },
+  internal_doctor_pct: { type: "int", default: 30, unit: "%", min: 0, max: 100 },
+  idle_lock_minutes: { type: "int", default: 10, unit: "min", min: 1 },
+  arabic_numerals: { type: "bool", default: false },
+  thermal_width: { type: "int", default: 32, unit: "cols", min: 16 },
+  thermal_printer_name: { type: "text", default: "" },
+}
+
 interface SettingGroup {
   key: string
   defaultTitle: string
@@ -198,7 +227,10 @@ interface RowProps {
 
 function SettingRow ({ keyName, setting, busy, saved, onSave }: RowProps) {
   const { t } = useTranslation()
-  const valueType = setting?.value.valueType
+  const spec = SETTING_SPECS[keyName]
+  // A row exists for this tenant once it has been saved at least once; until
+  // then the field shows the default and is still fully editable.
+  const isOverride = Boolean(setting)
   return (
     <div className="flex flex-wrap items-center justify-between gap-5 px-5 py-4">
       <div className="min-w-0 flex-1">
@@ -207,8 +239,16 @@ function SettingRow ({ keyName, setting, busy, saved, onSave }: RowProps) {
         </div>
         <div className="mt-0.5 flex items-center gap-2 text-[11px] uppercase tracking-[0.06em] text-ink-3">
           <span className="font-mono normal-case tracking-normal">{keyName}</span>
-          {valueType ? <span className="text-ink-4">·</span> : null}
-          {valueType ? <span>{valueType}</span> : <span className="text-ink-4">not seeded</span>}
+          {spec ? <span className="text-ink-4">·</span> : null}
+          {spec ? <span>{spec.type}</span> : null}
+          {!isOverride ? (
+            <>
+              <span className="text-ink-4">·</span>
+              <span className="text-ink-4">
+                {t("admin.settings.default", { defaultValue: "default" })}
+              </span>
+            </>
+          ) : null}
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -218,7 +258,7 @@ function SettingRow ({ keyName, setting, busy, saved, onSave }: RowProps) {
             {t("admin.settings.saved", { defaultValue: "Saved" })}
           </span>
         ) : null}
-        {valueType ? (
+        {spec ? (
           <SettingInput keyName={keyName} setting={setting} busy={busy} saved={saved} onSave={onSave} />
         ) : null}
       </div>
@@ -227,12 +267,22 @@ function SettingRow ({ keyName, setting, busy, saved, onSave }: RowProps) {
 }
 
 function SettingInput ({ keyName, setting, busy, onSave }: RowProps) {
-  const valueType = setting!.value.valueType
-  const [textValue, setTextValue] = useState(settingValueAsText(setting))
-  const [intValue, setIntValue] = useState(settingValueAsNumber(setting, 0))
-  const [boolValue, setBoolValue] = useState(settingValueAsBool(setting, false))
+  const { t } = useTranslation()
+  const spec = SETTING_SPECS[keyName]!
+  // Seed each control from the saved row when present, else from the spec
+  // default -- so a tenant with no row yet still gets a pre-filled, editable
+  // field instead of an empty/dead control.
+  const [textValue, setTextValue] = useState(
+    settingValueAsText(setting, spec.type === "text" ? String(spec.default) : "")
+  )
+  const [intValue, setIntValue] = useState(
+    settingValueAsNumber(setting, spec.type === "int" ? Number(spec.default) : 0)
+  )
+  const [boolValue, setBoolValue] = useState(
+    settingValueAsBool(setting, spec.type === "bool" ? Boolean(spec.default) : false)
+  )
 
-  if (valueType === "bool") {
+  if (spec.type === "bool") {
     return (
       <Toggle
         checked={boolValue}
@@ -243,22 +293,27 @@ function SettingInput ({ keyName, setting, busy, onSave }: RowProps) {
       />
     )
   }
-  if (valueType === "int") {
+  if (spec.type === "int") {
     return (
       <div className="flex items-center gap-2">
         <input
           type="number"
           value={intValue}
+          min={spec.min}
+          max={spec.max}
           onChange={(e) => setIntValue(Number(e.target.value))}
           className="input input-sm w-28 font-mono"
         />
+        {spec.unit ? (
+          <span className="w-8 text-[11px] text-ink-3">{spec.unit}</span>
+        ) : null}
         <button
           type="button"
           disabled={busy}
           onClick={() => onSave(keyName, { valueType: "int", value: intValue })}
           className="btn btn-ghost btn-sm"
         >
-          {busy ? "..." : "Save"}
+          {busy ? "..." : t("admin.settings.save", { defaultValue: "Save" })}
         </button>
       </div>
     )
@@ -277,7 +332,7 @@ function SettingInput ({ keyName, setting, busy, onSave }: RowProps) {
         onClick={() => onSave(keyName, { valueType: "text", value: textValue })}
         className="btn btn-ghost btn-sm"
       >
-        {busy ? "..." : "Save"}
+        {busy ? "..." : t("admin.settings.save", { defaultValue: "Save" })}
       </button>
     </div>
   )

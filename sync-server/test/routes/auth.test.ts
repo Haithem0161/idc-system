@@ -87,6 +87,24 @@ test('POST /auth/login returns tokens for valid credentials', async (t) => {
   assert.strictEqual(body.user.role, 'superadmin')
 })
 
+test('POST /auth/login WITHOUT entityId resolves the tenant from the user (single-clinic desktop)', async (t) => {
+  // The desktop sends only email + password -- it has no reason to know the
+  // tenant UUID. The server must find the user by email and read their tenant
+  // off their row, not require the client to supply it.
+  const app = await buildWithBootstrap(t)
+  const res = await app.inject({
+    method: 'POST',
+    url: '/auth/login',
+    payload: { email: 'admin@example.com', password: 'hunter22' }, // no entityId
+    headers: { 'x-device-id': 'dev-1' },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.ok(body.accessToken)
+  // The resolved tenant is the user's real one, NOT 'unscoped'.
+  assert.strictEqual(body.user.entityId, TENANT)
+})
+
 test('POST /auth/login returns 401 for wrong password', async (t) => {
   const app = await buildWithBootstrap(t)
   const res = await app.inject({

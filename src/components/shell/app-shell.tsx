@@ -9,6 +9,7 @@ import { useSyncEvents } from "@/features/sync/sync-events"
 import { useUpdater } from "@/features/updater/use-updater"
 import { FirstLaunchSetup } from "@/components/setup/first-launch-setup"
 import { IdleWatcher } from "@/components/auth/idle-watcher"
+import { DevViewSwitcher } from "@/components/dev/dev-view-switcher"
 
 import { Breadcrumbs } from "./breadcrumbs"
 import { LanguageToggle } from "./language-toggle"
@@ -58,6 +59,7 @@ export function AppShell() {
             <header className="flex h-16 shrink-0 items-center justify-between border-b border-line bg-paper px-9">
               <Breadcrumbs />
               <div className="flex items-center gap-2">
+                <DevViewSwitcher />
                 <LanguageToggle />
                 <UserMenu />
               </div>

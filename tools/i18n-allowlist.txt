@@ -82,3 +82,28 @@ ReturnType
 # the local dev fallback.
 http://localhost:3161
 https://idc-sync.madebyhaithem.com
+
+# Dev-only role-account switcher (src/components/dev/dev-view-switcher.tsx).
+# Never ships to a clinic (gated on import.meta.env.DEV), so intentionally
+# English-only and not internationalized.
+Dev only: switch role account (real re-login)
+Switch failed
+
+# Dev-only catalog seed fixtures (src/features/dev/dev-seed.ts + the seed button
+# in dev-view-switcher.tsx). Test data, never user-facing copy; gated on
+# import.meta.env.DEV and never shipped to a clinic.
+Dev only: seed catalog (check types, doctors, operators, inventory) via the real IPC
+سونار
+مفراس
+رنين
+صبغة وريدية
+جل سونار
+حقن
+ورق طباعة
+
+# Default IQD currency symbol (src/features/settings/queries.ts useMoneyDisplay).
+# A configuration DEFAULT mirroring the seeded `currency_symbol` setting
+# (migration 002 row 008), used only in the brief window before settings load.
+# It is the symbol itself, not translatable UI copy; the clinic can change it in
+# Settings. Not a candidate for i18n.
+د.ع

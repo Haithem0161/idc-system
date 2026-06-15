@@ -41,6 +41,14 @@ export class MemoryUserStore implements UserRepository, RefreshTokenRepository {
     return null
   }
 
+  async findByEmail (email: string): Promise<UserRecord | null> {
+    const lower = email.trim().toLowerCase()
+    const matches = [...this.users.values()].filter(
+      (u) => u.email === lower && u.deletedAt === null,
+    )
+    return matches.length === 1 ? matches[0] : null // none, or ambiguous
+  }
+
   async getById (id: string): Promise<UserRecord | null> {
     return this.users.get(id) ?? null
   }

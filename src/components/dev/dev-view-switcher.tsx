@@ -1,0 +1,154 @@
+import { useState } from "react"
+import { useNavigate } from "react-router"
+import { FlaskConical, Sprout } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+
+import { cn } from "@/lib/utils"
+import type { UserRoleLiteral } from "@/lib/ipc"
+import { useAuthStore } from "@/stores/auth-store"
+import {
+  DEV_ACCOUNTS,
+  ensureDevAccounts,
+  switchToRole,
+  homeForRole,
+} from "@/features/dev/dev-accounts"
+import { seedCatalog } from "@/features/dev/dev-seed"
+
+// Dev-only role-account switcher. Lets a developer flip between the three role
+// surfaces by performing a REAL re-login as a per-role dev account (see
+// features/dev/dev-accounts.ts). Rendered only in dev builds AND only for a
+// superadmin (who can provision the accounts). It is intentionally NOT
+// internationalized -- it never ships to a clinic.
+//
+// Role dot colors mirror the design system's role coding
+// (.claude/rules/design-system.md §1.5): receptionist=info, accountant=gold,
+// superadmin=crimson.
+const ROLE_DOT: Record<UserRoleLiteral, string> = {
+  superadmin: "bg-crimson",
+  receptionist: "bg-info",
+  accountant: "bg-gold",
+}
+
+const ROLE_LABEL: Record<UserRoleLiteral, string> = {
+  superadmin: "Admin",
+  receptionist: "Reception",
+  accountant: "Accounting",
+}
+
+export function DevViewSwitcher () {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const state = useAuthStore((s) => s.state)
+  const setAuthenticated = useAuthStore((s) => s.setAuthenticated)
+  const [busy, setBusy] = useState<UserRoleLiteral | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [seeding, setSeeding] = useState(false)
+  const [seedNote, setSeedNote] = useState<string | null>(null)
+
+  // Only in dev, only for a superadmin (the one who can create the other
+  // accounts). A non-superadmin dev session simply doesn't see the switcher.
+  if (!import.meta.env.DEV) return null
+  if (state.kind !== "authenticated" || state.role !== "superadmin") return null
+
+  const currentRole = state.role
+
+  const handleSwitch = async (role: UserRoleLiteral) => {
+    if (busy) return
+    setError(null)
+    setBusy(role)
+    try {
+      // Provision any missing dev accounts WHILE we are still the superadmin
+      // (users_create is superadmin-only). Switching to a non-admin role first
+      // would lose that right, so we always ensure up front.
+      await ensureDevAccounts()
+      const result = await switchToRole(role)
+      // Reflect the new session in the auth store (mirrors useLogin's onSuccess).
+      setAuthenticated({
+        user: {
+          user_id: result.user.id,
+          entity_id: result.user.entity_id,
+          email: result.user.email,
+          name: result.user.name,
+          role: result.user.role,
+        },
+        role: result.user.role,
+        mode: result.mode,
+      })
+      navigate(homeForRole(role), { replace: true })
+    } catch (e) {
+      setError((e as { message?: string }).message ?? "Switch failed")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleSeed = async () => {
+    if (seeding) return
+    setSeedNote(null)
+    setSeeding(true)
+    try {
+      const r = await seedCatalog()
+      // Refresh every catalog query so the seeded rows appear without a reload.
+      await queryClient.invalidateQueries()
+      setSeedNote(
+        `+${r.checkTypes}ct ${r.doctors}dr ${r.operators}op ${r.inventory}inv`,
+      )
+    } catch (e) {
+      setSeedNote((e as { message?: string }).message ?? "Seed failed")
+    } finally {
+      setSeeding(false)
+    }
+  }
+
+  return (
+    <div
+      className="flex items-center gap-1 rounded-md border border-line-2 bg-paper-2 px-1 py-1"
+      title="Dev only: switch role account (real re-login)"
+    >
+      <FlaskConical className="ms-1 h-3.5 w-3.5 text-ink-4" strokeWidth={1.8} aria-hidden />
+      {DEV_ACCOUNTS.map((acct) => {
+        const active = acct.role === currentRole
+        const isBusy = busy === acct.role
+        return (
+          <button
+            key={acct.role}
+            type="button"
+            onClick={() => void handleSwitch(acct.role)}
+            disabled={!!busy}
+            aria-pressed={active}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold transition-colors duration-150 disabled:opacity-60",
+              active
+                ? "bg-surface text-ink shadow-[0_1px_2px_rgba(10,18,48,0.06)]"
+                : "text-ink-3 hover:bg-surface/60 hover:text-ink",
+            )}
+          >
+            <span className={cn("h-1.5 w-1.5 rounded-full", ROLE_DOT[acct.role], isBusy && "animate-pulse")} />
+            {ROLE_LABEL[acct.role]}
+          </button>
+        )
+      })}
+      <span className="mx-0.5 h-4 w-px bg-line-2" aria-hidden />
+      <button
+        type="button"
+        onClick={() => void handleSeed()}
+        disabled={seeding}
+        title="Dev only: seed catalog (check types, doctors, operators, inventory) via the real IPC"
+        className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold text-ink-3 transition-colors duration-150 hover:bg-surface/60 hover:text-ink disabled:opacity-60"
+      >
+        <Sprout className={cn("h-3.5 w-3.5", seeding && "animate-pulse")} strokeWidth={1.8} />
+        {seeding ? "Seeding" : "Seed"}
+      </button>
+      {seedNote ? (
+        <span className="ms-1 max-w-[160px] truncate text-[10px] text-ink-4" title={seedNote}>
+          {seedNote}
+        </span>
+      ) : null}
+      {error ? (
+        <span className="ms-1 max-w-[160px] truncate text-[10px] text-crimson" title={error}>
+          {error}
+        </span>
+      ) : null}
+    </div>
+  )
+}

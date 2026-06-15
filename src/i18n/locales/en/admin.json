@@ -53,6 +53,8 @@
       "title": "Settings",
       "subtitle": "Configure clinic operations.",
       "saved": "Saved",
+      "save": "Save",
+      "default": "default",
       "group": {
         "identity": "Clinic identity",
         "pricing": "Pricing",

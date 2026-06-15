@@ -55,6 +55,8 @@
       "report": "تقرير",
       "report_unsupported": "التقرير غير مدعوم لهذا الفحص.",
       "total_label": "الإجمالي الحالي",
+      "total": "الإجمالي",
+      "estimating": "جارٍ الحساب…",
       "finish": "إنهاء",
       "autosave": {
         "saving": "جارٍ الحفظ…",
@@ -152,15 +154,33 @@
       "today_history": "ورديات اليوم",
       "operator": "المشغل",
       "phone": "الهاتف",
+      "status": "الحالة",
+      "status_on": "في الوردية",
+      "status_off": "خارج الوردية",
       "since": "منذ",
       "check_in": "دخول",
       "check_out": "خروج",
       "duration": "المدة",
       "lines_run": "عدد العينات",
       "clock_out": "تسجيل الخروج",
+      "clock_in_action": "تسجيل الدخول",
+      "filter_all": "الكل",
+      "filter_on": "في الوردية",
+      "filter_off": "خارج الوردية",
       "open": "مفتوحة",
       "empty_open": "لا يوجد مشغلون في الوردية الآن.",
       "empty_today": "لا توجد ورديات اليوم.",
+      "roster": {
+        "title": "المشغلون",
+        "empty": "لا يوجد مشغلون نشطون. أضف مشغلاً من صفحة المشغلين."
+      },
+      "activity": {
+        "title": "النشاط",
+        "empty": "لا يوجد نشاط تسجيل اليوم.",
+        "clocked_in": "سجّل الدخول",
+        "clocked_out": "سجّل الخروج",
+        "by": "بواسطة {{name}}"
+      },
       "actions": {
         "clock_in_operator": "تسجيل دخول مشغل",
         "edit_shift": "تعديل الوردية بأثر رجعي"

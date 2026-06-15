@@ -6,17 +6,27 @@ import { useTranslation } from "react-i18next"
 import { AdminHeader, ErrorBanner, FieldLabel } from "@/components/admin/admin-panel"
 import { FeatureToggle } from "@/components/ui/feature-toggle"
 import { OperatorPickerDialog } from "@/components/reception/operator-picker-dialog"
+import {
+  RunningTotalPanel,
+  type RunningTotalLine,
+} from "@/components/reception/running-total-panel"
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback"
 import {
   patientKeys,
   useChecksGrid,
   usePatientCreate,
   usePatientSearch,
+  usePricingEffective,
   useQualifiedOperators,
   useVisitCreateDraft,
   useVisitLock,
   useVisitUpdateDraft,
 } from "@/features/visits/queries"
+import {
+  getSettingByKey,
+  settingValueAsNumber,
+  useSettings,
+} from "@/features/settings/queries"
 import { invoke } from "@/lib/ipc"
 import { formatIpcError } from "@/lib/errors"
 import { useCheckSubtypes, useDoctors } from "@/features/catalog/queries"
@@ -59,6 +69,84 @@ export default function NewVisitTabbedPage () {
     checkType?.has_subtypes ? (activeTab?.checkTypeId ?? null) : null,
   )
   const { data: doctors } = useDoctors({ include_inactive: false })
+
+  // --- Running total -------------------------------------------------------
+  // Mirror the canonical Rust money_math: total = price + dye_cost + report.
+  // The price is the authoritative effective price from `pricing_effective`
+  // (subtype/base + doctor override), so the displayed total is byte-identical
+  // to what Finish will charge. Dye/report surcharges come from settings.
+  const activeForm = activeTab?.form
+  const needsSubtype = Boolean(checkType?.has_subtypes)
+  const subtypeChosen = !needsSubtype || Boolean(activeForm?.subtypeId)
+
+  const { data: settings } = useSettings()
+  const dyeCostIqd = settingValueAsNumber(
+    getSettingByKey(settings, "dye_cost_iqd"),
+    0,
+  )
+  const reportCostIqd = settingValueAsNumber(
+    getSettingByKey(settings, "report_cost_iqd"),
+    0,
+  )
+
+  const {
+    data: effectivePrice,
+    isFetching: priceFetching,
+  } = usePricingEffective({
+    checkTypeId: activeTab?.checkTypeId ?? null,
+    subtypeId: activeForm?.subtypeId ?? null,
+    doctorId: activeForm?.doctorId ?? null,
+    // Don't ask for a price until the selection is complete enough to price:
+    // a subtype-bearing check needs its subtype chosen first.
+    ready: subtypeChosen,
+  })
+
+  // Instant local fallback while the authoritative price resolves: when a
+  // subtype is chosen we already know its price client-side. A flat check's
+  // base price isn't on the grid card, so it relies on the resolved price.
+  const localSubtypePrice = useMemo(() => {
+    const sid = activeForm?.subtypeId
+    if (!sid) return null
+    return (subtypes ?? []).find((s) => s.id === sid)?.price_iqd ?? null
+  }, [subtypes, activeForm?.subtypeId])
+
+  const priceIqd = effectivePrice ?? localSubtypePrice
+  const dyeApplied = Boolean(activeForm?.dye) && Boolean(checkType?.dye_supported)
+  const reportApplied =
+    Boolean(activeForm?.report) && Boolean(checkType?.report_supported)
+
+  const totalLines = useMemo<RunningTotalLine[]>(() => {
+    if (priceIqd == null) return []
+    const lines: RunningTotalLine[] = [
+      { label: localizedCheckName, amountIqd: priceIqd, emphasis: true },
+    ]
+    if (dyeApplied) {
+      lines.push({ label: t("reception.new_visit.dye"), amountIqd: dyeCostIqd })
+    }
+    if (reportApplied) {
+      lines.push({
+        label: t("reception.new_visit.report"),
+        amountIqd: reportCostIqd,
+      })
+    }
+    return lines
+  }, [
+    priceIqd,
+    localizedCheckName,
+    dyeApplied,
+    reportApplied,
+    dyeCostIqd,
+    reportCostIqd,
+    t,
+  ])
+
+  const totalIqd =
+    (priceIqd ?? 0) +
+    (dyeApplied ? dyeCostIqd : 0) +
+    (reportApplied ? reportCostIqd : 0)
+  const hasPrice = priceIqd != null
+  // Pending only when we have nothing to show yet but a fetch is in flight.
+  const estimating = priceFetching && priceIqd == null && subtypeChosen
 
   const [operatorPickerOpen, setOperatorPickerOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -370,31 +458,23 @@ export default function NewVisitTabbedPage () {
           </div>
         </div>
 
-        <aside className="panel">
-          <div className="panel-head">
-            <span className="panel-title">
-              {t("reception.new_visit.total_label")}
-            </span>
-          </div>
-          <div className="panel-body space-y-3">
-            <p
-              className="font-mono text-[28px] font-bold tabular-nums text-ink"
-              data-testid="running-total"
-            >
-              —
-            </p>
-            <button
-              type="button"
-              className="btn btn-primary w-full"
-              disabled={!lockEnabled || visitLock.isPending}
-              onClick={() => void onFinishClick()}
-              data-testid="finish-btn"
-            >
-              {t("reception.new_visit.finish")}
-            </button>
-            <AutosaveIndicator status={saveStatus} />
-          </div>
-        </aside>
+        <RunningTotalPanel
+          lines={totalLines}
+          totalIqd={totalIqd}
+          hasPrice={hasPrice}
+          estimating={estimating}
+        >
+          <button
+            type="button"
+            className="btn btn-primary w-full"
+            disabled={!lockEnabled || visitLock.isPending}
+            onClick={() => void onFinishClick()}
+            data-testid="finish-btn"
+          >
+            {t("reception.new_visit.finish")}
+          </button>
+          <AutosaveIndicator status={saveStatus} />
+        </RunningTotalPanel>
       </div>
 
       <OperatorPickerDialog

@@ -55,6 +55,8 @@
       "report": "Report",
       "report_unsupported": "Report is not supported for this check.",
       "total_label": "Running total",
+      "total": "Total",
+      "estimating": "Estimating…",
       "finish": "Finish",
       "autosave": {
         "saving": "Saving…",
@@ -152,15 +154,33 @@
       "today_history": "Today's shifts",
       "operator": "Operator",
       "phone": "Phone",
+      "status": "Status",
+      "status_on": "On shift",
+      "status_off": "Off",
       "since": "Since",
       "check_in": "In",
       "check_out": "Out",
       "duration": "Duration",
       "lines_run": "Lines run",
       "clock_out": "Clock out",
+      "clock_in_action": "Clock in",
+      "filter_all": "All",
+      "filter_on": "On shift",
+      "filter_off": "Off",
       "open": "Open",
       "empty_open": "No operators on shift right now.",
       "empty_today": "No shifts today.",
+      "roster": {
+        "title": "Operators",
+        "empty": "No active operators. Add one in Operators."
+      },
+      "activity": {
+        "title": "Activity",
+        "empty": "No clock activity today.",
+        "clocked_in": "Clocked in",
+        "clocked_out": "Clocked out",
+        "by": "by {{name}}"
+      },
       "actions": {
         "clock_in_operator": "Clock in operator",
         "edit_shift": "Edit shift retroactively"

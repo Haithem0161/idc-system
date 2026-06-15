@@ -2,6 +2,13 @@ import type { RefreshTokenRecord, UserRecord, UserRole } from './types'
 
 export interface UserRepository {
   getByEmail (email: string, entityId: string): Promise<UserRecord | null>
+  // Tenant-agnostic login lookup: find the active user by email across all
+  // tenants. A user's tenant comes FROM their row, not from the client -- the
+  // desktop logs in with email + password and the server resolves the tenant.
+  // Returns null when no active user matches, OR when the email is ambiguous
+  // (present in more than one tenant -- the rare multi-tenant case, which must
+  // fall back to an explicit entityId rather than guess).
+  findByEmail (email: string): Promise<UserRecord | null>
   getById (id: string): Promise<UserRecord | null>
   create (input: {
     id: string

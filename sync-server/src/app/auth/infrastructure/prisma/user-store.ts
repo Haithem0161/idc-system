@@ -44,6 +44,18 @@ export class PrismaUserStore implements UserRepository, RefreshTokenRepository {
     return toUserRecord(row)
   }
 
+  async findByEmail (email: string): Promise<UserRecord | null> {
+    const lower = email.trim().toLowerCase()
+    // Find active users with this email across ALL tenants. Take up to 2 so we
+    // can detect ambiguity without loading the whole table.
+    const rows = await this.prisma.user.findMany({
+      where: { email: lower, deletedAt: null },
+      take: 2,
+    })
+    if (rows.length !== 1) return null // none, or ambiguous across tenants
+    return toUserRecord(rows[0])
+  }
+
   async getById (id: string): Promise<UserRecord | null> {
     const row = await this.prisma.user.findUnique({ where: { id } })
     return row ? toUserRecord(row) : null

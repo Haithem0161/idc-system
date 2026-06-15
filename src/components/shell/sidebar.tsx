@@ -25,6 +25,10 @@ interface SidebarItem {
   to: string
   icon: LucideIcon
   enabled: boolean
+  // Match this route EXACTLY (NavLink `end`). Needed for a parent path whose
+  // children are separate nav items -- e.g. /reception must not light up when
+  // the active route is its child /reception/shifts.
+  end?: boolean
 }
 
 interface SidebarGroup {
@@ -55,6 +59,8 @@ export function Sidebar() {
           to: "/reception",
           icon: ClipboardList,
           enabled: role === "receptionist" || role === "superadmin",
+          // Exact match so /reception/shifts doesn't also light up Reception.
+          end: true,
         },
         {
           key: "shifts",
@@ -62,12 +68,9 @@ export function Sidebar() {
           icon: HardHat,
           enabled: role === "receptionist" || role === "superadmin",
         },
-        {
-          key: "inventory",
-          to: "/inventory",
-          icon: Package,
-          enabled: role === "receptionist" || role === "superadmin",
-        },
+        // Operations inventory removed from nav: inventory is managed from the
+        // Admin > Inventory catalog. The ops /inventory routes still exist but
+        // are no longer surfaced here.
       ],
     },
     {
@@ -133,6 +136,7 @@ export function Sidebar() {
                   <li key={item.key}>
                     <NavLink
                       to={item.to}
+                      end={item.end}
                       className={({ isActive }) =>
                         cn("nav-item", isActive && "is-active")
                       }

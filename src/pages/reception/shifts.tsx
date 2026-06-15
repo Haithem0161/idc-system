@@ -9,7 +9,11 @@ import {
 import { useAuthStore } from "@/stores/auth-store"
 import { AdminHeader, ErrorBanner } from "@/components/admin/admin-panel"
 import { ClockInDialog } from "@/components/reception/clock-in-dialog"
-import { OnShiftTable } from "@/components/reception/on-shift-table"
+import {
+  OperatorRosterGrid,
+  type RosterFilter,
+} from "@/components/reception/operator-roster-grid"
+import { ShiftActivityFeed } from "@/components/reception/shift-activity-feed"
 import { OpenShiftConflictBanner } from "@/components/reception/open-shift-conflict-banner"
 import { ResolveOverlappingShifts } from "@/components/reception/resolve-overlapping-shifts"
 import { RetroactiveShiftEditor } from "@/components/reception/retroactive-shift-editor"
@@ -18,12 +22,14 @@ import { ShiftHistoryToday } from "@/components/reception/shift-history-today"
 /**
  * `/reception/shifts` (PRD §7.1.5, phase-04).
  *
- * Two tables stacked vertically:
- *   - On shift (clocked in, awaiting clock-out).
- *   - Today's history (open + closed, by clock-in time).
+ * Two-pane working surface:
+ *   - Left: the operator roster grid -- every active operator, status-first,
+ *     with inline context-aware Clock in / Clock out (the direct path).
+ *   - Right: a chronological activity feed of today's clock-in/out events.
  *
- * Operator picker for clock-in is filtered to active operators NOT
- * currently on an open shift. Superadmin sees retroactive edit actions.
+ * Below the split, superadmins still see today's shift history table with the
+ * retroactive edit action. The modal clock-in picker remains for the
+ * conflict / retroactive flows surfaced by the conflict banner.
  */
 export default function ShiftsPage () {
   const { t } = useTranslation()
@@ -38,6 +44,7 @@ export default function ShiftsPage () {
   const [clockInOpen, setClockInOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [resolvingOperatorId, setResolvingOperatorId] = useState<string | null>(null)
+  const [rosterFilter, setRosterFilter] = useState<RosterFilter>("all")
 
   const loading = open.isLoading || history.isLoading
   const error =
@@ -88,12 +95,26 @@ export default function ShiftsPage () {
         </div>
       ) : (
         <>
-          <OnShiftTable shifts={open.data ?? []} />
-          <ShiftHistoryToday
-            shifts={history.data ?? []}
-            canEdit={canEdit}
-            onEditShift={(id) => setEditingId(id)}
-          />
+          <div className="grid gap-6 lg:grid-cols-5 lg:items-start">
+            <div className="lg:col-span-3">
+              <OperatorRosterGrid
+                openShifts={open.data ?? []}
+                filter={rosterFilter}
+                onFilterChange={setRosterFilter}
+              />
+            </div>
+            <div className="lg:col-span-2 lg:sticky lg:top-6 lg:max-h-[calc(100vh-8rem)]">
+              <ShiftActivityFeed shifts={history.data ?? []} />
+            </div>
+          </div>
+
+          {canEdit ? (
+            <ShiftHistoryToday
+              shifts={history.data ?? []}
+              canEdit={canEdit}
+              onEditShift={(id) => setEditingId(id)}
+            />
+          ) : null}
         </>
       )}
 
