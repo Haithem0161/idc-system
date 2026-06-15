@@ -1,7 +1,42 @@
 //! Pull-apply handlers for the remaining syncable entities (C3/C5).
+//!
+//! Two policy shapes live here (declared in [`crate::sync::conflict::policy_for`]):
+//!
+//! - **LastWriteWins** (catalog, patients, shifts, etc.): the incoming row is
+//!   applied via `INSERT ... ON CONFLICT DO UPDATE ... WHERE <t>.version <
+//!   excluded.version AND <t>.dirty = 0`. The `WHERE` clause is the *sole*
+//!   authoritative gate -- there is intentionally no Rust-level `SELECT version`
+//!   pre-read. Reading the version in Rust and then issuing the upsert opened a
+//!   window where a concurrent local mutation (separate pool connection) could
+//!   flip `dirty`/bump `version` between the read and the conflict evaluation,
+//!   silently clobbering the local edit (phase-10 T2). Letting SQLite evaluate
+//!   the gate atomically closes that race; a `rows_affected() == 0` result means
+//!   "stale or locally dirty" and is the correct silent skip.
+//!
+//! - **Manual** (`settings`, `visits`): a server row must NEVER overwrite an
+//!   unsynced local edit, because settings drive money math and visits are
+//!   financial records (phase-10 T1). On pull we first check whether the local
+//!   row is `dirty = 1` (has unpushed local edits). If so we skip applying the
+//!   server row entirely and leave the local edit intact; the dirty row pushes
+//!   on the next push cycle, where the server's `detectSettingConflict` /
+//!   `detectVisitConflict` parks the divergence and surfaces it through the
+//!   conflict resolver UI (the single source of truth for parked conflicts).
+//!   When the local row is clean we fast-forward via the same version gate.
 
 use crate::domains::sync::infrastructure::PullChange;
 use crate::error::AppResult;
+
+/// Whether the local row for `id` in `table` currently has unpushed local
+/// edits (`dirty = 1`). Used by the Manual-policy handlers to refuse to
+/// overwrite a divergent local edit on pull. `table` is a fixed string literal
+/// supplied by the caller (never user input), so the `format!` is safe.
+async fn local_row_is_dirty(tx: &mut crate::db::Tx<'_>, table: &str, id: &str) -> AppResult<bool> {
+    let row = sqlx::query_as::<_, (i64,)>(&format!("SELECT dirty FROM {table} WHERE id = ?"))
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+    Ok(matches!(row, Some((1,))))
+}
 
 pub(crate) async fn apply_settings_change(
     tx: &mut crate::db::Tx<'_>,
@@ -12,16 +47,13 @@ pub(crate) async fn apply_settings_change(
     if id.is_empty() {
         return Ok(());
     }
-    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM settings WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?;
-    let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(());
-        }
+    // Manual policy (phase-10 T1): never overwrite an unsynced local edit. A
+    // dirty local row diverges from the incoming server row; skip the apply and
+    // let the next push surface the conflict server-side.
+    if local_row_is_dirty(tx, "settings", id).await? {
+        return Ok(());
     }
+    let incoming_version = change.version;
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO settings ( \
@@ -76,16 +108,9 @@ pub(crate) async fn apply_check_types_change(
     if id.is_empty() {
         return Ok(());
     }
-    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM check_types WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    // LWW: the SQL WHERE gate below is the sole authoritative check (phase-10
+    // T2). No Rust-level version pre-read -- that opened a clobber race.
     let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(());
-        }
-    }
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO check_types ( \
@@ -163,16 +188,8 @@ pub(crate) async fn apply_check_subtypes_change(
     if id.is_empty() {
         return Ok(());
     }
-    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM check_subtypes WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    // LWW: SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(());
-        }
-    }
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO check_subtypes ( \
@@ -235,16 +252,8 @@ pub(crate) async fn apply_doctors_change(
     if id.is_empty() {
         return Ok(());
     }
-    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM doctors WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    // LWW: SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(());
-        }
-    }
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO doctors ( \
@@ -303,16 +312,8 @@ pub(crate) async fn apply_doctor_check_pricing_change(
     if id.is_empty() {
         return Ok(());
     }
-    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM doctor_check_pricing WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    // LWW: SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(());
-        }
-    }
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO doctor_check_pricing ( \
@@ -378,16 +379,8 @@ pub(crate) async fn apply_operators_change(
     if id.is_empty() {
         return Ok(());
     }
-    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM operators WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    // LWW: SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(());
-        }
-    }
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO operators ( \
@@ -450,16 +443,8 @@ pub(crate) async fn apply_operator_specialties_change(
     if id.is_empty() {
         return Ok(());
     }
-    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM operator_specialties WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    // LWW: SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(());
-        }
-    }
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO operator_specialties ( \
@@ -516,17 +501,8 @@ pub(crate) async fn apply_inventory_consumption_map_change(
     if id.is_empty() {
         return Ok(());
     }
-    let row =
-        sqlx::query_as::<_, (i64,)>("SELECT version FROM inventory_consumption_map WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&mut **tx)
-            .await?;
+    // LWW: SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(());
-        }
-    }
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO inventory_consumption_map ( \
@@ -598,16 +574,8 @@ pub(crate) async fn apply_operator_shifts_change(
     if id.is_empty() {
         return Ok(());
     }
-    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM operator_shifts WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    // SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(());
-        }
-    }
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO operator_shifts ( \
@@ -673,16 +641,8 @@ pub(crate) async fn apply_patients_change(
     if id.is_empty() {
         return Ok(());
     }
-    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM patients WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    // LWW: SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(());
-        }
-    }
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO patients ( \
@@ -733,16 +693,14 @@ pub(crate) async fn apply_visits_change(
     if id.is_empty() {
         return Ok(());
     }
-    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM visits WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?;
-    let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(());
-        }
+    // Manual policy (phase-10 T1): never overwrite an unsynced local edit. A
+    // dirty local visit diverges from the incoming server row; skip the apply
+    // and let the next push surface the conflict server-side
+    // (detectVisitConflict parks it for the resolver UI).
+    if local_row_is_dirty(tx, "visits", id).await? {
+        return Ok(());
     }
+    let incoming_version = change.version;
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO visits ( \

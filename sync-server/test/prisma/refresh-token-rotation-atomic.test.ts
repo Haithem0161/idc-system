@@ -36,7 +36,7 @@ const userStore = readFileSync(userStorePath, 'utf8')
 test('DEF-007 G33: PrismaUserStore.rotate uses prisma.$transaction (atomic revoke + create)', () => {
   // Extract the body of the `rotate` method.
   const rotateMatch = userStore.match(
-    /async rotate \(presentedToken: string, deviceId: string \| null\)\s*\{([\s\S]*?)\n {2}\}/,
+    /async rotate \(presentedToken: string, deviceId: string \| null(?:, expectedUserId\?: string)?\)\s*\{([\s\S]*?)\n {2}\}/,
   )
   assert.ok(rotateMatch, 'PrismaUserStore.rotate must be present')
   const body = rotateMatch[1]
@@ -51,7 +51,7 @@ test('DEF-007 G33: PrismaUserStore.rotate uses prisma.$transaction (atomic revok
 
 test('DEF-007 G33: rotate $transaction includes BOTH refreshToken.update + refreshToken.create', () => {
   const rotateMatch = userStore.match(
-    /async rotate \(presentedToken: string, deviceId: string \| null\)\s*\{([\s\S]*?)\n {2}\}/,
+    /async rotate \(presentedToken: string, deviceId: string \| null(?:, expectedUserId\?: string)?\)\s*\{([\s\S]*?)\n {2}\}/,
   )
   const body = rotateMatch![1]
   // Extract the $transaction array. The body inside MUST contain both
@@ -81,7 +81,7 @@ test('DEF-007 G33: rotate revokes the OLD token by id BEFORE creating the new on
   // (success). The reversed order would create a brief window
   // where TWO valid tokens exist for the same user.
   const rotateMatch = userStore.match(
-    /async rotate \(presentedToken: string, deviceId: string \| null\)\s*\{([\s\S]*?)\n {2}\}/,
+    /async rotate \(presentedToken: string, deviceId: string \| null(?:, expectedUserId\?: string)?\)\s*\{([\s\S]*?)\n {2}\}/,
   )
   const body = rotateMatch![1]
   const txnMatch = body.match(/\$transaction\(\s*\[([\s\S]*?)\]\s*\)/)
@@ -102,7 +102,7 @@ test('DEF-007 G33: rotate revokes by setting revokedAt (not by row deletion)', (
   // `current.revokedAt !== null` guard in the next call reject
   // a replayed-old-token attack.
   const rotateMatch = userStore.match(
-    /async rotate \(presentedToken: string, deviceId: string \| null\)\s*\{([\s\S]*?)\n {2}\}/,
+    /async rotate \(presentedToken: string, deviceId: string \| null(?:, expectedUserId\?: string)?\)\s*\{([\s\S]*?)\n {2}\}/,
   )
   const body = rotateMatch![1]
   assert.match(
@@ -125,7 +125,7 @@ test('DEF-007 G33: rotate rejects already-revoked tokens (no replay)', () => {
   // rotation, presenting it returns SESSION_EXPIRED rather than
   // issuing a new pair.
   const rotateMatch = userStore.match(
-    /async rotate \(presentedToken: string, deviceId: string \| null\)\s*\{([\s\S]*?)\n {2}\}/,
+    /async rotate \(presentedToken: string, deviceId: string \| null(?:, expectedUserId\?: string)?\)\s*\{([\s\S]*?)\n {2}\}/,
   )
   const body = rotateMatch![1]
   assert.match(

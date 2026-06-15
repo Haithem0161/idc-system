@@ -63,14 +63,19 @@ services:
     ports: !override
       - "127.0.0.1:3161:3161"
     restart: unless-stopped
-    # Safe schema sync: plain `db push` (NO --accept-data-loss). A drift that
-    # would drop data FAILS the boot instead of destroying it. Run a manual,
-    # reviewed migration in that case. init-custom-sql.sql still applies.
+    # Phase-10 T10: back up with pg_dump BEFORE the schema sync, then a safe
+    # `db push` (NO --accept-data-loss -- a destructive drift FAILS the boot
+    # instead of destroying data), then init-custom-sql.sql, then start. The
+    # full sequence lives in tools/prod-entrypoint.sh (mounted below) so it is
+    # reviewable and testable rather than an inline one-liner.
     command:
       - sh
-      - -c
-      - >-
-        pnpm prisma generate &&
-        pnpm prisma db push &&
-        psql "$DATABASE_URL" -f prisma/init-custom-sql.sql &&
-        pnpm exec fastify start -a 0.0.0.0 -p 3161 -l info dist/app/app.js
+      - tools/prod-entrypoint.sh
+    volumes:
+      # Persist database backups on the host so a bad schema change is
+      # recoverable. The entrypoint writes timestamped gzipped pg_dumps here.
+      - sync_db_backups:/backups
+
+volumes:
+  # Host-persisted database backups (phase-10 T10 pg_dump-before-schema-change).
+  sync_db_backups:

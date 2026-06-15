@@ -58,6 +58,13 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ),
 ];
 
+/// The local sync schema version: the count of embedded migrations. Sent to the
+/// server as `X-Schema-Version` on every sync request so the server can reject
+/// (426) a client whose local schema predates a migration that made a synced
+/// column required, instead of silently accepting a payload missing that column
+/// (phase-10 T3). Monotonic and forward-only because migrations are append-only.
+pub const SYNC_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
+
 /// Apply every embedded migration that has not already run.
 pub async fn run(pool: &SqlitePool) -> AppResult<()> {
     sqlx::query(

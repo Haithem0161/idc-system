@@ -16,6 +16,10 @@ export const PullResponseSchema = Type.Object({
     })
   ),
   next_cursor: Type.String(),
+  // The schema version the server speaks (phase-10 T3). Optional for backward
+  // compatibility; the client logs it to diagnose drift even when the
+  // MIN_CLIENT_SCHEMA_VERSION gate passes the request through.
+  server_schema_version: Type.Optional(Type.Number()),
 })
 
 export type PullQuery = Static<typeof PullQuerySchema>

@@ -67,10 +67,22 @@ export class AuthService {
     return this.issueTokenPair(user, deviceId)
   }
 
-  async refresh (refreshToken: string, deviceId: string | null) {
+  /**
+   * Rotate the refresh + access tokens.
+   *
+   * Phase-10 T5: when `expectedUserId` is supplied (the `sub` of a presented
+   * access token, possibly expired), the rotation MUST belong to that subject.
+   * This binds the refresh token to its owner so a leaked/mixed token cannot be
+   * rotated under a different identity. It stays optional so the offline-first
+   * refresh path still works when the client has no access token to present.
+   */
+  async refresh (refreshToken: string, deviceId: string | null, expectedUserId?: string) {
     const rotated = await this.tokens
-      .rotate(refreshToken, deviceId)
+      .rotate(refreshToken, deviceId, expectedUserId)
       .catch((err) => {
+        // Preserve an explicit subject-mismatch (403) thrown by the store;
+        // everything else collapses to a 401 session-expired.
+        if (err instanceof DomainError) throw err
         throw new DomainError(
           'SESSION_EXPIRED',
           'refresh token invalid or expired',
@@ -81,6 +93,12 @@ export class AuthService {
     const user = await this.users.getById(rotated.userId)
     if (!user || !user.isActive) {
       throw new DomainError('NOT_AUTHENTICATED', 'user not found or inactive', 401)
+    }
+    // Phase-10 T11: defense-in-depth -- the refresh-token row carries its own
+    // tenant; assert the loaded user belongs to that same tenant so a token can
+    // never mint an access token scoped to a different entity.
+    if (user.entityId !== rotated.entityIdTenant) {
+      throw new DomainError('FORBIDDEN', 'refresh token tenant does not match user', 403)
     }
     const access = this.signer.sign(
       claimsFor(user),
@@ -93,8 +111,13 @@ export class AuthService {
     }
   }
 
-  async logout (refreshToken: string): Promise<void> {
-    await this.tokens.revokeByPlaintext(refreshToken)
+  /**
+   * Revoke a refresh token. Phase-10 T5: when `expectedUserId` is supplied, the
+   * token must belong to that subject or the revoke is rejected (403) -- a
+   * leaked token cannot be used to force-logout a different user.
+   */
+  async logout (refreshToken: string, expectedUserId?: string): Promise<void> {
+    await this.tokens.revokeByPlaintext(refreshToken, expectedUserId)
   }
 
   async changePassword (
@@ -119,6 +142,33 @@ export class AuthService {
     }
     const newHash = await argonHash(newPassword)
     await this.users.updatePasswordHash(user.id, newHash)
+  }
+
+  /**
+   * Phase-10 T6: server-canonical identity for the authenticated subject. The
+   * client calls this after login/refresh to confirm the server agrees on who
+   * is logged in (the JWT claims alone are not ground truth -- a user may have
+   * been deactivated server-side since the token was minted). Never returns the
+   * password hash.
+   */
+  async getProfile (userId: string): Promise<{
+    id: string
+    email: string
+    name: string
+    role: string
+    entityId: string
+  }> {
+    const user = await this.users.getById(userId)
+    if (!user || !user.isActive) {
+      throw new DomainError('NOT_FOUND', `user ${userId}`, 404)
+    }
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      entityId: user.entityId,
+    }
   }
 
   async bootstrapSuperadmin (

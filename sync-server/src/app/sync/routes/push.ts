@@ -39,12 +39,25 @@ const route: FastifyPluginAsync = async (fastify) => {
       const actorClaims = actor?.sub && actor.role && actor.entityId
         ? { sub: actor.sub, role: actor.role, entityId: actor.entityId }
         : undefined
-      const result = await fastify.pushService.apply(
-        request.body.ops,
-        tenantId,
-        deviceId,
-        actorClaims
-      )
+      // Phase-10 T9: time the push and record it so /metrics is non-zero. A
+      // thrown error is observed as a failure before it propagates.
+      const start = performance.now()
+      let result
+      try {
+        result = await fastify.pushService.apply(
+          request.body.ops,
+          tenantId,
+          deviceId,
+          actorClaims
+        )
+      } catch (err) {
+        fastify.metricsRegistry.observeSyncPush(performance.now() - start, 'fail')
+        throw err
+      }
+      fastify.metricsRegistry.observeSyncPush(performance.now() - start, 'ok')
+      for (let i = 0; i < result.conflicts.length; i += 1) {
+        fastify.metricsRegistry.incrConflict()
+      }
       return {
         accepted: result.accepted,
         conflicts: result.conflicts.map((c) => ({

@@ -155,6 +155,94 @@ test('POST /auth/logout revokes the refresh token', async (t) => {
   assert.strictEqual(reuse.statusCode, 401)
 })
 
+// --- Phase-10 T5: refresh/logout bound to the JWT subject -------------------
+
+async function loginAdmin (app: { inject: FastifyAppLike['inject'] }) {
+  const login = await app.inject({
+    method: 'POST',
+    url: '/auth/login',
+    payload: { email: 'admin@example.com', password: 'hunter22', entityId: TENANT },
+    headers: { 'x-device-id': 'dev-t5' },
+  })
+  return JSON.parse(login.payload) as { accessToken: string, refreshToken: string, user: { id: string } }
+}
+
+test('T5: refresh with a bearer whose sub != token owner is rejected 403', async (t) => {
+  const app = await buildWithBootstrap(t)
+  const a = app as unknown as FastifyAppLike
+  const { refreshToken } = await loginAdmin(app)
+
+  // Forge an access token for a DIFFERENT subject (a leaked-token attacker).
+  const foreignBearer = a.jwt.sign({ sub: 'attacker-id', email: 'x@y.z', entityId: TENANT, role: 'superadmin' })
+  const res = await app.inject({
+    method: 'POST',
+    url: '/auth/refresh',
+    headers: { authorization: `Bearer ${foreignBearer}` },
+    payload: { refreshToken },
+  })
+  assert.strictEqual(res.statusCode, 403, res.payload)
+  assert.strictEqual(JSON.parse(res.payload).code, 'FORBIDDEN')
+})
+
+test('T5: refresh with a bearer matching the token owner succeeds', async (t) => {
+  const app = await buildWithBootstrap(t)
+  const { accessToken, refreshToken } = await loginAdmin(app)
+  const res = await app.inject({
+    method: 'POST',
+    url: '/auth/refresh',
+    headers: { authorization: `Bearer ${accessToken}` },
+    payload: { refreshToken },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+})
+
+test('T5: logout with a bearer whose sub != token owner does NOT revoke the token', async (t) => {
+  const app = await buildWithBootstrap(t)
+  const a = app as unknown as FastifyAppLike
+  const { refreshToken } = await loginAdmin(app)
+
+  const foreignBearer = a.jwt.sign({ sub: 'attacker-id', email: 'x@y.z', entityId: TENANT, role: 'superadmin' })
+  const logout = await app.inject({
+    method: 'POST',
+    url: '/auth/logout',
+    headers: { authorization: `Bearer ${foreignBearer}` },
+    payload: { refreshToken },
+  })
+  // The revoke is a no-op (scoped to the foreign subject); the token still works.
+  assert.strictEqual(logout.statusCode, 204, logout.payload)
+  const stillValid = await app.inject({
+    method: 'POST',
+    url: '/auth/refresh',
+    payload: { refreshToken },
+  })
+  assert.strictEqual(stillValid.statusCode, 200, 'a cross-user logout must NOT revoke the token')
+})
+
+// --- Phase-10 T6: GET /auth/profile -----------------------------------------
+
+test('T6: GET /auth/profile returns the authenticated user without the password hash', async (t) => {
+  const app = await buildWithBootstrap(t)
+  const { accessToken, user } = await loginAdmin(app)
+  const res = await app.inject({
+    method: 'GET',
+    url: '/auth/profile',
+    headers: { authorization: `Bearer ${accessToken}` },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload) as Record<string, unknown>
+  assert.strictEqual(body.id, user.id)
+  assert.strictEqual(body.email, 'admin@example.com')
+  assert.strictEqual(body.role, 'superadmin')
+  assert.strictEqual(body.entityId, TENANT)
+  assert.strictEqual('passwordHash' in body, false, 'profile must never expose the password hash')
+})
+
+test('T6: GET /auth/profile rejects unauthenticated callers with 401', async (t) => {
+  const app = await buildWithBootstrap(t)
+  const res = await app.inject({ method: 'GET', url: '/auth/profile' })
+  assert.strictEqual(res.statusCode, 401)
+})
+
 test('POST /auth/login accepts mixed-case email via case-insensitive lookup (P02-G37)', async (t) => {
   const app = await buildWithBootstrap(t)
   const mixed = await app.inject({

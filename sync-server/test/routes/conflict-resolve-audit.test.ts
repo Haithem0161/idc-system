@@ -94,12 +94,26 @@ test('Idempotent retry on resolve_op_id does not emit a second audit row', async
   const a = app as unknown as FastifyAppLike
   const token = tokenFor(a)
 
+  // A valid DRAFT visit: phase-10 T4 re-validates the resolved payload, so the
+  // local payload must satisfy validateVisit (required fields + valid status).
+  // This test asserts audit-row idempotency, not validation, so we use a
+  // minimal valid draft.
+  const validDraftVisit = {
+    id: 'visit-blk6',
+    patient_id: 'p-blk6',
+    receptionist_user_id: 'u-blk6',
+    check_type_id: 'c-blk6',
+    status: 'draft',
+    dye: false,
+    entity_id: TENANT,
+    version: 3,
+  }
   await a.conflictsRepo.park({
     opId: 'op-blk6-002',
     entity: 'visits',
     entityId: 'visit-blk6',
-    serverPayload: { id: 'visit-blk6' },
-    localPayload: { id: 'visit-blk6' },
+    serverPayload: { ...validDraftVisit, version: 5 },
+    localPayload: validDraftVisit,
     reason: 'manual_policy_visit_divergence',
     tenantId: TENANT,
   })
@@ -204,4 +218,89 @@ test("resolve choice='server' leaves the store unchanged (server already canonic
   assert.strictEqual(res.statusCode, 200, res.payload)
   // choice='server' applies nothing -- the store never received this setting.
   assert.strictEqual(a.entityStore.settings.get(settingId), undefined)
+})
+
+// --- Phase-10 T4: merged payloads are re-validated before they hit the store -
+
+test("resolve choice='merged' rejects a malformed visit payload with 422 and writes nothing", async (t) => {
+  const app = await build(t)
+  const a = app as unknown as FastifyAppLike & {
+    entityStore: { visits: Map<string, unknown> }
+  }
+  const token = tokenFor(a)
+
+  const visitId = 'visit-t4-001'
+  await a.conflictsRepo.park({
+    opId: 'op-t4-visit',
+    entity: 'visits',
+    entityId: visitId,
+    serverPayload: { id: visitId, version: 5 },
+    localPayload: { id: visitId, version: 3 },
+    reason: 'manual_policy_visit_divergence',
+    tenantId: TENANT,
+  })
+
+  // A locked visit MUST carry the financial snapshot fields; this merged
+  // payload omits them, so the shared validateVisit must reject it (422)
+  // instead of persisting a corrupt financial record.
+  const res = await app.inject({
+    method: 'POST',
+    url: '/sync/conflicts/op-t4-visit/resolve',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-device-id': 'dev-t4' },
+    payload: {
+      choice: 'merged',
+      resolve_op_id: 'stable-resolve-t4-visit',
+      merged: {
+        id: visitId,
+        patient_id: 'p1',
+        receptionist_user_id: 'u1',
+        check_type_id: 'c1',
+        status: 'locked',
+        entity_id: TENANT,
+        version: 4,
+      },
+    },
+  })
+  assert.strictEqual(res.statusCode, 422, res.payload)
+  assert.strictEqual(JSON.parse(res.payload).code, 'VALIDATION_ERROR')
+  assert.strictEqual(
+    a.entityStore.visits.get(visitId),
+    undefined,
+    'a rejected merge must not write the visit to the store'
+  )
+})
+
+test("resolve choice='merged' applies a valid settings payload", async (t) => {
+  const app = await build(t)
+  const a = app as unknown as FastifyAppLike & {
+    entityStore: { settings: Map<string, { value: string; version: number }> }
+  }
+  const token = tokenFor(a)
+
+  const settingId = 'setting-t4-merged'
+  await a.conflictsRepo.park({
+    opId: 'op-t4-setting',
+    entity: 'settings',
+    entityId: settingId,
+    serverPayload: { id: settingId, key: 'currency_symbol', value: 'srv', value_type: 'text', entity_id: TENANT, version: 5 },
+    localPayload: { id: settingId, key: 'currency_symbol', value: 'lcl', value_type: 'text', entity_id: TENANT, version: 3 },
+    reason: 'manual_policy_version_divergence',
+    tenantId: TENANT,
+  })
+
+  const res = await app.inject({
+    method: 'POST',
+    url: '/sync/conflicts/op-t4-setting/resolve',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-device-id': 'dev-t4' },
+    payload: {
+      choice: 'merged',
+      resolve_op_id: 'stable-resolve-t4-setting',
+      merged: { id: settingId, key: 'currency_symbol', value: 'merged', value_type: 'text', entity_id: TENANT, version: 4 },
+    },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const stored = a.entityStore.settings.get(settingId)
+  assert.ok(stored, 'a valid merged setting must be written')
+  assert.strictEqual(stored.value, 'merged')
+  assert.ok(stored.version > 5, 'merged setting wins LWW above the server version')
 })

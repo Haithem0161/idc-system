@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from 'fastify'
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 
 import { PullQuerySchema, PullResponseSchema } from '../presentation/schemas/pull.js'
+import { SERVER_SCHEMA_VERSION } from '../../common/version.js'
 
 const ErrorRef = Type.Ref('ErrorResponse')
 
@@ -32,7 +33,19 @@ const route: FastifyPluginAsync = async (fastify) => {
       const deviceId = (request.headers['x-device-id'] as string | undefined) ?? 'unknown'
       const since = request.query.since ?? null
       const limit = request.query.limit ?? 500
-      return await fastify.pullService.changes(tenantId, deviceId, since, limit)
+      // Phase-10 T9: time the pull so /metrics is non-zero.
+      const start = performance.now()
+      let result
+      try {
+        result = await fastify.pullService.changes(tenantId, deviceId, since, limit)
+      } catch (err) {
+        fastify.metricsRegistry.observeSyncPull(performance.now() - start, 'fail')
+        throw err
+      }
+      fastify.metricsRegistry.observeSyncPull(performance.now() - start, 'ok')
+      // Advertise the server's schema version so the client can diagnose drift
+      // even when the version gate passes the request (phase-10 T3).
+      return { ...result, server_schema_version: SERVER_SCHEMA_VERSION }
     },
   })
 }

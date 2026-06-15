@@ -51,13 +51,15 @@ pub enum Policy {
 /// Unknown entities default to `Manual` (safer: a server 409 surfaces the gap
 /// rather than overwriting blindly).
 ///
-/// NOTE: the registry is authoritative for what EACH entity's policy is, but
-/// the engine's pull-apply and push-parking paths currently enforce these
-/// inline (the LWW `version` gate in `puller_entities`, additive `INSERT OR
-/// IGNORE`, and the server-side manual parking for settings/visits) rather than
-/// dispatching through `policy_for`. Wiring a single dispatch site through this
-/// registry is a tracked follow-up; until then this function is the truthful
-/// source of the declared policy for any caller that needs it.
+/// This function is the authoritative declaration of each entity's policy. The
+/// engine's pull-apply path (`puller`/`puller_entities`) honors it: Manual
+/// entities (`settings`, `visits`) refuse to overwrite an unsynced local edit
+/// (`dirty = 1`) and let the next push surface the divergence server-side, while
+/// LastWriteWins entities apply through an atomic SQL `version`/`dirty` gate and
+/// AdditiveOnly entities use `INSERT OR IGNORE`. The pull dispatch in
+/// `puller::apply_changes` asserts the Manual mapping for `settings`/`visits`
+/// via `debug_assert_eq!` so a future policy change here cannot silently diverge
+/// from the handler behavior (phase-10 T1/T2).
 pub fn policy_for(entity: &str) -> Policy {
     match entity {
         // additive-only: append-only logs / ledgers; both writes survive.

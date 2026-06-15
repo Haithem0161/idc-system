@@ -39,3 +39,15 @@ function resolveVersion (): string {
 }
 
 export const SERVER_VERSION: string = resolveVersion()
+
+/**
+ * The sync schema version the server speaks. Mirrors the desktop client's
+ * `SYNC_SCHEMA_VERSION` (the local-migration count in
+ * `src-tauri/src/db/migrations.rs`). Returned to clients in the pull response as
+ * `server_schema_version` so a client can log/diagnose a schema drift even when
+ * the `MIN_CLIENT_SCHEMA_VERSION` gate lets the request through (phase-10 T3).
+ *
+ * Bump this in lockstep whenever a client migration changes a synced column's
+ * shape, and set `MIN_CLIENT_SCHEMA_VERSION` to enforce the floor.
+ */
+export const SERVER_SCHEMA_VERSION = 11

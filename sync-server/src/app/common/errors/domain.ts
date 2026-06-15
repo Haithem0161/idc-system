@@ -7,6 +7,7 @@
  */
 export type DomainCode =
   | 'NOT_AUTHENTICATED'
+  | 'FORBIDDEN'
   | 'SESSION_EXPIRED'
   | 'VALIDATION_ERROR'
   | 'CONFLICT_PARKED'

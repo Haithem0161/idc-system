@@ -90,6 +90,37 @@ test('JWT plugin boots in non-production with a 32+ char JWT_SECRET (HS256 dev f
   }
 })
 
+test('T7: JWT plugin refuses to boot in a non-dev env (staging) with only JWT_SECRET', async () => {
+  // The HS256 fallback must be permitted ONLY for NODE_ENV development/test.
+  // A `staging` (or any non-dev) deploy with just JWT_SECRET would previously
+  // silently sign HS256 while clients pin the RS256 public key -- a forge trap.
+  const prev = { ...process.env }
+  try {
+    process.env.NODE_ENV = 'staging'
+    delete process.env.JWT_PUBLIC_KEY
+    delete process.env.JWT_PRIVATE_KEY
+    process.env.JWT_SECRET = 'test-only-shared-secret-with-thirty-two-plus-characters'
+
+    const fastify = Fastify({ logger: false })
+    const plugin = await loadJwtPlugin()
+    await assert.rejects(
+      async () => {
+        await fastify.register(fp(plugin, { name: 'auth-jwt-test-staging-hs256-refusal' }))
+        await fastify.ready()
+      },
+      (err: unknown) => {
+        const msg = (err as Error).message
+        assert.match(msg, /non-dev environment requires JWT_PUBLIC_KEY/i)
+        assert.match(msg, /staging/i)
+        return true
+      },
+    )
+    await fastify.close()
+  } finally {
+    process.env = prev
+  }
+})
+
 test('JWT plugin boots in non-production without JWT_PUBLIC_KEY when JWT_SECRET present', async () => {
   const prev = { ...process.env }
   try {

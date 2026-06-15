@@ -541,7 +541,16 @@ pub async fn auth_refresh_impl(state: &AppState) -> AppResult<AuthRefreshedEvent
         .await
         .ok_or(AppError::NotAuthenticated)?;
     let server_url = state.sync_server_url().await;
-    let result = svc.refresh(server_url.as_deref(), &refresh_token).await?;
+    // T5: present the cached (possibly expired) access token so the server binds
+    // the rotation to our subject.
+    let access_token = state.get_current_token().await;
+    let result = svc
+        .refresh(
+            server_url.as_deref(),
+            &refresh_token,
+            access_token.as_deref(),
+        )
+        .await?;
     state
         .set_current_token(
             result.access_token,

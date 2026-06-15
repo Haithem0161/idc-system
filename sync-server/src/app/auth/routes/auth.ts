@@ -40,6 +40,18 @@ export const RefreshResponse = Type.Object({
   expiresAt: Type.String(),
 })
 
+export const ProfileResponse = Type.Object({
+  id: Type.String(),
+  email: Type.String(),
+  name: Type.String(),
+  role: Type.Union([
+    Type.Literal('superadmin'),
+    Type.Literal('receptionist'),
+    Type.Literal('accountant'),
+  ]),
+  entityId: Type.String(),
+})
+
 export const ChangePasswordBody = Type.Object({
   oldPassword: Type.String({ minLength: 1 }),
   newPassword: Type.String({ minLength: 8 }),
@@ -71,6 +83,32 @@ const ErrorRef = Type.Ref('ErrorResponse')
 const routes: FastifyPluginAsync = async (fastify) => {
   const app = fastify.withTypeProvider<TypeBoxTypeProvider>()
 
+  /**
+   * Phase-10 T5: best-effort subject binding for refresh/logout. The refresh
+   * token is the credential, but when the caller also presents an access token
+   * we verify its `sub` and pass it down so the rotation/revocation is scoped
+   * to that subject. We accept an EXPIRED access token (`ignoreExpiration`)
+   * because refresh is exactly the moment the access token has lapsed -- the
+   * signature is what binds identity, not freshness. A missing or
+   * signature-invalid bearer yields `undefined` (offline-first refresh still
+   * works); a present-but-mismatching token is caught in the store (403).
+   */
+  async function subjectFromBearer (
+    request: { headers: Record<string, unknown> }
+  ): Promise<string | undefined> {
+    const header = request.headers.authorization
+    if (typeof header !== 'string' || !header.toLowerCase().startsWith('bearer ')) {
+      return undefined
+    }
+    const token = header.slice('bearer '.length).trim()
+    try {
+      const claims = fastify.jwt.verify(token, { ignoreExpiration: true }) as { sub?: string }
+      return typeof claims.sub === 'string' ? claims.sub : undefined
+    } catch {
+      return undefined
+    }
+  }
+
   app.post('/auth/login', {
     schema: {
       tags: ['auth'],
@@ -95,12 +133,14 @@ const routes: FastifyPluginAsync = async (fastify) => {
     schema: {
       tags: ['auth'],
       summary: 'Rotate refresh + access tokens',
+      description: `Rotates the presented refresh token. When an \`Authorization: Bearer\` access token is also sent, its \`sub\` is verified (ignoring expiry) and the rotation is bound to that subject -- a refresh token that does not belong to the bearer is rejected with 403 (phase-10 T5). The access token is optional so the offline-first refresh path still works when it has lapsed.`,
       body: RefreshBody,
-      response: { 200: RefreshResponse, 401: ErrorRef, 500: ErrorRef },
+      response: { 200: RefreshResponse, 401: ErrorRef, 403: ErrorRef, 500: ErrorRef },
     },
     handler: async (request) => {
       const deviceId = (request.headers['x-device-id'] as string | undefined) ?? null
-      return fastify.authService.refresh(request.body.refreshToken, deviceId)
+      const expectedUserId = await subjectFromBearer(request)
+      return fastify.authService.refresh(request.body.refreshToken, deviceId, expectedUserId)
     },
   })
 
@@ -108,12 +148,36 @@ const routes: FastifyPluginAsync = async (fastify) => {
     schema: {
       tags: ['auth'],
       summary: 'Revoke a refresh token',
+      description: 'Revokes the presented refresh token. When an `Authorization: Bearer` access token is sent, the revocation is bound to its subject so a leaked token cannot force-logout another user (phase-10 T5).',
       body: RefreshBody,
-      response: { 204: Type.Null() },
+      response: { 204: Type.Null(), 403: ErrorRef },
     },
     handler: async (request, reply) => {
-      await fastify.authService.logout(request.body.refreshToken)
+      const expectedUserId = await subjectFromBearer(request)
+      await fastify.authService.logout(request.body.refreshToken, expectedUserId)
       return reply.code(204).send(null)
+    },
+  })
+
+  app.get('/auth/profile', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      tags: ['auth'],
+      summary: 'Return the authenticated user (server-canonical identity)',
+      description: 'Returns the server-side record for the JWT subject so the client can confirm the server agrees on the current identity after login/refresh (phase-10 T6). 404 if the user no longer exists or is inactive. Never returns the password hash.',
+      security: [{ bearerAuth: [] }],
+      response: { 200: ProfileResponse, 401: ErrorRef, 404: ErrorRef, 500: ErrorRef },
+    },
+    handler: async (request, reply) => {
+      const userId = (request.user as { sub?: string } | undefined)?.sub
+      if (!userId) {
+        return reply.code(401).send({
+          code: 'NOT_AUTHENTICATED',
+          message: 'no user in token',
+          traceId: 'n/a',
+        })
+      }
+      return fastify.authService.getProfile(userId)
     },
   })
 

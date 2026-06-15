@@ -448,25 +448,32 @@ impl AuthService {
         &self,
         server_url: Option<&str>,
         refresh_token: &str,
+        access_token: Option<&str>,
     ) -> AppResult<RefreshResult> {
         let server_url = server_url
             .filter(|u| !u.is_empty())
             .ok_or(AppError::NotAuthenticated)?;
         let url = format!("{}/auth/refresh", server_url.trim_end_matches('/'));
 
-        let resp = self
+        // Phase-10 T5: when we still hold the (possibly expired) access token,
+        // send it as a bearer so the server binds the rotation to our subject.
+        let mut req = self
             .http
             .post(&url)
             .header("X-Device-Id", &self.device_id)
             .json(&ServerRefreshRequest {
                 refresh_token: refresh_token.to_string(),
-            })
-            .send()
-            .await
-            .map_err(AppError::from)?;
+            });
+        if let Some(at) = access_token.filter(|t| !t.is_empty()) {
+            req = req.bearer_auth(at);
+        }
+        let resp = req.send().await.map_err(AppError::from)?;
 
         let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
+        // 401 (revoked/expired) and 403 (T5: token does not belong to our
+        // subject) are both definitive auth failures -- surface session-expired
+        // so the engine prompts re-login instead of hot-retrying.
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return Err(AppError::NotAuthenticated);
         }
         if !status.is_success() {

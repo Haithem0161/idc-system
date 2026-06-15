@@ -121,7 +121,7 @@ export class MemoryUserStore implements UserRepository, RefreshTokenRepository {
     return { id, plaintextToken: plaintext, expiresAt }
   }
 
-  async rotate (presentedToken: string, deviceId: string | null) {
+  async rotate (presentedToken: string, deviceId: string | null, expectedUserId?: string) {
     const hash = sha256(presentedToken)
     const id = this.tokenHashes.get(hash)
     const current = id ? this.tokens.get(id) : null
@@ -130,6 +130,10 @@ export class MemoryUserStore implements UserRepository, RefreshTokenRepository {
     }
     if (Date.parse(current.expiresAt) < Date.now()) {
       throw new DomainError('SESSION_EXPIRED', 'expired refresh token', 401)
+    }
+    // Phase-10 T5: bind to the presented subject when one is supplied.
+    if (expectedUserId && current.userId !== expectedUserId) {
+      throw new DomainError('FORBIDDEN', 'refresh token does not belong to the authenticated user', 403)
     }
     current.revokedAt = new Date().toISOString()
 
@@ -146,12 +150,16 @@ export class MemoryUserStore implements UserRepository, RefreshTokenRepository {
     }
   }
 
-  async revokeByPlaintext (plaintextToken: string): Promise<void> {
+  async revokeByPlaintext (plaintextToken: string, expectedUserId?: string): Promise<void> {
     const hash = sha256(plaintextToken)
     const id = this.tokenHashes.get(hash)
     if (!id) return
     const t = this.tokens.get(id)
-    if (t) t.revokedAt = new Date().toISOString()
+    if (!t) return
+    // Phase-10 T5: when a subject is supplied, only revoke a token that belongs
+    // to it. A leaked token presented under a different identity is a no-op.
+    if (expectedUserId && t.userId !== expectedUserId) return
+    t.revokedAt = new Date().toISOString()
   }
 
   async revokeAllForUser (userId: string): Promise<void> {

@@ -27,7 +27,13 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
   const publicKey = process.env.JWT_PUBLIC_KEY
   const privateKey = process.env.JWT_PRIVATE_KEY
   const sharedSecret = process.env.JWT_SECRET
-  const isProd = process.env.NODE_ENV === 'production'
+  // Phase-10 T7: the HS256 dev fallback is allowed ONLY in an explicit dev/test
+  // environment. Previously this keyed off `NODE_ENV === 'production'`, so a
+  // `staging`/unset/typo NODE_ENV with JWT_SECRET set would silently sign HS256
+  // while clients pin the RS256 public key -- a token-forge trap. Treat
+  // anything that is not explicitly dev/test as production-strict (RS256 only).
+  const nodeEnv = process.env.NODE_ENV
+  const isDevLike = nodeEnv === 'development' || nodeEnv === 'test' || nodeEnv === undefined || nodeEnv === ''
 
   if (publicKey && publicKey.trim().length > 0) {
     if (privateKey && privateKey.trim().length > 0) {
@@ -49,13 +55,14 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
         verify: { algorithms: ['RS256'] },
       })
     }
-  } else if (!isProd && sharedSecret && sharedSecret.length >= 32) {
+  } else if (isDevLike && sharedSecret && sharedSecret.length >= 32) {
     fastify.log.warn('JWT running in HS256 dev fallback. Set JWT_PUBLIC_KEY for production.')
     await fastify.register(fjwt, { secret: sharedSecret })
   } else {
     throw new Error(
-      'JWT plugin: production requires JWT_PUBLIC_KEY + JWT_PRIVATE_KEY (RS256). '
-      + 'In non-production set JWT_SECRET to a 32+ char shared secret.'
+      'JWT plugin: any non-dev environment requires JWT_PUBLIC_KEY + JWT_PRIVATE_KEY (RS256). '
+      + `The HS256 JWT_SECRET fallback is permitted only when NODE_ENV is development or test (got '${nodeEnv ?? '<unset>'}'). `
+      + 'Set the RS256 keys, or set NODE_ENV=development for local dev.'
     )
   }
 

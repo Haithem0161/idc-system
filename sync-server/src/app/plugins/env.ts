@@ -32,6 +32,12 @@ const envSchema = {
     // Minimum client app version allowed to sync. A client whose
     // X-App-Version is below this is told to upgrade (426). Empty = no gate.
     MIN_CLIENT_VERSION: { type: 'string', default: '' },
+    // Minimum client SYNC SCHEMA version (integer local-migration count) allowed
+    // to sync. A client whose X-Schema-Version is below this is told to upgrade
+    // (426, reason=schema_version) so an old client cannot push payloads missing
+    // a column a newer server migration made required. Empty = no gate
+    // (phase-10 T3).
+    MIN_CLIENT_SCHEMA_VERSION: { type: 'string', default: '' },
   },
 } as const
 
@@ -49,6 +55,7 @@ interface ConfigShape {
   BOOTSTRAP_TENANT_ID: string
   METRICS_TOKEN: string
   MIN_CLIENT_VERSION: string
+  MIN_CLIENT_SCHEMA_VERSION: string
 }
 
 async function plugin (fastify: FastifyInstance): Promise<void> {

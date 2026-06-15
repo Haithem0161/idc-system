@@ -294,3 +294,41 @@ test('GET /metrics returns Prometheus payload when token matches', async (t) => 
   assert.match(res.payload, /sync_conflict_total/)
   delete process.env.METRICS_TOKEN
 })
+
+test('T9: a push increments sync_push_duration_seconds_count in /metrics', async (t) => {
+  process.env.METRICS_TOKEN = 'test-token-t9'
+  const app = await build(t)
+  const a = app as unknown as FastifyAppLike
+  const token = authToken(a, 'superadmin')
+
+  // Baseline count before any push.
+  const before = await app.inject({
+    method: 'GET',
+    url: '/metrics',
+    headers: { 'x-internal-token': 'test-token-t9' },
+  })
+  const beforeCount = Number(
+    /sync_push_duration_seconds_count (\d+)/.exec(before.payload)?.[1] ?? 'NaN'
+  )
+
+  await pushAuditRow(a, token, makeAuditPayload('t9-metrics-001'), '01HZ00000000000000000000T9')
+
+  const after = await app.inject({
+    method: 'GET',
+    url: '/metrics',
+    headers: { 'x-internal-token': 'test-token-t9' },
+  })
+  const afterCount = Number(
+    /sync_push_duration_seconds_count (\d+)/.exec(after.payload)?.[1] ?? 'NaN'
+  )
+
+  assert.ok(
+    Number.isFinite(beforeCount) && Number.isFinite(afterCount),
+    'metrics must expose a numeric push count'
+  )
+  assert.ok(
+    afterCount > beforeCount,
+    `push must increment the metric (before=${beforeCount}, after=${afterCount})`
+  )
+  delete process.env.METRICS_TOKEN
+})

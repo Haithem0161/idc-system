@@ -113,6 +113,10 @@ impl SyncHttpClient {
             .bearer_auth(token)
             .header("X-Device-Id", &self.device_id)
             .header("X-App-Version", &self.app_version)
+            .header(
+                "X-Schema-Version",
+                crate::db::migrations::SYNC_SCHEMA_VERSION.to_string(),
+            )
             .json(&Body { ops })
             .send()
             .await
@@ -146,6 +150,10 @@ impl SyncHttpClient {
             .bearer_auth(token)
             .header("X-Device-Id", &self.device_id)
             .header("X-App-Version", &self.app_version)
+            .header(
+                "X-Schema-Version",
+                crate::db::migrations::SYNC_SCHEMA_VERSION.to_string(),
+            )
             .send()
             .await
             .map_err(AppError::from)?;
@@ -154,8 +162,8 @@ impl SyncHttpClient {
             return Err(AppError::SessionExpired);
         }
         if status == reqwest::StatusCode::UPGRADE_REQUIRED {
-            // 426: this app version is too old. Distinct error so the engine
-            // surfaces an upgrade prompt instead of retrying forever.
+            // 426: this app or schema version is too old. Distinct error so the
+            // engine surfaces an upgrade prompt instead of retrying forever.
             let body = resp.text().await.unwrap_or_default();
             return Err(AppError::UpgradeRequired(body));
         }

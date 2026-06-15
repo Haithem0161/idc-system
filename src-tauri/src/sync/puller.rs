@@ -198,9 +198,17 @@ async fn apply_changes(
             // C3/C5: the remaining syncable entities. Previously these were
             // silently skipped while the cursor advanced past them, so peer
             // changes to patients/visits/settings/catalog/shifts were dropped
-            // permanently. Each handler is an LWW-gated upsert (see
-            // `puller_entities`).
+            // permanently. The per-entity policy is declared in
+            // `crate::sync::conflict::policy_for`:
+            //   - settings/visits  -> Manual: the handler refuses to overwrite
+            //     an unsynced local edit (dirty=1) and lets the next push surface
+            //     the conflict server-side (phase-10 T1).
+            //   - everything else  -> LastWriteWins via the atomic SQL gate.
             "settings" => {
+                debug_assert_eq!(
+                    crate::sync::conflict::policy_for("settings"),
+                    crate::sync::conflict::Policy::Manual
+                );
                 crate::sync::puller_entities::apply_settings_change(tx, change).await?;
                 applied += 1;
             }
@@ -242,6 +250,10 @@ async fn apply_changes(
                 applied += 1;
             }
             "visits" => {
+                debug_assert_eq!(
+                    crate::sync::conflict::policy_for("visits"),
+                    crate::sync::conflict::Policy::Manual
+                );
                 crate::sync::puller_entities::apply_visits_change(tx, change).await?;
                 applied += 1;
             }
@@ -516,19 +528,14 @@ async fn apply_users_change(tx: &mut crate::db::Tx<'_>, change: &PullChange) -> 
         return Ok(false);
     }
 
-    let row = sqlx::query_as::<_, (i64,)>("SELECT version FROM users WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    // LWW: the SQL WHERE gate is the sole authoritative check (phase-10 T2).
+    // No Rust-level version pre-read -- that opened a clobber race where a
+    // concurrent local mutation between the read and the upsert could be
+    // silently overwritten. `rows_affected()` below tells us whether the row
+    // was actually applied.
     let incoming_version = change.version;
-    if let Some((existing,)) = row {
-        if incoming_version <= existing {
-            return Ok(false);
-        }
-    }
-
     let now = chrono::Utc::now().to_rfc3339();
-    sqlx::query(
+    let result = sqlx::query(
         "INSERT INTO users ( \
             id, email, name, password_hash, role, is_active, last_login_at, \
             created_at, updated_at, deleted_at, version, dirty, \
@@ -577,5 +584,8 @@ async fn apply_users_change(tx: &mut crate::db::Tx<'_>, change: &PullChange) -> 
     .bind(p.get("entity_id").and_then(|v| v.as_str()).unwrap_or(""))
     .execute(&mut **tx)
     .await?;
-    Ok(true)
+    // A stale or locally-dirty row is a no-op under the WHERE gate; report
+    // whether a row was actually applied so the caller's `applied` counter and
+    // `sync:applied` invalidation stay accurate.
+    Ok(result.rows_affected() > 0)
 }

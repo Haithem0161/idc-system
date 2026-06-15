@@ -1253,3 +1253,320 @@ async fn h7_pull_does_not_clobber_an_unpushed_dirty_local_row() {
         "the unpushed edit must remain dirty so it still pushes"
     );
 }
+
+// --- Phase-10 T1: Manual-policy entities park on divergence ----------------
+//
+// `settings` and `visits` are declared `Manual` in
+// `crate::sync::conflict::policy_for`. A pull MUST NOT silently overwrite an
+// unsynced local edit (dirty=1) with a higher-version server row -- settings
+// drive money math and visits are financial records. The local edit is left
+// intact so the next push surfaces the divergence server-side
+// (detectSettingConflict / detectVisitConflict park it for the resolver).
+
+#[tokio::test]
+async fn t1_pull_settings_does_not_overwrite_dirty_local_edit() {
+    let pool = shared_cache_pool().await;
+    let setting_id = uuid::Uuid::now_v7();
+    // A dirty local settings row: locally edited, not yet pushed.
+    sqlx::query(
+        "INSERT INTO settings (id, key, value, value_type, created_at, updated_at, \
+         version, dirty, entity_id) \
+         VALUES (?, 'currency', 'LOCAL_EDIT', 'text', '2026-05-13T10:00:00Z', \
+         '2026-05-13T12:00:00Z', 2, 1, 'tenant-x')",
+    )
+    .bind(setting_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "entity": "settings",
+                "entity_id": setting_id.to_string(),
+                "payload": {
+                    "id": setting_id.to_string(),
+                    "key": "currency",
+                    "value": "SERVER_VALUE",
+                    "value_type": "text",
+                    "created_at": "2026-05-13T10:00:00Z",
+                    "updated_at": "2026-05-13T11:00:00Z",
+                    "version": 9,
+                    "entity_id": "tenant-x",
+                },
+                "updated_at": "2026-05-13T11:00:00Z",
+                "version": 9,
+            }],
+            "next_cursor": "2026-05-13T11:00:00Z|settings-1"
+        })))
+        .mount(&server)
+        .await;
+
+    puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("pull ok");
+
+    let (value, dirty): (String, i64) =
+        sqlx::query_as("SELECT value, dirty FROM settings WHERE id = ?")
+            .bind(setting_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        value, "LOCAL_EDIT",
+        "Manual policy: a dirty local settings edit must NOT be overwritten by a pull"
+    );
+    assert_eq!(
+        dirty, 1,
+        "the local edit must stay dirty so the next push surfaces the conflict"
+    );
+}
+
+#[tokio::test]
+async fn t1_pull_settings_fast_forwards_a_clean_local_row() {
+    // A clean local settings row (dirty=0) has no unsynced edit, so a
+    // higher-version server row applies normally (no parking).
+    let pool = shared_cache_pool().await;
+    let setting_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO settings (id, key, value, value_type, created_at, updated_at, \
+         version, dirty, entity_id) \
+         VALUES (?, 'currency', 'OLD', 'text', '2026-05-13T10:00:00Z', \
+         '2026-05-13T10:00:00Z', 1, 0, 'tenant-x')",
+    )
+    .bind(setting_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "entity": "settings",
+                "entity_id": setting_id.to_string(),
+                "payload": {
+                    "id": setting_id.to_string(),
+                    "key": "currency",
+                    "value": "NEW",
+                    "value_type": "text",
+                    "created_at": "2026-05-13T10:00:00Z",
+                    "updated_at": "2026-05-13T11:00:00Z",
+                    "version": 3,
+                    "entity_id": "tenant-x",
+                },
+                "updated_at": "2026-05-13T11:00:00Z",
+                "version": 3,
+            }],
+            "next_cursor": "2026-05-13T11:00:00Z|settings-1"
+        })))
+        .mount(&server)
+        .await;
+
+    puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("pull ok");
+
+    let (value, version, dirty): (String, i64, i64) =
+        sqlx::query_as("SELECT value, version, dirty FROM settings WHERE id = ?")
+            .bind(setting_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        value, "NEW",
+        "a clean local row must fast-forward to the server value"
+    );
+    assert_eq!(version, 3);
+    assert_eq!(dirty, 0, "applied server row is clean");
+}
+
+#[tokio::test]
+async fn t1_pull_visits_does_not_overwrite_dirty_local_edit() {
+    let pool = shared_cache_pool().await;
+    // FK parents for the visit (already on the device).
+    let user_id = uuid::Uuid::now_v7();
+    let check_type_id = uuid::Uuid::now_v7();
+    let patient_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO users (id, email, name, password_hash, role, is_active, created_at, \
+         updated_at, version, dirty, entity_id) \
+         VALUES (?, 'r@idc.io', 'Rita', '', 'receptionist', 1, '2026-05-13T09:00:00Z', \
+         '2026-05-13T09:00:00Z', 1, 0, 'tenant-x')",
+    )
+    .bind(user_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO check_types (id, name_ar, has_subtypes, base_price_iqd, created_at, \
+         updated_at, version, dirty, entity_id) \
+         VALUES (?, 'سونار', 0, 25000, '2026-05-13T09:00:00Z', '2026-05-13T09:00:00Z', 1, 0, 'tenant-x')",
+    )
+    .bind(check_type_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO patients (id, name, created_at, updated_at, version, dirty, entity_id) \
+         VALUES (?, 'Salwa', '2026-05-13T09:00:00Z', '2026-05-13T09:00:00Z', 1, 0, 'tenant-x')",
+    )
+    .bind(patient_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // A dirty local visit (status edited locally, not yet pushed).
+    let visit_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO visits (id, patient_id, status, receptionist_user_id, check_type_id, \
+         dye, report, created_at, updated_at, version, dirty, entity_id) \
+         VALUES (?, ?, 'draft', ?, ?, 0, 0, '2026-05-13T10:00:00Z', '2026-05-13T12:00:00Z', 2, 1, 'tenant-x')",
+    )
+    .bind(visit_id.to_string())
+    .bind(patient_id.to_string())
+    .bind(user_id.to_string())
+    .bind(check_type_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "entity": "visits",
+                "entity_id": visit_id.to_string(),
+                "payload": {
+                    "id": visit_id.to_string(),
+                    "patient_id": patient_id.to_string(),
+                    "status": "locked",
+                    "receptionist_user_id": user_id.to_string(),
+                    "check_type_id": check_type_id.to_string(),
+                    "dye": false,
+                    "report": false,
+                    "created_at": "2026-05-13T10:00:00Z",
+                    "updated_at": "2026-05-13T11:00:00Z",
+                    "version": 9,
+                    "entity_id": "tenant-x",
+                },
+                "updated_at": "2026-05-13T11:00:00Z",
+                "version": 9,
+            }],
+            "next_cursor": "2026-05-13T11:00:00Z|visits-1"
+        })))
+        .mount(&server)
+        .await;
+
+    puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("pull ok");
+
+    let (status, dirty): (String, i64) =
+        sqlx::query_as("SELECT status, dirty FROM visits WHERE id = ?")
+            .bind(visit_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        status, "draft",
+        "Manual policy: a dirty local visit must NOT be overwritten by a pull"
+    );
+    assert_eq!(
+        dirty, 1,
+        "the local visit edit must stay dirty for the next push"
+    );
+}
+
+// --- Phase-10 T2: LWW clean-row apply still works after the pre-read removal -
+
+#[tokio::test]
+async fn t2_pull_lww_clean_row_still_fast_forwards() {
+    // Removing the Rust-level version pre-read must not regress the normal
+    // LWW path: a clean local catalog row with a lower version takes the
+    // higher-version server row via the atomic SQL gate.
+    let pool = shared_cache_pool().await;
+    let ct_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO check_types (id, name_ar, has_subtypes, base_price_iqd, created_at, \
+         updated_at, version, dirty, entity_id) \
+         VALUES (?, 'OLD', 0, 10000, '2026-05-13T09:00:00Z', '2026-05-13T09:00:00Z', 1, 0, 'tenant-x')",
+    )
+    .bind(ct_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let state: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/sync/pull"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "entity": "check_types",
+                "entity_id": ct_id.to_string(),
+                "payload": {
+                    "id": ct_id.to_string(),
+                    "name_ar": "NEW",
+                    "has_subtypes": false,
+                    "base_price_iqd": 20000,
+                    "created_at": "2026-05-13T09:00:00Z",
+                    "updated_at": "2026-05-13T11:00:00Z",
+                    "version": 4,
+                    "entity_id": "tenant-x",
+                },
+                "updated_at": "2026-05-13T11:00:00Z",
+                "version": 4,
+            }],
+            "next_cursor": "2026-05-13T11:00:00Z|ct-1"
+        })))
+        .mount(&server)
+        .await;
+
+    puller::run_step(
+        &pool,
+        state,
+        &http_for(&server).await,
+        Some("t"),
+        "tenant-x",
+    )
+    .await
+    .expect("pull ok");
+
+    let (name, version): (String, i64) =
+        sqlx::query_as("SELECT name_ar, version FROM check_types WHERE id = ?")
+            .bind(ct_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        name, "NEW",
+        "LWW clean row must fast-forward to the higher server version"
+    );
+    assert_eq!(version, 4);
+}

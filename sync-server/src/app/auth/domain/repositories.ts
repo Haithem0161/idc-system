@@ -24,7 +24,11 @@ export interface RefreshTokenRepository {
     ttlSeconds: number
   }): Promise<{ id: string, plaintextToken: string, expiresAt: string }>
 
-  rotate (presentedToken: string, deviceId: string | null): Promise<{
+  // `expectedUserId` (phase-10 T5): when set, the token must belong to this
+  // subject (the `sub` of a presented access token) or the operation is
+  // rejected with a 403 -- binding the refresh token to its owner. Optional so
+  // the offline-first refresh path still works without an access token.
+  rotate (presentedToken: string, deviceId: string | null, expectedUserId?: string): Promise<{
     id: string
     plaintextToken: string
     expiresAt: string
@@ -32,7 +36,7 @@ export interface RefreshTokenRepository {
     entityIdTenant: string
   }>
 
-  revokeByPlaintext (plaintextToken: string): Promise<void>
+  revokeByPlaintext (plaintextToken: string, expectedUserId?: string): Promise<void>
   revokeAllForUser (userId: string): Promise<void>
   loadRaw (id: string): Promise<RefreshTokenRecord | null>
 }

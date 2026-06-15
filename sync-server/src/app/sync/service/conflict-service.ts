@@ -19,6 +19,7 @@ import { PrismaAuditLogRepo } from '../infrastructure/prisma/audit-repo'
 import { PrismaConflictParkedRepo } from '../infrastructure/prisma/conflict-parked-repo'
 import { PrismaEntityStore } from '../infrastructure/prisma/entity-store'
 import { PrismaProcessedOpRepo } from '../infrastructure/prisma/processed-op-repo'
+import { validateSetting, validateVisit } from './validators'
 
 export interface ResolveInput {
   choice: 'local' | 'server' | 'merged'
@@ -195,11 +196,19 @@ export class ConflictResolveService {
     const localVersion = versionOf(parked.localPayload)
     winning.version = Math.max(serverVersion, localVersion) + 1
 
+    // Phase-10 T4: re-validate the chosen payload through the SAME domain
+    // validators the push path uses, so a `merged` (or stale `local`) payload
+    // cannot bypass the invariants on its way into the store. Without this a
+    // malformed merge could persist an invalid setting or a locked visit with
+    // broken financial snapshots.
+    const validationOpId = `resolve:${parked.entity}`
     switch (parked.entity) {
       case 'settings':
+        validateSetting(winning as unknown as SettingSyncRecord, validationOpId)
         await store.upsertSetting(winning as unknown as SettingSyncRecord)
         break
       case 'visits':
+        validateVisit(winning as unknown as VisitSyncRecord, validationOpId)
         await store.upsertVisit(winning as unknown as VisitSyncRecord)
         break
       default:

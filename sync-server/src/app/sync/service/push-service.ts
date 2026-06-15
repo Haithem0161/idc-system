@@ -23,19 +23,7 @@ import type {
   VisitSyncRecord,
 } from '../infrastructure/memory/store'
 import { decodeAuditPayload, decodeJsonPayload } from './push-decoders'
-
-const PROTECTED_SETTING_KEYS = new Set([
-  'dye_cost_iqd',
-  'report_cost_iqd',
-  'internal_doctor_pct',
-  'idle_lock_minutes',
-  'arabic_numerals',
-  'clinic_display_name_ar',
-  'clinic_display_name_en',
-  'currency_symbol',
-  'thermal_width',
-  'thermal_printer_name',
-])
+import { validateSetting, validateVisit } from './validators'
 
 export interface PushAccepted {
   op_id: string
@@ -160,14 +148,7 @@ export class SyncPushService {
           this.requireSuperadmin(actor, 'settings push')
           const row = decodeJsonPayload<SettingSyncRecord>(op.payload_b64, op.op_id)
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
-          if (row.deleted_at && PROTECTED_SETTING_KEYS.has(row.key)) {
-            throw new DomainError(
-              'VALIDATION_ERROR',
-              `${row.key} is a required setting and cannot be deleted`,
-              422,
-              { op_id: op.op_id }
-            )
-          }
+          validateSetting(row, op.op_id)
           const conflict = await this.store.detectSettingConflict(row)
           if (conflict) {
             const envelope: ParkedConflict = {
@@ -636,107 +617,6 @@ function assertTenantMatches (rowTenant: string, tenantId: string, opId: string)
       'VALIDATION_ERROR',
       'payload entity_id must match JWT entityId',
       403,
-      { op_id: opId }
-    )
-  }
-}
-
-function validateVisit (row: VisitSyncRecord, opId: string): void {
-  if (!row.patient_id || !row.receptionist_user_id || !row.check_type_id) {
-    throw new DomainError(
-      'VALIDATION_ERROR',
-      'visit missing required fields',
-      422,
-      { op_id: opId }
-    )
-  }
-  if (!['draft', 'locked', 'voided'].includes(row.status)) {
-    throw new DomainError(
-      'VALIDATION_ERROR',
-      `visit status invalid: ${row.status}`,
-      422,
-      { op_id: opId }
-    )
-  }
-  if (row.status === 'locked') {
-    if (row.operator_id == null) {
-      throw new DomainError(
-        'VALIDATION_ERROR',
-        'locked visit must have operator_id',
-        422,
-        { op_id: opId }
-      )
-    }
-    const snapKeys: Array<keyof VisitSyncRecord> = [
-      'price_snapshot_iqd',
-      'dye_cost_snapshot_iqd',
-      'report_cost_snapshot_iqd',
-      'doctor_cut_snapshot_iqd',
-      'operator_cut_snapshot_iqd',
-      'total_amount_iqd_snapshot',
-    ]
-    for (const k of snapKeys) {
-      if (row[k] == null) {
-        throw new DomainError(
-          'VALIDATION_ERROR',
-          `locked visit missing snapshot field: ${String(k)}`,
-          422,
-          { op_id: opId }
-        )
-      }
-    }
-    const total =
-      (row.price_snapshot_iqd ?? 0) +
-      (row.dye_cost_snapshot_iqd ?? 0) +
-      (row.report_cost_snapshot_iqd ?? 0)
-    if (total !== row.total_amount_iqd_snapshot) {
-      throw new DomainError(
-        'VALIDATION_ERROR',
-        'total_amount_iqd_snapshot must equal price + dye + report',
-        422,
-        { op_id: opId }
-      )
-    }
-    if (row.doctor_id == null && row.internal_pct_snapshot == null) {
-      throw new DomainError(
-        'VALIDATION_ERROR',
-        'internal_pct_snapshot required when doctor_id is null',
-        422,
-        { op_id: opId }
-      )
-    }
-    if (row.doctor_id != null && row.internal_pct_snapshot != null) {
-      throw new DomainError(
-        'VALIDATION_ERROR',
-        'internal_pct_snapshot must be null when doctor_id is set',
-        422,
-        { op_id: opId }
-      )
-    }
-    if (row.patient_name_snapshot == null || row.operator_name_snapshot == null || row.check_type_name_ar_snapshot == null) {
-      throw new DomainError(
-        'VALIDATION_ERROR',
-        'locked visit missing name snapshot fields',
-        422,
-        { op_id: opId }
-      )
-    }
-  }
-  if (row.status === 'voided') {
-    if (!row.voided_by_user_id || row.void_reason == null || row.void_reason.trim().length < 5) {
-      throw new DomainError(
-        'VALIDATION_ERROR',
-        'voided visit requires voided_by_user_id and a >= 5-char void_reason',
-        422,
-        { op_id: opId }
-      )
-    }
-  }
-  if (row.dye && !row.check_type_id) {
-    throw new DomainError(
-      'VALIDATION_ERROR',
-      'visit dye requires check_type_id',
-      422,
       { op_id: opId }
     )
   }

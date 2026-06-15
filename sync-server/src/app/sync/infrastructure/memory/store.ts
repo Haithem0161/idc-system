@@ -455,27 +455,32 @@ export class MemorySyncStore implements
     const existing = this.inventoryAdjustments.get(row.id)
     if (!existing) {
       this.inventoryAdjustments.set(row.id, row)
-      this.recomputeInventoryItemOnHand(row.item_id)
+      this.recomputeInventoryItemOnHand(row.item_id, row.entity_id)
       return { applied: true, duplicate: false }
     }
     return { applied: false, duplicate: true }
   }
 
   /**
-   * Sum all non-deleted adjustments for `itemId` and overwrite the matching
-   * `inventoryItems.quantity_on_hand`. The version is bumped on every
-   * recompute so a subsequent pull surfaces the new total to clients that
-   * receive `inventory_items` rows in the same batch.
+   * Sum all non-deleted adjustments for `itemId` WITHIN `tenantId` and
+   * overwrite the matching `inventoryItems.quantity_on_hand`. The version is
+   * bumped on every recompute so a subsequent pull surfaces the new total to
+   * clients that receive `inventory_items` rows in the same batch.
+   *
+   * Phase-10 T11: the tenant filter mirrors the Prisma store -- without it an
+   * adjustment referencing another tenant's item_id would read and overwrite
+   * that tenant's inventory item.
    */
-  recomputeInventoryItemOnHand (itemId: string): number {
+  recomputeInventoryItemOnHand (itemId: string, tenantId: string): number {
     let sum = 0
     for (const adj of this.inventoryAdjustments.values()) {
-      if (adj.item_id === itemId && adj.deleted_at == null) {
+      if (adj.item_id === itemId && adj.entity_id === tenantId && adj.deleted_at == null) {
         sum += adj.delta
       }
     }
     const item = this.inventoryItems.get(itemId)
-    if (item) {
+    // Only recompute the item if it belongs to the same tenant.
+    if (item && item.entity_id === tenantId) {
       this.inventoryItems.set(itemId, {
         ...item,
         quantity_on_hand: sum,

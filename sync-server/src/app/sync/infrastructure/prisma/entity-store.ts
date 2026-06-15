@@ -520,19 +520,26 @@ export class PrismaEntityStore implements SyncEntityStore {
           entityId: row.entity_id,
         },
       })
+      // Phase-10 T11: scope the on-hand recompute by tenant. Without the
+      // entityId filter a push op referencing another tenant's item_id would
+      // read (aggregate) and overwrite that tenant's inventory item. The
+      // incoming row's entity_id was already verified against the JWT tenant by
+      // the push service (assertTenantMatches), so it is the authoritative
+      // tenant here. updateMany (not update) means a cross-tenant item_id
+      // matches zero rows -- a safe no-op rather than a cross-tenant write.
       const agg = await tx.inventoryAdjustment.aggregate({
-        where: { itemId: row.item_id, deletedAt: null },
+        where: { itemId: row.item_id, entityId: row.entity_id, deletedAt: null },
         _sum: { delta: true },
       })
       const total = agg._sum.delta ?? 0
-      await tx.inventoryItem.update({
-        where: { id: row.item_id },
+      await tx.inventoryItem.updateMany({
+        where: { id: row.item_id, entityId: row.entity_id },
         data: {
           quantityOnHand: total,
           version: { increment: 1 },
           updatedAt: new Date(),
         },
-      }).catch(() => undefined)
+      })
     })
     return { applied: true, duplicate: false }
   }

@@ -123,7 +123,7 @@ export class PrismaUserStore implements UserRepository, RefreshTokenRepository {
     return { id, plaintextToken: plaintext, expiresAt: expiresAt.toISOString() }
   }
 
-  async rotate (presentedToken: string, deviceId: string | null) {
+  async rotate (presentedToken: string, deviceId: string | null, expectedUserId?: string) {
     const hash = sha256(presentedToken)
     const current = await this.prisma.refreshToken.findUnique({ where: { tokenHash: hash } })
     if (!current || current.revokedAt !== null) {
@@ -131,6 +131,10 @@ export class PrismaUserStore implements UserRepository, RefreshTokenRepository {
     }
     if (current.expiresAt.getTime() < Date.now()) {
       throw new DomainError('SESSION_EXPIRED', 'expired refresh token', 401)
+    }
+    // Phase-10 T5: bind to the presented subject when one is supplied.
+    if (expectedUserId && current.userId !== expectedUserId) {
+      throw new DomainError('FORBIDDEN', 'refresh token does not belong to the authenticated user', 403)
     }
 
     const plaintext = randomBytes(32).toString('hex')
@@ -165,10 +169,17 @@ export class PrismaUserStore implements UserRepository, RefreshTokenRepository {
     }
   }
 
-  async revokeByPlaintext (plaintextToken: string): Promise<void> {
+  async revokeByPlaintext (plaintextToken: string, expectedUserId?: string): Promise<void> {
     const hash = sha256(plaintextToken)
+    // Phase-10 T5: when a subject is supplied, only revoke a token that belongs
+    // to it. Scoping the WHERE by userId means a leaked token presented under a
+    // different identity matches nothing -- a no-op, not a cross-user logout.
     await this.prisma.refreshToken.updateMany({
-      where: { tokenHash: hash, revokedAt: null },
+      where: {
+        tokenHash: hash,
+        revokedAt: null,
+        ...(expectedUserId ? { userId: expectedUserId } : {}),
+      },
       data: { revokedAt: new Date() },
     })
   }

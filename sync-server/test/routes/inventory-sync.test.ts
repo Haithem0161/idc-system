@@ -291,3 +291,68 @@ test('inventory: note longer than 500 chars is rejected', async (t) => {
   assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
   assert.strictEqual(body.rejected[0].status_code, 422)
 })
+
+// --- Phase-10 T11: cross-tenant inventory isolation -------------------------
+
+test('T11: an adjustment from tenant B cannot read or overwrite tenant A inventory', async (t) => {
+  const app = await build(t)
+  const a = app as unknown as FastifyAppLike & {
+    entityStore: {
+      inventoryItems: Map<string, { id: string, quantity_on_hand: number, version: number, entity_id: string }>
+      upsertInventoryItem: (row: Record<string, unknown>) => Promise<unknown>
+    }
+  }
+
+  const TENANT_A = 'tenant-A'
+  const TENANT_B = 'tenant-B'
+  const itemId = '01900000-0000-7000-8000-0000000004AA'
+  const now = new Date().toISOString()
+
+  // Seed tenant A's inventory item with a known on-hand quantity.
+  await a.entityStore.upsertInventoryItem({
+    id: itemId,
+    name_ar: 'مادة',
+    name_en: 'Reagent',
+    unit: 'box',
+    quantity_on_hand: 42,
+    low_stock_threshold: 0,
+    is_active: true,
+    entity_id: TENANT_A,
+    version: 1,
+    created_at: now,
+    updated_at: now,
+    deleted_at: null,
+    origin_device_id: 'dev-A',
+  })
+  const before = a.entityStore.inventoryItems.get(itemId)
+  assert.ok(before, 'tenant A item must be seeded')
+  assert.strictEqual(before.quantity_on_hand, 42)
+  const beforeVersion = before.version
+
+  // Tenant B pushes a superadmin adjustment that references tenant A's item_id.
+  const bToken = app.jwt.sign({
+    sub: USER_ID,
+    email: 'superadmin@example.com',
+    entityId: TENANT_B,
+    role: 'superadmin',
+  })
+  const adjId = '01900000-0000-7000-8000-0000000002BB'
+  const res = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${bToken}`, 'x-device-id': 'dev-B' },
+    payload: {
+      ops: [jsonOp('01HZWP0000000000000000B001', 'inventory_adjustments', adjId,
+        adjustment(adjId, itemId, { entity_id: TENANT_B, by_user_id: USER_ID, reason: 'receive', delta: 100 }))],
+    },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+
+  // Tenant A's item must be UNTOUCHED: same quantity, same version. The
+  // cross-tenant recompute is a no-op because the item belongs to tenant A.
+  const after = a.entityStore.inventoryItems.get(itemId)
+  assert.ok(after)
+  assert.strictEqual(after.quantity_on_hand, 42, 'tenant A on-hand must NOT change')
+  assert.strictEqual(after.version, beforeVersion, 'tenant A item version must NOT change')
+  assert.strictEqual(after.entity_id, TENANT_A)
+})

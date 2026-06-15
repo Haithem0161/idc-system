@@ -9,6 +9,7 @@
     },
     "codes": {
       "NOT_AUTHENTICATED": "You are not signed in. Please log in to continue.",
+      "FORBIDDEN": "You do not have permission to perform this action.",
       "SESSION_EXPIRED": "Your session has expired. Please log in again.",
       "VALIDATION_ERROR": "Some of the information entered is invalid. Please review and try again.",
       "CONFLICT_PARKED": "This change conflicts with another and has been parked for review.",
