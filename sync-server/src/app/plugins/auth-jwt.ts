@@ -7,8 +7,16 @@ import { DomainError } from '../common/errors/domain'
 /**
  * JWT auth plugin.
  *
- * Production (`NODE_ENV=production`): RS256 only. `JWT_PUBLIC_KEY` must be a
- * PEM-encoded public key; the server refuses to boot otherwise.
+ * Production (`NODE_ENV=production`): RS256. The server SIGNS access/refresh
+ * tokens with `JWT_PRIVATE_KEY` and VERIFIES them with `JWT_PUBLIC_KEY` (both
+ * PEM-encoded). The desktop app verifies offline with the bundled public key.
+ * `JWT_PUBLIC_KEY` is mandatory; `JWT_PRIVATE_KEY` is mandatory for the server
+ * to issue tokens at all -- without it `/auth/login` cannot sign. The server
+ * refuses to boot if the public key is missing.
+ *
+ * When only `JWT_PUBLIC_KEY` is set (no private key), the plugin registers in
+ * VERIFY-ONLY mode -- useful for a future read-only replica, but `sign()` will
+ * throw. We log a warning so this is never a silent surprise in production.
  *
  * Non-production: falls back to HS256 with `JWT_SECRET` (>= 32 chars) for
  * local dev and the existing test fixtures. The phase-09 §3 rewrite ELIMINATED
@@ -17,20 +25,36 @@ import { DomainError } from '../common/errors/domain'
  */
 async function plugin (fastify: FastifyInstance): Promise<void> {
   const publicKey = process.env.JWT_PUBLIC_KEY
+  const privateKey = process.env.JWT_PRIVATE_KEY
   const sharedSecret = process.env.JWT_SECRET
   const isProd = process.env.NODE_ENV === 'production'
 
   if (publicKey && publicKey.trim().length > 0) {
-    await fastify.register(fjwt, {
-      secret: { public: publicKey },
-      verify: { algorithms: ['RS256'] },
-    })
+    if (privateKey && privateKey.trim().length > 0) {
+      // Full RS256: sign with the private key, verify with the public key.
+      await fastify.register(fjwt, {
+        secret: { private: privateKey, public: publicKey },
+        sign: { algorithm: 'RS256' },
+        verify: { algorithms: ['RS256'] },
+      })
+    } else {
+      // Verify-only: the server can validate tokens but NOT issue them. Any
+      // token-minting route (login/refresh) will throw on sign().
+      fastify.log.warn(
+        'JWT registered in VERIFY-ONLY mode (no JWT_PRIVATE_KEY). '
+        + 'Token issuance (login/refresh) will fail. Set JWT_PRIVATE_KEY to sign.'
+      )
+      await fastify.register(fjwt, {
+        secret: { public: publicKey },
+        verify: { algorithms: ['RS256'] },
+      })
+    }
   } else if (!isProd && sharedSecret && sharedSecret.length >= 32) {
     fastify.log.warn('JWT running in HS256 dev fallback. Set JWT_PUBLIC_KEY for production.')
     await fastify.register(fjwt, { secret: sharedSecret })
   } else {
     throw new Error(
-      'JWT plugin: production requires JWT_PUBLIC_KEY (RS256). '
+      'JWT plugin: production requires JWT_PUBLIC_KEY + JWT_PRIVATE_KEY (RS256). '
       + 'In non-production set JWT_SECRET to a 32+ char shared secret.'
     )
   }

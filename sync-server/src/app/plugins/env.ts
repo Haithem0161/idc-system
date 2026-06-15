@@ -21,6 +21,7 @@ const envSchema = {
     DATABASE_URL: { type: 'string', default: '' },
     REDIS_URL: { type: 'string', default: '' },
     JWT_PUBLIC_KEY: { type: 'string', default: '' },
+    JWT_PRIVATE_KEY: { type: 'string', default: '' },
     JWT_SECRET: { type: 'string', default: '' },
     JWT_ACCESS_TTL_SECONDS: { type: 'string', default: '900' },
     JWT_REFRESH_TTL_SECONDS: { type: 'string', default: '2592000' },
@@ -39,6 +40,7 @@ interface ConfigShape {
   DATABASE_URL: string
   REDIS_URL: string
   JWT_PUBLIC_KEY: string
+  JWT_PRIVATE_KEY: string
   JWT_SECRET: string
   JWT_ACCESS_TTL_SECONDS: string
   JWT_REFRESH_TTL_SECONDS: string

@@ -1,0 +1,70 @@
+# Production override for the sync-server stack.
+#
+# Usage (on the VPS, from sync-server/, with a filled .env alongside):
+#   docker compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d
+#
+# Why this file exists (the base docker-compose.yaml is dev-oriented):
+#   1. Every runtime var is enumerated EXPLICITLY here as ${VAR} so it reaches
+#      the container deterministically. The base compose only lists a subset and
+#      hardcodes NODE_ENV=development + a postgres:postgres password, neither of
+#      which a .env value can override on its own. We restate them here.
+#   2. Ports bind to 127.0.0.1 only -- nginx (443) is the sole public entry; the
+#      Node server (3161) and Postgres (5432/5449) are never on the internet.
+#   3. The startup command runs PLAIN `prisma db push` (no --accept-data-loss),
+#      so a schema drift fails the boot instead of silently DROPPING prod data.
+#   4. restart: unless-stopped so the stack survives reboots.
+#
+# Compose auto-substitutes ${VAR} from ./.env, so a filled .env supplies the
+# values below. The :? guards fail fast if a critical var is missing. Verify the
+# merge before starting:
+#   docker compose -f docker-compose.yaml -f docker-compose.prod.yaml config
+#   (then after `up`)  docker exec idc-sync-server env | sort
+
+services:
+  sync-db:
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: idc_sync
+    ports:
+      - "127.0.0.1:5449:5432"
+    restart: unless-stopped
+
+  sync-server:
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      HOST: 0.0.0.0
+      PORT: 3161
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      REDIS_URL: ${REDIS_URL:-}
+      # RS256: server SIGNS with the private key, VERIFIES with the public key.
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?set JWT_PUBLIC_KEY in .env}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?set JWT_PRIVATE_KEY in .env}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
+      JWT_REFRESH_TTL_SECONDS: ${JWT_REFRESH_TTL_SECONDS:-2592000}
+      BOOTSTRAP_SUPERADMIN_EMAIL: ${BOOTSTRAP_SUPERADMIN_EMAIL:-}
+      BOOTSTRAP_SUPERADMIN_PASSWORD: ${BOOTSTRAP_SUPERADMIN_PASSWORD:-}
+      BOOTSTRAP_TENANT_ID: ${BOOTSTRAP_TENANT_ID:-}
+      DEFAULT_ENTITY_ID: ${DEFAULT_ENTITY_ID:-}
+      # Read by cors.ts as CORS_EXTRA_ORIGINS (the Tauri + localhost origins are
+      # always allowed; this adds extras). Empty is fine for the desktop app.
+      CORS_EXTRA_ORIGINS: ${CORS_EXTRA_ORIGINS:-}
+      SERVICE_API_KEY: ${SERVICE_API_KEY:-}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      MIN_CLIENT_VERSION: ${MIN_CLIENT_VERSION:-}
+    ports:
+      - "127.0.0.1:3161:3161"
+    restart: unless-stopped
+    # Safe schema sync: plain `db push` (NO --accept-data-loss). A drift that
+    # would drop data FAILS the boot instead of destroying it. Run a manual,
+    # reviewed migration in that case. init-custom-sql.sql still applies.
+    command:
+      - sh
+      - -c
+      - >-
+        pnpm prisma generate &&
+        pnpm prisma db push &&
+        psql "$DATABASE_URL" -f prisma/init-custom-sql.sql &&
+        pnpm exec fastify start -a 0.0.0.0 -p 3161 -l info dist/app/app.js

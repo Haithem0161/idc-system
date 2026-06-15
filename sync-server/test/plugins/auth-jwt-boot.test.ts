@@ -126,11 +126,12 @@ test('No source file references the removed \'dev-only-secret\' fallback (CI gre
 // DEF-007 G20: @fastify/jwt registered with RS256 keypair
 // =============================================================
 
-test('DEF-007 G20: JWT plugin signs with RS256 when JWT_PUBLIC_KEY is set', async () => {
-  // Generate an in-memory RSA keypair for this test. The plugin only
-  // accepts the public side at register-time; we set the private side
-  // on the fastify instance afterwards so `app.jwt.sign` can mint a
-  // token without us shipping a real keypair file.
+test('DEF-007 G20: JWT plugin signs AND verifies with RS256 when both keys are set', async () => {
+  // The production server signs its OWN tokens (auth-services.ts -> fastify
+  // .jwt.sign). So the plugin MUST register the private key, not just the
+  // public one. This test mints a token through the PLUGIN's own
+  // `fastify.jwt.sign` (the real login path) -- if the plugin were
+  // verify-only, sign() would throw, which is exactly the bug this guards.
   const { generateKeyPairSync, createPrivateKey } = await import('node:crypto')
   const { publicKey, privateKey } = generateKeyPairSync('rsa', {
     modulusLength: 2048,
@@ -142,61 +143,67 @@ test('DEF-007 G20: JWT plugin signs with RS256 when JWT_PUBLIC_KEY is set', asyn
   try {
     process.env.NODE_ENV = 'production'
     process.env.JWT_PUBLIC_KEY = publicKey
+    process.env.JWT_PRIVATE_KEY = privateKey
     delete process.env.JWT_SECRET
 
-    const fastify = Fastify({ logger: false })
+    const fastify = Fastify({ logger: false }) as FastifyInstance & {
+      jwt: { sign: (p: object) => string, verify: (t: string) => unknown }
+    }
     const plugin = await loadJwtPlugin()
-    // Override the @fastify/jwt registration so we have BOTH keys for
-    // signing in the test (the production plugin only loads the public
-    // half because production servers don't sign locally -- a separate
-    // auth service does). We piggy-back on the plugin's normal boot
-    // path to assert it accepted JWT_PUBLIC_KEY in RS256 form, then
-    // sign with the matching private key to verify the header carries
-    // `alg: RS256`.
     await fastify.register(fp(plugin, { name: 'auth-jwt-test-rs256' }))
     await fastify.ready()
     assert.strictEqual(typeof fastify.authenticate, 'function')
 
-    // Mint a token externally using the private half and verify the
-    // header alg is RS256. The `jsonwebtoken` package's ESM import shape
-    // surfaces sign/verify via `default` under Node ESM but bare-named
-    // when consumed via CommonJS interop; we read defensively.
-    type JwtSign = (
-      payload: object,
-      secret: string,
-      opts: { algorithm: 'RS256' },
-    ) => string
-    type JwtVerify = (
-      token: string,
-      secret: string,
-      opts: { algorithms: Array<'RS256'> },
-    ) => unknown
-    const jwtModule = (await import('jsonwebtoken')) as unknown as {
-      default?: { sign: JwtSign, verify: JwtVerify }
-      sign?: JwtSign
-      verify?: JwtVerify
-    }
-    const jwtSign = (jwtModule.default?.sign ?? jwtModule.sign) as JwtSign
-    const jwtVerify = (jwtModule.default?.verify ?? jwtModule.verify) as JwtVerify
-    const token = jwtSign({ sub: 'test' }, privateKey, { algorithm: 'RS256' })
-    const headerB64 = token.split('.')[0]
-    const header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8')) as {
-      alg: string
-      typ: string
-    }
+    // Sign through the plugin itself -- this is the production token-issuance
+    // path. It throws if no private key is registered.
+    const token = fastify.jwt.sign({ sub: 'test', email: 'a@b.c', entityId: 'e1' })
+    const header = JSON.parse(
+      Buffer.from(token.split('.')[0], 'base64url').toString('utf8')
+    ) as { alg: string }
     assert.strictEqual(header.alg, 'RS256', 'token header MUST be RS256')
 
-    // And verify with the public key via the same lib (so we know the
-    // PEM round-trip works against the plugin's loaded key material).
-    const claims = jwtVerify(token, publicKey, { algorithms: ['RS256'] }) as {
-      sub: string
-    }
+    // And the plugin verifies its own token with the public half.
+    const claims = fastify.jwt.verify(token) as { sub: string }
     assert.strictEqual(claims.sub, 'test')
 
-    // Ensure the private key parses as RSA-2048 (defense against a
-    // future refactor that silently downgrades modulus length).
-    const keyObj = createPrivateKey(privateKey)
-    assert.strictEqual(keyObj.asymmetricKeyType, 'rsa')
+    // Defense against a future refactor that silently downgrades modulus.
+    assert.strictEqual(createPrivateKey(privateKey).asymmetricKeyType, 'rsa')
+
+    await fastify.close()
+  } finally {
+    process.env = prev
+  }
+})
+
+test('DEF-007 G20b: production with only JWT_PUBLIC_KEY is VERIFY-ONLY (sign throws)', async () => {
+  // Without the private key the plugin still boots (a read-only replica is a
+  // valid shape) but token issuance must fail loudly rather than silently
+  // mint unsigned/HS256 tokens.
+  const { generateKeyPairSync } = await import('node:crypto')
+  const { publicKey } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  })
+
+  const prev = { ...process.env }
+  try {
+    process.env.NODE_ENV = 'production'
+    process.env.JWT_PUBLIC_KEY = publicKey
+    delete process.env.JWT_PRIVATE_KEY
+    delete process.env.JWT_SECRET
+
+    const fastify = Fastify({ logger: false }) as FastifyInstance & {
+      jwt: { sign: (p: object) => string }
+    }
+    const plugin = await loadJwtPlugin()
+    await fastify.register(fp(plugin, { name: 'auth-jwt-test-verifyonly' }))
+    await fastify.ready()
+
+    assert.throws(
+      () => fastify.jwt.sign({ sub: 'test', email: 'a@b.c', entityId: 'e1' }),
+      'verify-only registration MUST NOT be able to sign tokens'
+    )
 
     await fastify.close()
   } finally {
