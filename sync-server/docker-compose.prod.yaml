@@ -26,7 +26,11 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: idc_sync
-    ports:
+    # !override REPLACES the base compose's ports list instead of appending to
+    # it. Compose merges `ports` ADDITIVELY by default; without this the base
+    # "5449:5432" (binds 0.0.0.0, all interfaces) would coexist with the
+    # localhost binding below and expose Postgres to the internet.
+    ports: !override
       - "127.0.0.1:5449:5432"
     restart: unless-stopped
 
@@ -54,7 +58,9 @@ services:
       SERVICE_API_KEY: ${SERVICE_API_KEY:-}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       MIN_CLIENT_VERSION: ${MIN_CLIENT_VERSION:-}
-    ports:
+    # !override REPLACES the base compose's ports list (binds 0.0.0.0) with the
+    # localhost-only binding below. See the sync-db note above.
+    ports: !override
       - "127.0.0.1:3161:3161"
     restart: unless-stopped
     # Safe schema sync: plain `db push` (NO --accept-data-loss). A drift that

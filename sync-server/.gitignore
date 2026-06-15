@@ -3,6 +3,9 @@ logs
 *.log
 npm-debug.log*
 
+# Secrets: JWT keypair and any PEM must never be committed
+*.pem
+
 # Runtime data
 pids
 *.pid
