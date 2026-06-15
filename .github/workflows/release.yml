@@ -144,9 +144,10 @@ jobs:
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          # The signing key has no password; an explicit empty string keeps the
-          # signer non-interactive (a truly-unset var can make it prompt).
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          # The signing key is password-protected. tauri-cli 2.10's empty-password
+          # path is broken (it prompts even with --ci-generated keys), so the key
+          # carries a real password supplied here from a secret.
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --bundles ${{ matrix.bundles }}
 
       # Stage the updater artifact(s) for this platform: every .sig plus the

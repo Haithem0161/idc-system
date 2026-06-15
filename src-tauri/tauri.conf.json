@@ -48,7 +48,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFEMzc0QzY3RDVBNzA2NkIKUldSckJxZlZaMHczSFNENkJEUHlGbVJ6WkJ0aUkraDBYRUlLYVZyaldSWjdTV2p2OUNsSTdTcmUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJBNENCRkVEMkRDOTgyNjkKUldScGdza3Q3YjlNdXFoajFhLzZLOWErZzZKQkJoSUJkVDNxamFsVDFYM3E1L1N1Tm5DaGJSODIK",
       "endpoints": [
         "https://idc-release.madebyhaithem.com/idc/{{target}}/{{arch}}/latest.json"
       ]
