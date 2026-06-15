@@ -26,11 +26,15 @@ fi
 ok "no phase-04 forward-references"
 
 # Banner eprintln! in lib.rs embedded-mode block. Removed under NIT-3.
-step "Guardrail: no eprintln! / println! anywhere in src-tauri/src"
-if grep -rn -E "^[^/]*\\b(eprintln|println)!" src-tauri/src/ 2>/dev/null; then
+# Excludes src/bin/: standalone CLI tools (e.g. the seed_weekly seeder) write
+# operator-facing progress to stderr via eprintln! by design -- that is the
+# correct CLI idiom, not the in-runtime "use tracing" rule this guard enforces
+# for the app/library code that runs inside the Tauri webview.
+step "Guardrail: no eprintln! / println! in src-tauri/src (excluding src/bin/ CLI tools)"
+if grep -rn -E "^[^/]*\\b(eprintln|println)!" --exclude-dir=bin src-tauri/src/ 2>/dev/null; then
   fail "src-tauri/src contains eprintln!/println! (use tracing instead)"
 fi
-ok "no eprintln!/println! in src-tauri/src"
+ok "no eprintln!/println! in src-tauri/src (excluding src/bin/)"
 
 # 'dev-only-secret' literal in JWT plugin. Removed under BLOCKER-2; the
 # CI grep guardrail enforces it never reappears.

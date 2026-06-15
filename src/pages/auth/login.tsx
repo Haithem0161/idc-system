@@ -1,10 +1,11 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Navigate, useLocation, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 
 import { Logo } from "@/components/shell/logo"
-import { useHasAnyUser, useLogin } from "@/features/auth/queries"
+import { useLogin } from "@/features/auth/queries"
 import { useAuthStore } from "@/stores/auth-store"
+import { invoke, isTauri } from "@/lib/ipc"
 import { formatIpcError } from "@/lib/errors"
 import { AppErrorSchema } from "@/lib/schemas/error"
 
@@ -14,16 +15,43 @@ export default function LoginPage () {
   const location = useLocation()
   const state = useAuthStore((s) => s.state)
   const login = useLogin()
-  const hasAnyUser = useHasAnyUser()
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
 
+  // First-launch is gated on whether THIS machine has a sync server configured,
+  // not on a local user count: every fresh machine boots with an empty local DB,
+  // so gating on "has any local user" made each one think it was the first. A
+  // machine with no sync URL has never been set up -> send it to first-run,
+  // which asks the SERVER whether the clinic already has an admin.
+  // Resolves to true only in Tauri with no sync URL set. Seeded false outside
+  // Tauri (web/dev) so the effect can stay async-only and never setState in a
+  // synchronous early-return path.
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(() =>
+    isTauri() ? null : false,
+  )
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    invoke("config_get_sync_server_url")
+      .then((url) => {
+        if (!cancelled) setNeedsSetup(!url || url.trim().length === 0)
+      })
+      .catch(() => {
+        // A transient lookup failure is NOT "no URL" -- don't bounce to setup on
+        // a bootstrap hiccup; assume configured and let login surface real errors.
+        if (!cancelled) setNeedsSetup(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   if (state.kind === "authenticated") {
     return <Navigate to={(location.state as { from?: string } | null)?.from ?? "/"} replace />
   }
-  if (hasAnyUser.data === false) {
+  if (needsSetup === true) {
     return <Navigate to="/setup/first-run" replace />
   }
 

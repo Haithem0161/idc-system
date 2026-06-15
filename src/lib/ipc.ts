@@ -48,6 +48,14 @@ export type CommandMap = {
   auth_unlock: { args: { args: { password: string } }; result: null }
   auth_is_locked: { args: void; result: boolean }
   auth_has_any_user: { args: void; result: boolean }
+  // First-launch: ask the SERVER whether this clinic already has a user
+  // (superadmin). Drives the decision between "create first admin" (false) and
+  // "go to login" (true). An unreachable server rejects with NETWORK_OFFLINE so
+  // the UI blocks with a retry instead of offering a second "first" admin.
+  auth_bootstrap_status: {
+    args: { args: { server_url: string } }
+    result: boolean
+  }
   // DEF-007 G01: client-side token rotation. Reads the cached refresh
   // token from AppState, calls `/auth/refresh`, writes the new pair, and
   // fires the `auth:refreshed` Tauri event.

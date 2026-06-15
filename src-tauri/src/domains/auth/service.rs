@@ -316,6 +316,88 @@ impl AuthService {
         Ok(())
     }
 
+    /// Ask the sync server whether this clinic already has a user
+    /// (superadmin). A fresh desktop machine calls this AFTER the sync URL is
+    /// set to decide between "create the first administrator" (`false`) and
+    /// "go straight to login" (`true`). The server -- not the local DB -- is
+    /// authoritative: every machine boots with an empty local DB, so gating on
+    /// the local count would make every machine think it is the first one.
+    ///
+    /// An unreachable server surfaces as `AppError::Network`, which the UI maps
+    /// to a "can't reach the sync server" block-with-retry screen (a brand-new
+    /// client genuinely cannot proceed without the server once).
+    pub async fn remote_bootstrap_status(&self, server_url: &str) -> AppResult<bool> {
+        let url = format!("{}/auth/bootstrap-status", server_url.trim_end_matches('/'));
+        let resp = self.http.get(&url).send().await?; // reqwest::Error -> Network/SyncUnavailable
+        if !resp.status().is_success() {
+            return Err(AppError::SyncUnavailable(format!(
+                "bootstrap-status returned {}",
+                resp.status()
+            )));
+        }
+        #[derive(serde::Deserialize)]
+        struct StatusBody {
+            initialized: bool,
+        }
+        let body: StatusBody = resp.json().await?;
+        Ok(body.initialized)
+    }
+
+    /// Server-authoritative first-admin creation. Unlike
+    /// [`Self::bootstrap_remote_superadmin`] (best-effort, local-first), this
+    /// REQUIRES the server round-trip to succeed and lets the SERVER assign the
+    /// tenant: the client sends no `entityId`, and the server stamps its
+    /// configured `DEFAULT_ENTITY_ID`. Returns the server-assigned
+    /// `(id, entity_id)` so the caller can persist the local row under the
+    /// correct scope. A 409 means the clinic already has an admin (the caller
+    /// should have been routed to login, not here) and surfaces as a conflict.
+    pub async fn bootstrap_remote_superadmin_strict(
+        &self,
+        server_url: &str,
+        id: Uuid,
+        email: &str,
+        name: &str,
+        password: &str,
+    ) -> AppResult<(Uuid, String)> {
+        let url = format!(
+            "{}/auth/bootstrap-superadmin",
+            server_url.trim_end_matches('/')
+        );
+        // No entityId: the server owns tenancy (DEFAULT_ENTITY_ID).
+        let resp = self
+            .http
+            .post(&url)
+            .json(&serde_json::json!({
+                "id": id.to_string(),
+                "email": email,
+                "name": name,
+                "password": password,
+            }))
+            .send()
+            .await?; // reqwest::Error -> Network -> UI blocks with retry
+        let status = resp.status();
+        if status == reqwest::StatusCode::CONFLICT {
+            return Err(AppError::Conflict(
+                "this clinic already has an administrator; sign in instead".into(),
+            ));
+        }
+        if !status.is_success() {
+            let detail = resp.text().await.unwrap_or_default();
+            return Err(AppError::SyncUnavailable(format!(
+                "bootstrap-superadmin returned {status}: {detail}"
+            )));
+        }
+        #[derive(serde::Deserialize)]
+        struct BootstrapOk {
+            id: String,
+            #[serde(rename = "entityId")]
+            entity_id: String,
+        }
+        let body: BootstrapOk = resp.json().await?;
+        let assigned_id = Uuid::parse_str(&body.id).unwrap_or(id);
+        Ok((assigned_id, body.entity_id))
+    }
+
     /// Best-effort: register the same superadmin on the sync server so the
     /// sync engine can authenticate. Returns `Ok(())` when the server already
     /// has users (409) or is unreachable -- the local bootstrap stands on its

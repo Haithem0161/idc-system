@@ -139,19 +139,36 @@ async fn rig(server_url: Option<&str>) -> Rig {
     }
 }
 
+/// Seed a logged-in local superadmin for tests that need an authenticated
+/// actor (refresh, change-password, etc.).
+///
+/// This deliberately seeds LOCALLY via the service's `create_first_admin` +
+/// an offline login, rather than the `users_create_first_admin_impl` command.
+/// The command is now SERVER-AUTHORITATIVE (it POSTs to `/auth/bootstrap-
+/// superadmin` and requires success when a sync URL is set); a rig pointed at a
+/// MockServer that only mocks `/auth/refresh` would 404 on bootstrap. These
+/// tests only need a local logged-in admin, so we create one directly. The
+/// server-first bootstrap path itself is covered by `bootstrap_creates_*` tests
+/// (with the bootstrap endpoint mocked) and the live roundtrip gate.
 async fn bootstrap_superadmin(rig: &Rig) -> String {
-    let user = users_create_first_admin_impl(
+    let svc = rig.state.auth_service().expect("auth service");
+    let user = svc
+        .create_first_admin("admin@idc.io", "Mariam", "admin-pass", "tenant-1")
+        .await
+        .unwrap();
+    // Mirror the command's post-create state: log in offline so a current user
+    // + (offline) session exists for the refresh/change-password assertions.
+    auth_login_impl(
         &rig.state,
-        FirstAdminArgs {
+        LoginArgs {
             email: "admin@idc.io".into(),
-            name: "Mariam".into(),
             password: "admin-pass".into(),
-            entity_id: Some("tenant-1".into()),
+            entity_id_hint: Some("tenant-1".into()),
         },
     )
     .await
     .unwrap();
-    user.id
+    user.id.to_string()
 }
 
 // --- auth_login ----------------------------------------------------------

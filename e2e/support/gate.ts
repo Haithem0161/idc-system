@@ -20,10 +20,16 @@
 //      config has a single tauri-driver lifecycle and the binary
 //      mutates the same app-data SQLite across specs).
 //   3. For multi-device: TWO binaries running side-by-side against a
-//      shared sync-server stack. The wdio config currently spins a
-//      single instance; multi-device specs spin a second via a child
-//      process inside the spec body. They are gated by MULTI_DEVICE=true
-//      so the default CI path stays single-device.
+//      shared sync-server stack. The base wdio config spins a single
+//      instance (device A = the global `browser`); the multi-device
+//      specs spin a SECOND binary with an isolated app-data dir via
+//      support/multi-device.ts (its own tauri-driver on a private port
+//      + a private XDG_DATA_HOME), driven through support/sync-driver.ts.
+//      They are gated by MULTI_DEVICE=true so the default CI path stays
+//      single-device. Requires a reachable sync server -- point both
+//      devices at it with E2E_SYNC_URL and supply E2E_LOGIN_EMAIL /
+//      E2E_LOGIN_PASSWORD / E2E_TENANT_ID (defaults match the
+//      sync-server roundtrip gate's bootstrap admin).
 //
 // Until (1) and (2) are wired into the wdio onPrepare/beforeSpec
 // hooks, the full §4 specs are gated by `RUN_FULL_E2E=true` -- the

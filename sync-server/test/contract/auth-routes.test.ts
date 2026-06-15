@@ -229,7 +229,18 @@ test('BootstrapBody accepts a canonical first-admin bootstrap payload', () => {
   assert.equal(Value.Check(BootstrapBody, body), true)
 })
 
-test('BootstrapBody rejects empty name or empty entityId', () => {
+test('BootstrapBody accepts a payload that OMITS entityId (server decides tenant)', () => {
+  // The single-clinic desktop flow sends no entityId; the server stamps its
+  // configured DEFAULT_ENTITY_ID. The schema must accept the omission.
+  const body = {
+    email: 'admin@idc.io',
+    name: 'Mariam',
+    password: 'admin-strong-789',
+  }
+  assert.equal(Value.Check(BootstrapBody, body), true)
+})
+
+test('BootstrapBody rejects empty name, or a present-but-empty entityId', () => {
   assert.equal(
     Value.Check(BootstrapBody, {
       email: 'admin@idc.io',
@@ -240,6 +251,7 @@ test('BootstrapBody rejects empty name or empty entityId', () => {
     false,
     'empty name',
   )
+  // entityId is optional, but if PRESENT it must be non-empty (minLength 1).
   assert.equal(
     Value.Check(BootstrapBody, {
       email: 'admin@idc.io',
@@ -248,7 +260,7 @@ test('BootstrapBody rejects empty name or empty entityId', () => {
       entityId: '',
     }),
     false,
-    'empty entityId',
+    'present-but-empty entityId',
   )
 })
 
@@ -268,16 +280,21 @@ test('BootstrapResponse accepts the canonical bootstrap response shape', () => {
     email: 'admin@idc.io',
     name: 'Mariam',
     role: 'superadmin',
+    // The server now echoes the assigned tenant so the client can persist the
+    // admin under the correct scope without having chosen it.
+    entityId: 'clinic-1',
   }
   assert.equal(Value.Check(BootstrapResponse, body), true)
 })
 
-test('BootstrapResponse rejects bodies missing any of the 4 fields', () => {
+test('BootstrapResponse rejects bodies missing any of the required fields', () => {
+  // Missing entityId (now part of the response contract) is rejected.
   assert.equal(
     Value.Check(BootstrapResponse, {
       id: '01HZ',
       email: 'admin@idc.io',
       name: 'Mariam',
+      role: 'superadmin',
     }),
     false,
   )

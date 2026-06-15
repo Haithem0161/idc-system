@@ -24,6 +24,7 @@ import {
   authKeys,
   useAuthRefresh,
   useBootstrapJwtKey,
+  useBootstrapStatus,
   useChangePassword,
   useCurrentUser,
   useFirstAdmin,
@@ -178,11 +179,11 @@ describe.each(directions)("Phase-02 §2.4 auth feature hooks (dir=%s)", (dir) =>
     mockOnce(userResponseFixture())
     const { wrapper } = makeWrapper()
     const { result } = renderHook(() => useFirstAdmin(), { wrapper })
+    // No entity_id: the server owns tenancy and stamps its DEFAULT_ENTITY_ID.
     result.current.mutate({
       email: "root@idc.io",
       name: "Root",
       password: "rootpass1",
-      entity_id: "tenant-1",
     })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(invoke).toHaveBeenCalledWith("users_create_first_admin", {
@@ -190,7 +191,6 @@ describe.each(directions)("Phase-02 §2.4 auth feature hooks (dir=%s)", (dir) =>
         email: "root@idc.io",
         name: "Root",
         password: "rootpass1",
-        entity_id: "tenant-1",
       },
     })
     const state = useAuthStore.getState().state
@@ -316,6 +316,18 @@ describe.each(directions)("Phase-02 §2.4 auth feature hooks (dir=%s)", (dir) =>
     renderHook(() => useHasAnyUser(), { wrapper })
     await waitFor(() => expect(invoke).toHaveBeenCalled())
     expect(invoke).toHaveBeenCalledWith("auth_has_any_user")
+  })
+
+  it("useBootstrapStatus asks the SERVER (auth_bootstrap_status) with the URL", async () => {
+    mockOnce(false)
+    const { wrapper } = makeWrapper()
+    const { result } = renderHook(() => useBootstrapStatus(), { wrapper })
+    result.current.mutate("https://sync.example")
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toBe(false)
+    expect(invoke).toHaveBeenCalledWith("auth_bootstrap_status", {
+      args: { server_url: "https://sync.example" },
+    })
   })
 
   // --- DEF-007 G30: useCurrentUser ---------------------------------------

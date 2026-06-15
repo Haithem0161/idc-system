@@ -37,15 +37,25 @@ export interface TokenSigner {
 export class AuthService {
   private readonly accessTtlSec: number
   private readonly refreshTtlSec: number
+  // Server-authoritative tenant for the single-clinic desktop flow: when a
+  // bootstrap call omits entityId, the admin is stamped with this. Empty means
+  // the caller MUST supply one (multi-tenant / misconfigured server).
+  private readonly defaultEntityId: string
 
   constructor (
     private readonly users: UserRepository,
     private readonly tokens: RefreshTokenRepository,
     private readonly signer: TokenSigner,
-    ttl?: { accessTtlSec?: number; refreshTtlSec?: number }
+    opts?: { accessTtlSec?: number; refreshTtlSec?: number; defaultEntityId?: string }
   ) {
-    this.accessTtlSec = ttl?.accessTtlSec ?? DEFAULT_ACCESS_TOKEN_TTL_SEC
-    this.refreshTtlSec = ttl?.refreshTtlSec ?? DEFAULT_REFRESH_TOKEN_TTL_SEC
+    this.accessTtlSec = opts?.accessTtlSec ?? DEFAULT_ACCESS_TOKEN_TTL_SEC
+    this.refreshTtlSec = opts?.refreshTtlSec ?? DEFAULT_REFRESH_TOKEN_TTL_SEC
+    this.defaultEntityId = (opts?.defaultEntityId ?? '').trim()
+  }
+
+  /** True once any user exists -- drives the desktop first-launch decision. */
+  async isInitialized (): Promise<boolean> {
+    return (await this.users.count()) > 0
   }
 
   async login (
@@ -175,7 +185,7 @@ export class AuthService {
     email: string,
     name: string,
     password: string,
-    entityId: string,
+    entityId: string | undefined,
     id?: string
   ): Promise<UserRecord> {
     if ((await this.users.count()) > 0) {
@@ -192,6 +202,17 @@ export class AuthService {
         422
       )
     }
+    // The server owns tenancy: prefer an explicit entityId, else stamp the
+    // configured default. If neither is present the server is misconfigured for
+    // bootstrap -- fail loud rather than create an unscoped admin.
+    const tenant = (entityId ?? '').trim() || this.defaultEntityId
+    if (!tenant) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'no entityId supplied and DEFAULT_ENTITY_ID is not configured on the server',
+        422
+      )
+    }
     const hashStr = await argonHash(password)
     return this.users.create({
       id: id ?? randomUUID(),
@@ -199,7 +220,7 @@ export class AuthService {
       name,
       passwordHash: hashStr,
       role: 'superadmin',
-      entityId,
+      entityId: tenant,
     })
   }
 

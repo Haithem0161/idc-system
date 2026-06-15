@@ -456,6 +456,36 @@ pub async fn auth_has_any_user(state: State<'_, AppState>) -> AppResult<bool> {
     auth_has_any_user_impl(&state).await
 }
 
+/// Query the sync server for whether this clinic already has a user. Drives the
+/// desktop first-launch decision: `false` -> show "create first administrator",
+/// `true` -> go to login. An unreachable server returns `AppError::Network`
+/// (`NETWORK_OFFLINE`) so the UI can block with a retry rather than offer to
+/// create a second "first" admin from an empty local DB.
+pub async fn auth_bootstrap_status_impl(state: &AppState, server_url: String) -> AppResult<bool> {
+    let svc = state
+        .auth_service()
+        .ok_or_else(|| AppError::Configuration("auth service unavailable".into()))?;
+    let url = server_url.trim();
+    if url.is_empty() {
+        return Err(AppError::Validation("sync server URL is required".into()));
+    }
+    svc.remote_bootstrap_status(url).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BootstrapStatusArgs {
+    pub server_url: String,
+}
+
+#[tauri::command]
+#[instrument(skip(state))]
+pub async fn auth_bootstrap_status(
+    state: State<'_, AppState>,
+    args: BootstrapStatusArgs,
+) -> AppResult<bool> {
+    auth_bootstrap_status_impl(&state, args.server_url).await
+}
+
 pub async fn users_create_first_admin_impl(
     state: &AppState,
     args: FirstAdminArgs,
@@ -463,53 +493,78 @@ pub async fn users_create_first_admin_impl(
     let svc = state
         .auth_service()
         .ok_or_else(|| AppError::Configuration("auth service unavailable".into()))?;
+
+    let server_url = state.sync_server_url().await.filter(|u| !u.is_empty());
+
+    // Server-authoritative path: the server is the single origin of the first
+    // admin AND of tenancy. We POST the bootstrap (no entityId -- the server
+    // stamps its DEFAULT_ENTITY_ID), REQUIRE success, then run the normal online
+    // login which materializes the local row under the server-assigned scope and
+    // caches the tokens. This is what stops every fresh machine from creating its
+    // own "first" admin: a second machine's bootstrap gets a 409 and is routed to
+    // login instead. The UI only reaches this command after `auth_bootstrap_status`
+    // reported the clinic is uninitialized, so a 409 here is a rare benign race.
+    if let Some(server_url) = server_url {
+        let (_assigned_id, assigned_entity_id) = svc
+            .bootstrap_remote_superadmin_strict(
+                &server_url,
+                uuid::Uuid::now_v7(),
+                &args.email,
+                &args.name,
+                &args.password,
+            )
+            .await?;
+        // Log in online with the server-assigned scope; the JWT carries the
+        // canonical entityId, so the hint is only a routing aid.
+        let result = svc
+            .login(
+                Some(&server_url),
+                &args.email,
+                &args.password,
+                &assigned_entity_id,
+            )
+            .await?;
+        if let (Some(token), Some(exp)) = (result.access_token, result.access_token_expires_at) {
+            state.set_current_token(token, exp.timestamp()).await;
+        }
+        state.set_refresh_token(result.refresh_token).await;
+        state
+            .set_current_user(UserContext {
+                user_id: result.user_id.to_string(),
+                entity_id: result.entity_id.clone(),
+                email: args.email.clone(),
+                name: Some(args.name.clone()),
+                role: result.role.to_string(),
+            })
+            .await;
+        // The online login materialized the local user row under the
+        // server-assigned scope; return it. Use the login's user_id (the server
+        // is canonical) rather than the locally-generated one.
+        let repo = state
+            .user_repo()
+            .ok_or_else(|| AppError::Configuration("user repo unavailable".into()))?;
+        let user = repo.get_by_id(result.user_id).await?.ok_or_else(|| {
+            AppError::Internal("first admin not materialized locally after login".into())
+        })?;
+        return Ok(user.into());
+    }
+
+    // No server configured (offline dev / safety net): fall back to the local
+    // bootstrap. The first-launch UI blocks before this path in production, so
+    // this only runs in a server-less dev build.
     let entity_id = args.entity_id.unwrap_or_else(|| "unscoped".to_string());
     let user = svc
         .create_first_admin(&args.email, &args.name, &args.password, &entity_id)
         .await?;
-
-    let ctx = UserContext {
-        user_id: user.id.to_string(),
-        entity_id: user.entity_id.clone(),
-        email: user.email.clone(),
-        name: Some(user.name.clone()),
-        role: user.role.to_string(),
-    };
-    state.set_current_user(ctx).await;
-
-    // Mirror the superadmin to the sync server (best-effort) and cache the
-    // JWT so the sync engine can authenticate. Failures here are non-fatal --
-    // the local bootstrap already succeeded.
-    if let Some(server_url) = state.sync_server_url().await {
-        if !server_url.is_empty() {
-            svc.bootstrap_remote_superadmin(
-                &server_url,
-                user.id,
-                &args.email,
-                &args.name,
-                &args.password,
-                &entity_id,
-            )
-            .await?;
-            match svc
-                .login(Some(&server_url), &args.email, &args.password, &entity_id)
-                .await
-            {
-                Ok(result) => {
-                    if let (Some(token), Some(exp)) =
-                        (result.access_token, result.access_token_expires_at)
-                    {
-                        state.set_current_token(token, exp.timestamp()).await;
-                    }
-                    state.set_refresh_token(result.refresh_token).await;
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "online login after bootstrap failed; sync will retry");
-                }
-            }
-        }
-    }
-
+    state
+        .set_current_user(UserContext {
+            user_id: user.id.to_string(),
+            entity_id: user.entity_id.clone(),
+            email: user.email.clone(),
+            name: Some(user.name.clone()),
+            role: user.role.to_string(),
+        })
+        .await;
     Ok(user.into())
 }
 

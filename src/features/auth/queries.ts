@@ -79,7 +79,8 @@ export function useUnlock () {
 export function useFirstAdmin () {
   const setAuthenticated = useAuthStore((s) => s.setAuthenticated)
   return useMutation({
-    mutationFn: async (input: { email: string; name: string; password: string; entity_id?: string }) => {
+    // No entity_id: the SERVER owns tenancy and stamps its DEFAULT_ENTITY_ID.
+    mutationFn: async (input: { email: string; name: string; password: string }) => {
       return invoke("users_create_first_admin", { args: input })
     },
     onSuccess: (user) => {
@@ -182,6 +183,19 @@ export function useHasAnyUser () {
     enabled: isTauri(),
     queryFn: () => invoke("auth_has_any_user"),
     refetchOnMount: "always",
+  })
+}
+
+// First-launch: ask the SERVER whether the clinic is already initialized.
+// Returns true if a superadmin exists (-> go to login), false otherwise
+// (-> create the first admin). Rejects with NETWORK_OFFLINE when the server
+// is unreachable so the caller can show a block-with-retry screen. A mutation
+// (not a query) because it is triggered explicitly once the URL is set and its
+// failure must surface to the UI rather than retry silently.
+export function useBootstrapStatus () {
+  return useMutation({
+    mutationFn: (serverUrl: string): Promise<boolean> =>
+      invoke("auth_bootstrap_status", { args: { server_url: serverUrl } }),
   })
 }
 

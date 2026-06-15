@@ -58,12 +58,24 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
       }
     },
   }
-  const auth = new AuthService(users, users, signer, { accessTtlSec, refreshTtlSec })
+  // Server-authoritative tenant for the single-clinic desktop flow. Prefer the
+  // canonical DEFAULT_ENTITY_ID; fall back to BOOTSTRAP_TENANT_ID so existing
+  // deployments that only set the latter keep working.
+  const defaultEntityId = (
+    fastify.config?.DEFAULT_ENTITY_ID ||
+    fastify.config?.BOOTSTRAP_TENANT_ID ||
+    ''
+  ).trim()
+  const auth = new AuthService(users, users, signer, {
+    accessTtlSec,
+    refreshTtlSec,
+    defaultEntityId,
+  })
 
   // Optional bootstrap from env (phase-02 §7.21).
   const bootEmail = process.env.BOOTSTRAP_SUPERADMIN_EMAIL
   const bootPassword = process.env.BOOTSTRAP_SUPERADMIN_PASSWORD
-  const bootTenant = process.env.BOOTSTRAP_TENANT_ID
+  const bootTenant = process.env.BOOTSTRAP_TENANT_ID || defaultEntityId
   if (bootEmail && bootPassword && bootTenant) {
     auth
       .bootstrapSuperadmin(bootEmail, 'Bootstrap Admin', bootPassword, bootTenant)

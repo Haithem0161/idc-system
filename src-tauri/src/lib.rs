@@ -25,9 +25,9 @@ use crate::domains::audit::service::{
     DiagnosticsService as DiagnosticsSvc,
 };
 use crate::domains::auth::commands::{
-    auth_bootstrap_jwt_key, auth_change_password, auth_current_user, auth_has_any_user,
-    auth_is_locked, auth_jwt_pinned_sha256, auth_lock, auth_login, auth_logout, auth_refresh,
-    auth_unlock, users_create, users_create_first_admin, users_get, users_list,
+    auth_bootstrap_jwt_key, auth_bootstrap_status, auth_change_password, auth_current_user,
+    auth_has_any_user, auth_is_locked, auth_jwt_pinned_sha256, auth_lock, auth_login, auth_logout,
+    auth_refresh, auth_unlock, users_create, users_create_first_admin, users_get, users_list,
     users_reset_password, users_soft_delete, users_update,
 };
 use crate::domains::auth::domain::repositories::UserRepo;
@@ -175,6 +175,7 @@ pub fn run() {
             auth_jwt_pinned_sha256,
             auth_current_user,
             auth_has_any_user,
+            auth_bootstrap_status,
             auth_lock,
             auth_unlock,
             auth_is_locked,

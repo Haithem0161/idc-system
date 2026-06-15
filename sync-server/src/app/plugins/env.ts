@@ -28,6 +28,10 @@ const envSchema = {
     BOOTSTRAP_SUPERADMIN_EMAIL: { type: 'string', default: '' },
     BOOTSTRAP_SUPERADMIN_PASSWORD: { type: 'string', default: '' },
     BOOTSTRAP_TENANT_ID: { type: 'string', default: '' },
+    // Canonical tenant the server stamps on bootstrap when the client omits
+    // entityId (single-clinic desktop flow). Falls back to BOOTSTRAP_TENANT_ID
+    // for backward compat with existing deployments.
+    DEFAULT_ENTITY_ID: { type: 'string', default: '' },
     METRICS_TOKEN: { type: 'string', default: '' },
     // Minimum client app version allowed to sync. A client whose
     // X-App-Version is below this is told to upgrade (426). Empty = no gate.
@@ -53,6 +57,7 @@ interface ConfigShape {
   BOOTSTRAP_SUPERADMIN_EMAIL: string
   BOOTSTRAP_SUPERADMIN_PASSWORD: string
   BOOTSTRAP_TENANT_ID: string
+  DEFAULT_ENTITY_ID: string
   METRICS_TOKEN: string
   MIN_CLIENT_VERSION: string
   MIN_CLIENT_SCHEMA_VERSION: string

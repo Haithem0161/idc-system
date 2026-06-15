@@ -62,7 +62,10 @@ export const BootstrapBody = Type.Object({
   email: Type.String({ format: 'email' }),
   name: Type.String({ minLength: 1 }),
   password: Type.String({ minLength: 8 }),
-  entityId: Type.String({ minLength: 1 }),
+  // Optional: the SERVER is authoritative for tenancy. When the client omits
+  // entityId (the single-clinic desktop flow), the server stamps the admin with
+  // its configured DEFAULT_ENTITY_ID. A multi-tenant caller may still pass one.
+  entityId: Type.Optional(Type.String({ minLength: 1 })),
 })
 
 export const BootstrapResponse = Type.Object({
@@ -70,6 +73,17 @@ export const BootstrapResponse = Type.Object({
   email: Type.String(),
   name: Type.String(),
   role: Type.String(),
+  // Echo the entityId the server actually assigned so the client can persist
+  // the row under the correct tenant scope without having chosen it.
+  entityId: Type.String(),
+})
+
+// Public read-only probe: does this clinic already have a user (superadmin)?
+// A fresh desktop machine calls this AFTER setting the sync URL to decide
+// whether to show "create first admin" (initialized=false) or jump to login
+// (initialized=true). No auth -- a brand-new machine has no token yet.
+export const BootstrapStatusResponse = Type.Object({
+  initialized: Type.Boolean(),
 })
 
 /// DEF-007 G08: client-side RS256 verifier reads this endpoint at boot
@@ -228,6 +242,22 @@ const routes: FastifyPluginAsync = async (fastify) => {
     },
   })
 
+  app.get('/auth/bootstrap-status', {
+    schema: {
+      tags: ['auth'],
+      summary: 'Whether this clinic already has a user (drives desktop first-launch)',
+      description:
+        'Public read-only probe. Returns `{ initialized: true }` once any user ' +
+        'exists, so a fresh desktop machine knows to go straight to login instead ' +
+        'of offering to create a first administrator. No authentication required.',
+      response: { 200: BootstrapStatusResponse, 500: ErrorRef },
+    },
+    handler: async () => {
+      const initialized = await fastify.authService.isInitialized()
+      return { initialized }
+    },
+  })
+
   app.post('/auth/bootstrap-superadmin', {
     schema: {
       tags: ['auth'],
@@ -248,6 +278,7 @@ const routes: FastifyPluginAsync = async (fastify) => {
         email: created.email,
         name: created.name,
         role: created.role,
+        entityId: created.entityId,
       }
     },
   })

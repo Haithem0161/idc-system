@@ -38,6 +38,39 @@ test('POST /auth/bootstrap-superadmin creates first user, refuses second', async
   assert.strictEqual(JSON.parse(second.payload).code, 'VALIDATION_ERROR')
 })
 
+test('GET /auth/bootstrap-status reports initialized=false then true', async (t) => {
+  const app = await build(t)
+
+  // Fresh server: no user yet -> a new desktop machine should offer first-admin.
+  const before = await app.inject({ method: 'GET', url: '/auth/bootstrap-status' })
+  assert.strictEqual(before.statusCode, 200, before.payload)
+  assert.strictEqual(JSON.parse(before.payload).initialized, false)
+
+  // After the first admin exists, every later machine must go straight to login.
+  await app.inject({
+    method: 'POST',
+    url: '/auth/bootstrap-superadmin',
+    payload: { email: 'first@example.com', name: 'First', password: 'hunter22', entityId: 'tenant-bs' },
+  })
+  const after = await app.inject({ method: 'GET', url: '/auth/bootstrap-status' })
+  assert.strictEqual(after.statusCode, 200, after.payload)
+  assert.strictEqual(JSON.parse(after.payload).initialized, true)
+})
+
+test('POST /auth/bootstrap-superadmin OMITTING entityId stamps the server default', async (t) => {
+  // No DEFAULT_ENTITY_ID/BOOTSTRAP_TENANT_ID in the test env -> the server has
+  // no fallback, so a tenant-less bootstrap is rejected 422 rather than creating
+  // an unscoped admin. (The positive "server stamps the default" path is proved
+  // by the live roundtrip gate, which runs with DEFAULT_ENTITY_ID set.)
+  const app = await build(t)
+  const res = await app.inject({
+    method: 'POST',
+    url: '/auth/bootstrap-superadmin',
+    payload: { email: 'noscope@example.com', name: 'NoScope', password: 'hunter22' },
+  })
+  assert.strictEqual(res.statusCode, 422, res.payload)
+})
+
 test('POST /auth/login returns tokens for valid credentials', async (t) => {
   const app = await buildWithBootstrap(t)
   const res = await app.inject({
