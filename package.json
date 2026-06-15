@@ -1,8 +1,9 @@
 {
   "name": "template",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
+  "packageManager": "pnpm@10.28.2",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -11,6 +12,7 @@
     "lint:i18n": "node tools/lint-i18n.mjs",
     "lint:rtl": "node tools/lint-rtl.mjs",
     "preview": "vite preview",
+    "release": "node tools/release.mjs",
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -19,12 +19,106 @@ The **one remaining step is operational, not code**: the `endpoints` URL in
 Until it points at a host that serves a signed manifest, `checkForUpdate()`
 short-circuits to a neutral "updates not available" state (it recognises the
 `.invalid` placeholder and does not surface a network error). Point it at a real
-host (steps 2–4 below) and the whole flow goes live with no further code change.
+host and the whole flow goes live with no further code change.
 
 This pairs with the server-side version gate (`MIN_CLIENT_VERSION`, see the
 `version-gate` plugin in `sync-server/`): the gate tells an outdated client to
 upgrade (HTTP 426 → in-app banner); the updater is how that client actually pulls
 the new binary.
+
+---
+
+## Release flow: `pnpm release` + GitHub Actions (recommended)
+
+The whole build → sign → deploy is automated. After the one-time setup below,
+cutting a release is a single local command:
+
+```bash
+pnpm release patch   # 0.1.0 -> 0.1.1   (also: minor, major)
+```
+
+That runs [`tools/release.mjs`](../tools/release.mjs): it bumps the three version
+fields (`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`) in
+lockstep, refreshes `Cargo.lock`, commits `chore(release): vX.Y.Z`, tags it, and
+pushes branch + tag **atomically**. The tag push triggers
+[`.github/workflows/release.yml`](../.github/workflows/release.yml):
+
+1. **build** (matrix: `ubuntu-22.04` + `windows-latest`) — `pnpm tauri build`
+   restricted to the one updater bundle per OS (AppImage / NSIS), signed with the
+   `TAURI_SIGNING_PRIVATE_KEY` secret. Asserts the tag == all three version
+   fields and that the endpoint host is not the placeholder, then uploads each
+   platform's bundle + `.sig` as an artifact.
+2. **deploy** (once, serialized) — runs [`tools/ci-deploy-release.sh`](../tools/ci-deploy-release.sh),
+   which writes a per-platform `latest.json` (signature read verbatim from the
+   `.sig`, every field `jq`-escaped) and rsyncs bundle + manifest to the VPS over
+   SSH — binary first, manifest last, so a client never sees a manifest pointing
+   at a not-yet-uploaded binary.
+
+The repo is **public**, so GitHub-hosted Linux + Windows runners are **free and
+unmetered**. No macOS runner (clinics are Windows + Linux x86_64 only).
+
+### One-time setup
+
+**A. VPS — create a least-privilege deploy user that owns only the docroot:**
+
+```bash
+# on the VPS, as an admin
+sudo adduser --disabled-password --gecos "" idcdeploy
+sudo mkdir -p /var/www/idc-updates/idc
+sudo chown -R idcdeploy:idcdeploy /var/www/idc-updates
+sudo chmod -R 755 /var/www/idc-updates
+sudo -u idcdeploy mkdir -p /home/idcdeploy/.ssh && sudo -u idcdeploy chmod 700 /home/idcdeploy/.ssh
+```
+
+Add the nginx `location /idc/` (see [`updater-nginx.conf.example`](./updater-nginx.conf.example))
+and a TLS cert for the host (`certbot`). The updater refuses plain HTTP.
+
+**B. Dedicated deploy SSH key (on your machine), authorize it on the VPS:**
+
+```bash
+ssh-keygen -t ed25519 -a 100 -N "" -C "idc-ci-deploy" -f ~/.ssh/idc_deploy_ed25519
+# append the PUBLIC key to the deploy user, ideally restricted:
+#   /home/idcdeploy/.ssh/authorized_keys  (one line)
+#   restrict,command="rrsync -wo /var/www/idc-updates" ssh-ed25519 AAAA...idc_deploy_ed25519
+```
+
+**C. Set the real releases host** in `src-tauri/tauri.conf.json` (replace
+`RELEASES_HOST_TODO.invalid`) and commit. CI fails the build if the placeholder
+is still present, because the host is baked into the signed binary.
+
+```jsonc
+"endpoints": [ "https://<your-host>/idc/{{target}}/{{arch}}/latest.json" ]
+```
+
+**D. GitHub repository secrets** (Settings → Secrets and variables → Actions, or
+`gh secret set`). Pipe key files via stdin to avoid paste/CRLF mangling:
+
+| Secret | Contents | How |
+|-|-|-|
+| `TAURI_SIGNING_PRIVATE_KEY` | the minisign private key | `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.idc/updater.key` |
+| `DEPLOY_SSH_KEY` | the deploy **private** key | `gh secret set DEPLOY_SSH_KEY < ~/.ssh/idc_deploy_ed25519` |
+| `DEPLOY_KNOWN_HOSTS` | the VPS host key (pinned, MITM-safe) | `gh secret set DEPLOY_KNOWN_HOSTS < <(ssh-keyscan <your-host>)` — verify the fingerprint out-of-band first |
+| `UPDATE_HOST` | releases host, no scheme | `gh secret set UPDATE_HOST --body "<your-host>"` |
+| `DEPLOY_SSH_USER` | `idcdeploy` | `gh secret set DEPLOY_SSH_USER --body "idcdeploy"` |
+| `DEPLOY_SSH_HOST` | VPS ip/hostname | `gh secret set DEPLOY_SSH_HOST --body "1.2.3.4"` |
+| `DEPLOY_DOCROOT` | nginx docroot | `gh secret set DEPLOY_DOCROOT --body "/var/www/idc-updates"` |
+| `DEPLOY_SSH_PORT` | ssh port (optional; defaults to 22) | `gh secret set DEPLOY_SSH_PORT --body "22"` |
+
+The signing key has **no password**; the workflow sets
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""` inline (it is non-sensitive), so no
+empty-password secret is needed. `UPDATE_HOST` must equal the host you set in
+step C and the nginx `server_name`.
+
+After that, every release is just `pnpm release patch|minor|major`. Watch it in
+the repo's **Actions** tab.
+
+### Manual fallback (`tools/release-update.sh`)
+
+If you ever need to publish without CI (or test locally), the manual script
+below still works — it builds for the OS it runs on and scps to the VPS. The CI
+path supersedes it for normal releases.
+
+---
 
 ## 1. Signing keypair (DONE on this machine)
 
@@ -49,7 +143,7 @@ Replace the placeholder host in the existing `plugins.updater.endpoints` entry:
     "updater": {
       "pubkey": "<already set — do not change unless rotating keys>",
       "endpoints": [
-        "https://releases.example.com/idc/{{target}}/{{arch}}/{{current_version}}"
+        "https://releases.example.com/idc/{{target}}/{{arch}}/latest.json"
       ]
     }
   }

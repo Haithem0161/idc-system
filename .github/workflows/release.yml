@@ -1,0 +1,237 @@
+# IDC System release pipeline.
+#
+# Flow:
+#   1. Maintainer runs `pnpm release patch|minor|major` locally. That bumps the
+#      three version fields (package.json, tauri.conf.json, Cargo.toml) in
+#      lockstep, commits, tags vX.Y.Z, and pushes the tag.
+#   2. The tag push triggers this workflow. Job `build` compiles + SIGNS the
+#      Tauri v2 updater bundles for linux/x86_64 (AppImage) and windows/x86_64
+#      (NSIS) and uploads each platform's bundle + .sig as a workflow artifact.
+#   3. Job `deploy` runs once, pulls both artifacts, and runs
+#      tools/ci-deploy-release.sh, which writes per-platform latest.json and
+#      rsyncs everything to the VPS docroot over SSH.
+#
+# Prerequisites (one-time, see docs/UPDATER-SETUP.md):
+#   - src-tauri/tauri.conf.json bundle has "createUpdaterArtifacts": true
+#     (already set) so the .sig files are emitted.
+#   - The plugins.updater endpoint host in tauri.conf.json is the REAL releases
+#     host (not RELEASES_HOST_TODO.invalid) and equals the UPDATE_HOST secret --
+#     the host is baked into the signed binary at build time.
+#   - Repository secrets are set (see the "Secrets" section of UPDATER-SETUP.md).
+#
+# Billing: the repo is public, so GitHub-hosted Linux + Windows runners are free
+# and unmetered. No macOS runner (clinics are Windows + Linux x86_64 only).
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Manual runs are restricted to an existing vX.Y.Z tag (the version is read
+  # from the built artifact and asserted against this tag).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to build and deploy"
+        required: true
+
+# Least privilege: this workflow only reads the repo. It publishes to a VPS, not
+# to GitHub Releases, so it never needs write access to repo contents.
+permissions:
+  contents: read
+
+env:
+  # The version tag for this run, for both triggers.
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux
+            platform_key: linux-x86_64
+            bundles: appimage
+          - os: windows-latest
+            target: windows
+            platform_key: windows-x86_64
+            bundles: nsis
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          prefix-key: ${{ matrix.platform_key }}
+
+      - name: Install Tauri system dependencies (Linux)
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            libssl-dev \
+            libgtk-3-dev \
+            file
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The endpoint host is baked into the signed binary. If it is still the
+      # placeholder, the shipped app can never fetch an update -- fail loud.
+      - name: Assert updater endpoint is configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q "RELEASES_HOST_TODO.invalid" src-tauri/tauri.conf.json; then
+            echo "::error::tauri.conf.json still points at the RELEASES_HOST_TODO.invalid placeholder."
+            echo "::error::Set the real releases host (equal to the UPDATE_HOST secret) and commit before tagging."
+            exit 1
+          fi
+
+      # The tag, the bundled binary's version, and all three version files must
+      # agree. A mismatch would ship a binary whose internal version differs
+      # from the manifest -> the updater would loop. Fail before building.
+      - name: Assert versions match the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG#v}"
+          conf="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          pkg="$(node -p "require('./package.json').version")"
+          cargo="$(grep -m1 -A0 '^version' src-tauri/Cargo.toml | sed -E 's/.*\"([^\"]+)\".*/\1/')"
+          echo "tag=$tag conf=$conf pkg=$pkg cargo=$cargo"
+          for got in "$conf" "$pkg" "$cargo"; do
+            if [ "$got" != "$tag" ]; then
+              echo "::error::version mismatch: tag=$tag conf=$conf pkg=$pkg cargo=$cargo"
+              exit 1
+            fi
+          done
+
+      # Raw `tauri build` restricted to the single updater bundle for this OS,
+      # so target=all's extra outputs (.deb/.rpm/.msi) never appear and the
+      # deploy step finds exactly one .sig. Signing happens because the signing
+      # env is set and createUpdaterArtifacts is true.
+      - name: Build and sign bundle
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # The signing key has no password; an explicit empty string keeps the
+          # signer non-interactive (a truly-unset var can make it prompt).
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: pnpm tauri build --bundles ${{ matrix.bundles }}
+
+      # Stage the updater artifact(s) for this platform: every .sig plus the
+      # bundle it signs. Globbing the .sig avoids hardcoding the spaced
+      # productName ("IDC System") or the AppImage/-setup.nsis.zip extension.
+      - name: Stage signed updater artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staged
+          shopt -s globstar nullglob
+          count=0
+          for sig in src-tauri/target/release/bundle/**/*.sig; do
+            bundle="${sig%.sig}"
+            if [ ! -f "$bundle" ]; then
+              echo "::error::signature $sig has no sibling bundle"
+              exit 1
+            fi
+            cp "$sig" "$bundle" staged/
+            count=$((count + 1))
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No .sig files produced for ${{ matrix.platform_key }}."
+            echo "::error::Check createUpdaterArtifacts and the TAURI_SIGNING_PRIVATE_KEY secret."
+            exit 1
+          fi
+          echo "staged $count signed artifact(s):"
+          ls -la staged/
+
+      - name: Upload platform artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: staged/
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    needs: build
+    # Run if at least one build leg succeeded; skip cleanly on cancellation.
+    # (A partial matrix deploys what built; per-platform dirs keep the other
+    # platform's files untouched.)
+    if: ${{ !cancelled() && needs.build.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Serialize all deploys so two releases never race the latest.json flip on
+    # the VPS. A stable group (not per-ref) is what makes releases queue.
+    concurrency:
+      group: release-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Checkout (for tools/ci-deploy-release.sh)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      # Download every build artifact into ./artifacts/<linux|windows>/...
+      # (the build jobs upload with name: linux / name: windows).
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Load deploy key into ssh-agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      # Pin the VPS host key from a pre-verified secret (NOT live ssh-keyscan,
+      # which is trust-on-first-use and offers no MITM protection in CI).
+      - name: Pin VPS host key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Generate manifests and deploy to VPS
+        run: bash tools/ci-deploy-release.sh
+        env:
+          VERSION: ${{ env.RELEASE_TAG }}
+          ARTIFACTS_DIR: artifacts
+          UPDATE_HOST: ${{ secrets.UPDATE_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_DOCROOT: ${{ secrets.DEPLOY_DOCROOT }}
+          SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
