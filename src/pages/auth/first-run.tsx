@@ -4,18 +4,25 @@ import { useTranslation } from "react-i18next"
 
 import { Logo } from "@/components/shell/logo"
 import { invoke } from "@/lib/ipc"
-import { useFirstAdmin, useHasAnyUser } from "@/features/auth/queries"
+import { useBootstrapJwtKey, useFirstAdmin, useHasAnyUser } from "@/features/auth/queries"
+
+// Production sync server. Overridable at build time (VITE_SYNC_SERVER_URL) for
+// staging/dev so a local run can point at http://localhost:3161 without editing
+// this file. The user can still change it in the field below.
+const DEFAULT_SYNC_URL =
+  import.meta.env.VITE_SYNC_SERVER_URL ?? "https://idc-sync.madebyhaithem.com"
 
 export default function FirstRunPage () {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const hasAnyUser = useHasAnyUser()
   const firstAdmin = useFirstAdmin()
+  const bootstrapJwtKey = useBootstrapJwtKey()
   const [email, setEmail] = useState("")
   const [name, setName] = useState("")
   const [password, setPassword] = useState("")
   const [entityId, setEntityId] = useState("")
-  const [syncUrl, setSyncUrl] = useState("http://localhost:3161")
+  const [syncUrl, setSyncUrl] = useState(DEFAULT_SYNC_URL)
   const [error, setError] = useState<string | null>(null)
 
   if (hasAnyUser.data === true) {
@@ -29,6 +36,14 @@ export default function FirstRunPage () {
       const trimmedUrl = syncUrl.trim()
       if (trimmedUrl) {
         await invoke("config_set_sync_server_url", { url: trimmedUrl })
+        // Pin the server's RS256 public key now (TOFU) so the client can verify
+        // JWT signatures offline. Best-effort: a network hiccup here must not
+        // block first-run -- the key can be re-pinned later from the same URL.
+        try {
+          await bootstrapJwtKey.mutateAsync({ server_url: trimmedUrl })
+        } catch {
+          // Non-fatal: pinning will be retried on a later online action.
+        }
       }
       await firstAdmin.mutateAsync({
         email,
@@ -108,7 +123,7 @@ export default function FirstRunPage () {
                     type="url"
                     value={syncUrl}
                     onChange={(e) => setSyncUrl(e.target.value)}
-                    placeholder="http://localhost:3161"
+                    placeholder="https://idc-sync.madebyhaithem.com"
                     className="input"
                   />
                 </Field>

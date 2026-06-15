@@ -3,6 +3,12 @@ import { useTranslation } from "react-i18next"
 
 import { invoke, isTauri } from "@/lib/ipc"
 import { Logo } from "@/components/shell/logo"
+import { useBootstrapJwtKey } from "@/features/auth/queries"
+
+// Production sync server (overridable at build time for staging/dev). Mirrors
+// the default on the first-run page.
+const DEFAULT_SYNC_URL =
+  import.meta.env.VITE_SYNC_SERVER_URL ?? "https://idc-sync.madebyhaithem.com"
 
 /**
  * First-launch modal (phase-01 §7.22). Captures the sync server URL via the
@@ -11,8 +17,9 @@ import { Logo } from "@/components/shell/logo"
  */
 export function FirstLaunchSetup() {
   const { t } = useTranslation()
+  const bootstrapJwtKey = useBootstrapJwtKey()
   const [open, setOpen] = useState(false)
-  const [url, setUrl] = useState("")
+  const [url, setUrl] = useState(DEFAULT_SYNC_URL)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -58,7 +65,15 @@ export function FirstLaunchSetup() {
     setSubmitting(true)
     setError(null)
     try {
-      await invoke("config_set_sync_server_url", { url: url.trim() })
+      const trimmedUrl = url.trim()
+      await invoke("config_set_sync_server_url", { url: trimmedUrl })
+      // Pin the server's RS256 public key (TOFU) for offline JWT verification.
+      // Best-effort: a network hiccup must not block setup -- re-pinned later.
+      try {
+        await bootstrapJwtKey.mutateAsync({ server_url: trimmedUrl })
+      } catch {
+        // Non-fatal: pinning retried on a later online action.
+      }
       setOpen(false)
     } catch (err) {
       setError(
@@ -104,7 +119,7 @@ export function FirstLaunchSetup() {
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://sync.example.com"
+              placeholder="https://idc-sync.madebyhaithem.com"
               className="input"
               required
               autoFocus

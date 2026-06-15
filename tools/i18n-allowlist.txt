@@ -76,6 +76,9 @@ ReturnType
 # Not user-facing -- assertion regex input only.
 حلّ
 
-# Default dev-mode sync server URL shown as input placeholder on first-run
-# bootstrap. Locale-invariant by design (URLs aren't translated).
+# Sync server URLs shown as input placeholders on the first-run / first-launch
+# setup screens. Locale-invariant by design (URLs aren't translated). The https
+# one is the production default (idc-sync.madebyhaithem.com); the http one is
+# the local dev fallback.
 http://localhost:3161
+https://idc-sync.madebyhaithem.com
