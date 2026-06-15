@@ -171,8 +171,32 @@ pub async fn auth_login(
     args: LoginArgs,
 ) -> AppResult<LoginResult> {
     let result = auth_login_impl(&state, args).await?;
+    // DEF-007 G20/G21: verify the just-issued access token's RS256 signature
+    // against the pinned public key. A forged token (compromised/MITM server)
+    // is rejected here: we clear the half-established session and fail closed.
+    if let Err(e) = verify_login_token(&app, &state).await {
+        state.clear_auth().await;
+        let _ = app.emit("auth:changed", "logout");
+        return Err(e);
+    }
     let _ = app.emit("auth:changed", &result.mode);
     Ok(result)
+}
+
+/// Verify the access token currently in `AppState` against the pinned key.
+/// Shared by `auth_login` and `auth_refresh`. A missing token (offline login
+/// mode that issued no access token) is not an error -- there is nothing to
+/// verify until one is obtained online.
+async fn verify_login_token(app: &AppHandle, state: &AppState) -> AppResult<()> {
+    let token = match state.get_current_token().await {
+        Some(t) => t,
+        None => return Ok(()),
+    };
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Internal(format!("app_data_dir: {e}")))?;
+    verify_access_token_against_pin(Some(&app_data_dir), &token)
 }
 
 #[tauri::command]
@@ -537,6 +561,14 @@ pub async fn auth_refresh(
     state: State<'_, AppState>,
 ) -> AppResult<AuthRefreshedEvent> {
     let event = auth_refresh_impl(&state).await?;
+    // DEF-007 G20/G21: same pinned-key signature check as login. A rotated
+    // token that does not verify against the pinned key is rejected and the
+    // session is cleared.
+    if let Err(e) = verify_login_token(&app, &state).await {
+        state.clear_auth().await;
+        let _ = app.emit("auth:changed", "logout");
+        return Err(e);
+    }
     let _ = app.emit("auth:refreshed", &event);
     Ok(event)
 }
@@ -634,6 +666,37 @@ pub fn auth_pinned_jwt_key_sha256(app_data_dir: &std::path::Path) -> AppResult<O
     Ok(Some(verifier.pinned_bytes_sha256_hex()))
 }
 
+/// DEF-007 G20/G21 enforcement: verify a freshly-received access token's RS256
+/// signature against the PINNED public key before the app trusts it.
+///
+/// Semantics, by design:
+/// - No pinned key yet (pre-bootstrap, e.g. very first launch): returns `Ok`.
+///   We cannot verify what we have not pinned; the bootstrap flow is responsible
+///   for establishing the pin. This keeps first-run working.
+/// - A pinned key exists and the token verifies: returns `Ok`.
+/// - A pinned key exists and the token FAILS (bad signature, alg-confusion,
+///   expired, malformed): returns `AppError::NotAuthenticated`. This is the
+///   security-meaningful case -- a tampered/forged token from a compromised or
+///   MITM'd server response is rejected instead of trusted.
+///
+/// `None` for `app_data_dir` (test/headless contexts without a managed app dir)
+/// is treated like "no pin": `Ok`. Production always passes the real dir.
+pub fn verify_access_token_against_pin(
+    app_data_dir: Option<&std::path::Path>,
+    token: &str,
+) -> AppResult<()> {
+    let dir = match app_data_dir {
+        Some(d) => d,
+        None => return Ok(()),
+    };
+    let pem = match read_pinned_pem(dir)? {
+        Some(p) => p,
+        None => return Ok(()), // no pin established yet -- nothing to verify against
+    };
+    let verifier = JwtVerifier::from_pem_bytes(&pem)?;
+    verifier.verify(token).map(|_claims| ())
+}
+
 #[tauri::command]
 #[instrument(skip(app, state, args))]
 pub async fn auth_bootstrap_jwt_key(
@@ -678,4 +741,78 @@ pub async fn auth_jwt_pinned_sha256(app: AppHandle) -> AppResult<Option<String>>
         .app_data_dir()
         .map_err(|e| AppError::Internal(format!("app_data_dir: {e}")))?;
     auth_pinned_jwt_key_sha256(&app_data_dir)
+}
+
+#[cfg(test)]
+mod pin_enforcement_tests {
+    use super::*;
+    use crate::domains::auth::infrastructure::jwt_verifier::IdcAuthClaims;
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+
+    // Reuse the committed deterministic test keypairs (same files the
+    // jwt_verifier suite pins). TEST is the "real" server key; OTHER is an
+    // attacker's key.
+    const TEST_PUBLIC_PEM: &[u8] = include_bytes!("./infrastructure/test_data/jwt_test_public.pem");
+    const TEST_PRIVATE_PEM: &[u8] =
+        include_bytes!("./infrastructure/test_data/jwt_test_private.pem");
+    const OTHER_PRIVATE_PEM: &[u8] =
+        include_bytes!("./infrastructure/test_data/jwt_other_private.pem");
+
+    fn mint(private_pem: &[u8]) -> String {
+        let header = Header::new(Algorithm::RS256);
+        let now = chrono::Utc::now().timestamp();
+        let claims = IdcAuthClaims {
+            sub: "user-1".into(),
+            email: "t@example.com".into(),
+            entity_id: "tenant-1".into(),
+            role: "superadmin".into(),
+            status: "active".into(),
+            is_superadmin: true,
+            iat: now - 5,
+            exp: now + 3600,
+        };
+        encode(
+            &header,
+            &claims,
+            &EncodingKey::from_rsa_pem(private_pem).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn accepts_token_signed_by_pinned_key() {
+        let dir = tempfile::tempdir().unwrap();
+        pin_public_key(dir.path(), TEST_PUBLIC_PEM).unwrap();
+        let token = mint(TEST_PRIVATE_PEM);
+        verify_access_token_against_pin(Some(dir.path()), &token)
+            .expect("token signed by the pinned key must verify");
+    }
+
+    #[test]
+    fn rejects_token_signed_by_a_different_key() {
+        // Pin the real server key; present a token forged with the attacker's
+        // key. This is the MITM / compromised-server case -- it MUST be rejected.
+        let dir = tempfile::tempdir().unwrap();
+        pin_public_key(dir.path(), TEST_PUBLIC_PEM).unwrap();
+        let forged = mint(OTHER_PRIVATE_PEM);
+        let err = verify_access_token_against_pin(Some(dir.path()), &forged)
+            .expect_err("a foreign-signed token must be rejected");
+        assert!(matches!(err, AppError::NotAuthenticated));
+    }
+
+    #[test]
+    fn no_pin_yet_is_a_noop() {
+        // Pre-bootstrap: nothing pinned. We cannot verify what we have not
+        // pinned, so this is Ok (first-run must still work).
+        let dir = tempfile::tempdir().unwrap();
+        verify_access_token_against_pin(Some(dir.path()), &mint(TEST_PRIVATE_PEM))
+            .expect("no pin established -> no verification -> Ok");
+    }
+
+    #[test]
+    fn none_dir_is_a_noop() {
+        // Headless/test context without a managed app dir.
+        verify_access_token_against_pin(None, &mint(OTHER_PRIVATE_PEM))
+            .expect("None app_data_dir -> Ok");
+    }
 }

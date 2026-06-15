@@ -532,8 +532,31 @@ async fn bootstrap(
                 let state = hook_app.state::<AppState>();
                 match crate::domains::auth::commands::auth_refresh_impl(&state).await {
                     Ok(_) => {
-                        let _ = hook_app.emit("auth:refreshed", ());
-                        state.get_current_token().await
+                        // DEF-007 G20/G21: verify the rotated token against the
+                        // pinned key on this path too. A forged token injected
+                        // via a MITM'd /auth/refresh is rejected -- treat as a
+                        // failed refresh (session expired) rather than handing a
+                        // bad token to the sync engine.
+                        let token = state.get_current_token().await;
+                        let verified = match (&token, hook_app.path().app_data_dir()) {
+                            (Some(tok), Ok(dir)) => {
+                                crate::domains::auth::commands::verify_access_token_against_pin(
+                                    Some(&dir),
+                                    tok,
+                                )
+                                .is_ok()
+                            }
+                            // No token or no app-dir: nothing to reject here.
+                            _ => true,
+                        };
+                        if verified {
+                            let _ = hook_app.emit("auth:refreshed", ());
+                            token
+                        } else {
+                            warn!("sync 401 refresh returned a token that failed pinned-key verification; session expired");
+                            state.clear_auth().await;
+                            None
+                        }
                     }
                     Err(e) => {
                         warn!(error = %e, "sync 401 refresh failed; session expired");
