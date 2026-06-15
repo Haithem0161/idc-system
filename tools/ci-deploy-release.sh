@@ -165,19 +165,24 @@ for row in "${PLATFORMS[@]}"; do
       platforms: { ($platform_key): { signature: $signature, url: $url } }
     }' > "$manifest"
 
-  remote_dir="${DEPLOY_DOCROOT}/idc/${target}/${ARCH}"
-  log "deploying ${platform_key}: ${bundle_name} -> ${SSH_TARGET}:${remote_dir}"
-
-  ssh -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes \
-    "$SSH_TARGET" "mkdir -p '${remote_dir}'"
+  # The VPS forces `rrsync -munge -wo $DEPLOY_DOCROOT` as the SSH command, which
+  # (1) rejects any non-rsync command -- so NO `ssh ... mkdir`: rrsync would
+  #     die("SSH_ORIGINAL_COMMAND does not run rsync"); rsync creates the dest
+  #     dirs itself on the receiving side, and
+  # (2) chdir's into $DEPLOY_DOCROOT and anchors every path there, rejecting
+  #     absolute paths and "..". So the rsync destination MUST be RELATIVE to the
+  #     docroot (an absolute path would get the docroot prepended -> doubled).
+  remote_dir="idc/${target}/${ARCH}"
+  log "deploying ${platform_key}: ${bundle_name} -> ${SSH_TARGET}:${DEPLOY_DOCROOT}/${remote_dir}"
 
   # STEP 1: binary first. No --delete (keep old bundles); --chmod=F644 so nginx
-  # (www-data) can read it regardless of the deploy user's umask.
-  rsync -a --chmod=F644 -e "$SSH_RSH" \
+  # (www-data) can read it regardless of the deploy user's umask. rsync creates
+  # the intermediate dirs on the server because the dest path includes them.
+  rsync -a --chmod=F644 --mkpath -e "$SSH_RSH" \
     "$bundle" "${SSH_TARGET}:${remote_dir}/${bundle_name}"
 
   # STEP 2: manifest last -- the flip that makes the new version live.
-  rsync -a --chmod=F644 -e "$SSH_RSH" \
+  rsync -a --chmod=F644 --mkpath -e "$SSH_RSH" \
     "$manifest" "${SSH_TARGET}:${remote_dir}/latest.json"
 
   log "published ${platform_key} ${VERSION} -> https://${UPDATE_HOST}/idc/${target}/${ARCH}/latest.json"
