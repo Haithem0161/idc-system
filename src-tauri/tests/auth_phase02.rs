@@ -129,6 +129,35 @@ async fn offline_login_succeeds_against_cached_user_when_no_server_url() {
     assert!(result.refresh_token.is_none());
 }
 
+// Regression: an admin created under a REAL tenant must be able to log in
+// offline even though the login form supplies no tenant hint (the IPC layer
+// defaults it to "unscoped"). Before the fix, offline_login did a
+// tenant-scoped get_by_email("...", "unscoped") which returned None for a row
+// stored under the real tenant -> NotAuthenticated, locking the user out
+// whenever the sync server was down. The fix resolves the tenant FROM the user
+// (find_by_email) when the hint is the unscoped default.
+#[tokio::test]
+async fn offline_login_resolves_real_tenant_when_hint_is_unscoped_default() {
+    let pool = fresh_pool().await;
+    let auth = make_auth(&pool, "dev-A");
+    let user = auth
+        .create_first_admin("root@idc.io", "Mariam", "12345678", "tenant-real")
+        .await
+        .unwrap();
+    assert_eq!(user.entity_id, "tenant-real");
+
+    // Server down (None) + the IPC default hint "unscoped" -- exactly what the
+    // app passes when the login form has no tenant field.
+    let result = auth
+        .login(None, "root@idc.io", "12345678", "unscoped")
+        .await
+        .unwrap();
+    assert_eq!(result.mode, LoginMode::Offline);
+    assert_eq!(result.user_id, user.id);
+    // The session must carry the user's actual tenant, not the hint.
+    assert_eq!(result.entity_id, "tenant-real");
+}
+
 #[tokio::test]
 async fn offline_login_normalizes_mixed_case_email_to_lowercase() {
     let pool = fresh_pool().await;

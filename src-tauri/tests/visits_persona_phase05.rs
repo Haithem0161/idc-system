@@ -150,6 +150,8 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
         notes: None,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
+        default_cut_kind: None,
+        default_cut_value: None,
     })
     .unwrap();
     let pricing = DoctorCheckPricing::try_new(DoctorPricingNewInput {
@@ -223,6 +225,7 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
     let patient_service = Arc::new(PatientService::new(
         pool.clone(),
         patient_repo.clone(),
+        visit_repo.clone(),
         audit.clone(),
         outbox.clone(),
         DEVICE_ID.to_string(),

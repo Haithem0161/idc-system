@@ -56,6 +56,18 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "011_purge_system_vacuum_outbox.sql",
         include_str!("../../migrations/011_purge_system_vacuum_outbox.sql"),
     ),
+    (
+        "012_patient_demographics.sql",
+        include_str!("../../migrations/012_patient_demographics.sql"),
+    ),
+    (
+        "013_patients_fts_restore_fix.sql",
+        include_str!("../../migrations/013_patients_fts_restore_fix.sql"),
+    ),
+    (
+        "014_doctor_default_cut.sql",
+        include_str!("../../migrations/014_doctor_default_cut.sql"),
+    ),
 ];
 
 /// The local sync schema version: the count of embedded migrations. Sent to the
@@ -253,6 +265,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(n, 10);
+
+        // Migration 012 added the 5 optional patient demographics columns
+        // (and re-running run() above must not have errored on duplicate
+        // ADD COLUMN -- the _migrations name-guard prevents re-application).
+        let (demo_cols,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('patients') \
+             WHERE name IN ('phone','sex','birth_date','file_no','notes')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(demo_cols, 5);
     }
 
     #[test]

@@ -336,6 +336,8 @@ async fn check_types_soft_delete_blocked_when_referenced_by_pricing() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -467,6 +469,8 @@ async fn doctors_create_persists_and_audits() {
                 specialty: Some("Cardio".into()),
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -495,6 +499,8 @@ async fn doctors_create_rejects_empty_name_after_trim() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await;
@@ -516,6 +522,8 @@ async fn doctors_update_re_indexes_fts5_after_name_change() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -565,6 +573,8 @@ async fn doctors_soft_delete_cascades_pricings_in_one_logical_op() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -619,6 +629,8 @@ async fn doctors_set_active_flips_flag_and_audits_update() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -668,6 +680,8 @@ async fn doctor_pricing_upsert_inserts_then_updates_on_same_tuple() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -735,6 +749,8 @@ async fn doctor_pricing_upsert_rejects_pct_above_100() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -786,6 +802,8 @@ async fn pricing_resolver_returns_doctor_override_when_present() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -1263,6 +1281,8 @@ async fn catalog_create_mutations_enqueue_outbox_rows() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -1317,6 +1337,8 @@ async fn list_includes_inactive_only_when_flag_true() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -1332,6 +1354,8 @@ async fn list_includes_inactive_only_when_flag_true() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await

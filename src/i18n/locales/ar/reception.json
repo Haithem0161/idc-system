@@ -10,7 +10,9 @@
       "open_workspace": "فتح المساحة",
       "empty": "لا توجد فحوصات نشطة. أعدّها من لوحة الإدارة أولاً.",
       "house_only": "البيت",
-      "has_subtypes": "أنواع فرعية"
+      "has_subtypes": "أنواع فرعية",
+      "pending_patient": "زيارة جديدة لـ {{name}} — اختر فحصاً للبدء.",
+      "pending_patient_clear": "إلغاء"
     },
     "workspace": {
       "title": "{{check}}",
@@ -45,6 +47,8 @@
       "patient": "المريض",
       "patient_placeholder": "اكتب للبحث أو إضافة مريض جديد",
       "patient_create_hint": "اضغط Enter لإضافة كمريض جديد.",
+      "patient_create": "إضافة \"{{name}}\"",
+      "patient_no_results": "لا يوجد مرضى مطابقون.",
       "subtype": "النوع الفرعي",
       "subtype_required": "اختر نوعاً فرعياً",
       "doctor": "الطبيب",
@@ -75,7 +79,23 @@
         "lock_failed": "فشل القفل.",
         "locked": "تم قفل الزيارة. تم إصدار الإيصال.",
         "void_too_short": "السبب يجب أن يكون 5 أحرف على الأقل."
-      }
+      },
+      "internal": "داخلي",
+      "internal_hint": "بدون طبيب محوِّل",
+      "doctor_search_placeholder": "ابحث أو أضف طبيبًا",
+      "doctor_create": "إضافة \"{{name}}\"",
+      "doctor_no_results": "لا يوجد أطباء مطابقون.",
+      "doctor_create_title": "طبيب جديد",
+      "doctor_field_name": "الاسم",
+      "doctor_field_cut": "النسبة الافتراضية",
+      "doctor_field_cut_kind": "النوع",
+      "doctor_cut_pct": "نسبة مئوية",
+      "doctor_cut_fixed": "مبلغ ثابت (د.ع)",
+      "doctor_field_phone": "الهاتف",
+      "doctor_field_specialty": "التخصص",
+      "doctor_name_dup": "يوجد طبيب بهذا الاسم بالفعل.",
+      "doctor_phone_dup": "طبيب آخر يستخدم هذا الهاتف.",
+      "doctor_create_submit": "إنشاء طبيب"
     },
     "tabs": {
       "new_visit": "زيارة جديدة",

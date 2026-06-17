@@ -449,3 +449,152 @@ test('GET /sync/pull surfaces newly pushed visits', async (t) => {
   // Mark void to verify presence of the pushed user.
   void OTHER_USER
 })
+
+// ---- patient demographics (client migration 012) round-trip ---------------
+
+const DEMOGRAPHICS = {
+  phone: '0770-123-4567',
+  sex: 'F',
+  birth_date: '1990-05-12',
+  file_no: 'F-2841',
+  notes: 'prefers morning appointments',
+}
+
+test('POST /sync/push then GET /sync/pull preserves patient demographics', async (t) => {
+  const app = await build(t)
+  const token = authToken(app as unknown as FastifyAppLike)
+  const patientId = '01900000-0000-7000-8000-0000000001D1'
+  const push = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-v1' },
+    payload: {
+      ops: [
+        jsonOp(
+          '01HZVP000000000000000001D1',
+          'patients',
+          patientId,
+          patientPayload(patientId, DEMOGRAPHICS)
+        ),
+      ],
+    },
+  })
+  assert.strictEqual(push.statusCode, 200, push.payload)
+  assert.strictEqual(JSON.parse(push.payload).accepted[0].status, 'applied')
+
+  const pull = await app.inject({
+    method: 'GET',
+    url: '/sync/pull',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-v2' },
+  })
+  assert.strictEqual(pull.statusCode, 200, pull.payload)
+  const change = JSON.parse(pull.payload).changes.find(
+    (c: { entity: string, entity_id: string }) =>
+      c.entity === 'patients' && c.entity_id === patientId
+  )
+  assert.ok(change, 'pushed patient must arrive on the other device')
+  const p = change.payload as Record<string, unknown>
+  assert.strictEqual(p.phone, DEMOGRAPHICS.phone)
+  assert.strictEqual(p.sex, 'F')
+  assert.strictEqual(p.birth_date, DEMOGRAPHICS.birth_date)
+  assert.strictEqual(p.file_no, DEMOGRAPHICS.file_no)
+  assert.strictEqual(p.notes, DEMOGRAPHICS.notes)
+})
+
+test('POST /sync/push normalizes patient sex to uppercase and trims blanks', async (t) => {
+  const app = await build(t)
+  const token = authToken(app as unknown as FastifyAppLike)
+  const patientId = '01900000-0000-7000-8000-0000000001D2'
+  await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-v1' },
+    payload: {
+      ops: [
+        jsonOp(
+          '01HZVP000000000000000001D2',
+          'patients',
+          patientId,
+          patientPayload(patientId, {
+            sex: 'm',
+            phone: '   ',
+            notes: '  kept  ',
+          })
+        ),
+      ],
+    },
+  })
+
+  const pull = await app.inject({
+    method: 'GET',
+    url: '/sync/pull',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-v2' },
+  })
+  const change = JSON.parse(pull.payload).changes.find(
+    (c: { entity: string, entity_id: string }) =>
+      c.entity === 'patients' && c.entity_id === patientId
+  )
+  const p = change.payload as Record<string, unknown>
+  assert.strictEqual(p.sex, 'M', 'lowercase sex must normalize to uppercase')
+  assert.strictEqual(p.phone, null, 'whitespace-only phone collapses to null')
+  assert.strictEqual(p.notes, 'kept', 'notes are trimmed')
+})
+
+test('POST /sync/push rejects a patient with invalid sex', async (t) => {
+  const app = await build(t)
+  const token = authToken(app as unknown as FastifyAppLike)
+  const patientId = '01900000-0000-7000-8000-0000000001D3'
+  const res = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-v1' },
+    payload: {
+      ops: [
+        jsonOp(
+          '01HZVP000000000000000001D3',
+          'patients',
+          patientId,
+          patientPayload(patientId, { sex: 'X' })
+        ),
+      ],
+    },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
+})
+
+test('POST /sync/push accepts a patient with no demographics (older client)', async (t) => {
+  const app = await build(t)
+  const token = authToken(app as unknown as FastifyAppLike)
+  const patientId = '01900000-0000-7000-8000-0000000001D4'
+  // An older client omits the demographics keys entirely.
+  const legacy = patientPayload(patientId)
+  const push = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-v1' },
+    payload: { ops: [jsonOp('01HZVP000000000000000001D4', 'patients', patientId, legacy)] },
+  })
+  assert.strictEqual(push.statusCode, 200, push.payload)
+  assert.strictEqual(JSON.parse(push.payload).accepted[0].status, 'applied')
+
+  const pull = await app.inject({
+    method: 'GET',
+    url: '/sync/pull',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-v2' },
+  })
+  const change = JSON.parse(pull.payload).changes.find(
+    (c: { entity: string, entity_id: string }) =>
+      c.entity === 'patients' && c.entity_id === patientId
+  )
+  const p = change.payload as Record<string, unknown>
+  assert.strictEqual(p.phone ?? null, null)
+  assert.strictEqual(p.sex ?? null, null)
+  assert.strictEqual(p.birth_date ?? null, null)
+  assert.strictEqual(p.file_no ?? null, null)
+  assert.strictEqual(p.notes ?? null, null)
+})

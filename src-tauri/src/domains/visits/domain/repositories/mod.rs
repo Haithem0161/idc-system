@@ -20,6 +20,10 @@ pub struct WorkspaceFilters {
 pub trait VisitRepo: Send + Sync {
     async fn upsert(&self, tx: &mut Tx<'_>, v: &Visit) -> AppResult<()>;
     async fn get_by_id(&self, id: Uuid) -> AppResult<Option<Visit>>;
+    /// Load a visit on the caller's transaction connection. Use this from
+    /// inside a `with_audit` write so it does not deadlock by acquiring a
+    /// second pool connection (critical on a single-connection pool).
+    async fn get_by_id_tx(&self, tx: &mut Tx<'_>, id: Uuid) -> AppResult<Option<Visit>>;
     async fn list_today_by_check(
         &self,
         entity_id: &str,

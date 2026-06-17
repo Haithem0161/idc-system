@@ -9,6 +9,7 @@ import enLegacy from "./locales/en/translation.json"
 import enAuth from "./locales/en/auth.json"
 import enAdmin from "./locales/en/admin.json"
 import enReception from "./locales/en/reception.json"
+import enPatients from "./locales/en/patients.json"
 import enInventory from "./locales/en/inventory.json"
 import enAccounting from "./locales/en/accounting.json"
 import enAudit from "./locales/en/audit.json"
@@ -20,6 +21,7 @@ import arLegacy from "./locales/ar/translation.json"
 import arAuth from "./locales/ar/auth.json"
 import arAdmin from "./locales/ar/admin.json"
 import arReception from "./locales/ar/reception.json"
+import arPatients from "./locales/ar/patients.json"
 import arInventory from "./locales/ar/inventory.json"
 import arAccounting from "./locales/ar/accounting.json"
 import arAudit from "./locales/ar/audit.json"
@@ -49,6 +51,7 @@ const resources = {
     auth: enAuth,
     admin: enAdmin,
     reception: enReception,
+    patients: enPatients,
     inventory: enInventory,
     accounting: enAccounting,
     audit: enAudit,
@@ -74,6 +77,7 @@ const resources = {
     auth: arAuth,
     admin: arAdmin,
     reception: arReception,
+    patients: arPatients,
     inventory: arInventory,
     accounting: arAccounting,
     audit: arAudit,

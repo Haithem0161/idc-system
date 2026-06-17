@@ -228,3 +228,168 @@ test('POST /sync/push rejects doctor_check_pricing when parent has_subtypes mism
   assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
   assert.strictEqual(body.rejected[0].status_code, 422)
 })
+
+// ---- doctor default cut (client migration 014) round-trip -----------------
+
+function doctorPayload (id: string, overrides: Record<string, unknown> = {}) {
+  const now = new Date().toISOString()
+  return {
+    id,
+    name: 'Dr. Sarah',
+    specialty: null,
+    phone: null,
+    is_active: true,
+    notes: null,
+    default_cut_kind: null,
+    default_cut_value: null,
+    entity_id: TENANT,
+    version: 1,
+    updated_at: now,
+    deleted_at: null,
+    origin_device_id: 'dev-1',
+    ...overrides,
+  }
+}
+
+test('POST /sync/push then GET /sync/pull preserves a doctor default cut', async (t) => {
+  const app = await build(t)
+  const token = authToken(app as unknown as FastifyAppLike)
+  const docId = '01900000-0000-7000-8000-0000000000C1'
+  const push = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-1' },
+    payload: {
+      ops: [
+        jsonOp('01HZBB00000000000000000C01', 'doctors', docId, doctorPayload(docId, {
+          phone: '0770-555-1234',
+          default_cut_kind: 'pct',
+          default_cut_value: 25,
+        })),
+      ],
+    },
+  })
+  assert.strictEqual(push.statusCode, 200, push.payload)
+  assert.strictEqual(JSON.parse(push.payload).accepted[0].status, 'applied')
+
+  const pull = await app.inject({
+    method: 'GET',
+    url: '/sync/pull',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-2' },
+  })
+  assert.strictEqual(pull.statusCode, 200, pull.payload)
+  const change = JSON.parse(pull.payload).changes.find(
+    (c: { entity: string, entity_id: string }) => c.entity === 'doctors' && c.entity_id === docId
+  )
+  assert.ok(change, 'pushed doctor must arrive on the other device')
+  const d = change.payload as Record<string, unknown>
+  assert.strictEqual(d.default_cut_kind, 'pct')
+  assert.strictEqual(d.default_cut_value, 25)
+  assert.strictEqual(d.phone, '0770-555-1234')
+})
+
+test('POST /sync/push normalizes doctor default cut kind to lowercase', async (t) => {
+  const app = await build(t)
+  const token = authToken(app as unknown as FastifyAppLike)
+  const docId = '01900000-0000-7000-8000-0000000000C2'
+  await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-1' },
+    payload: {
+      ops: [
+        jsonOp('01HZBB00000000000000000C02', 'doctors', docId, doctorPayload(docId, {
+          default_cut_kind: 'FIXED',
+          default_cut_value: 20000,
+        })),
+      ],
+    },
+  })
+  const pull = await app.inject({
+    method: 'GET',
+    url: '/sync/pull',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-2' },
+  })
+  const change = JSON.parse(pull.payload).changes.find(
+    (c: { entity: string, entity_id: string }) => c.entity === 'doctors' && c.entity_id === docId
+  )
+  const d = change.payload as Record<string, unknown>
+  assert.strictEqual(d.default_cut_kind, 'fixed')
+  assert.strictEqual(d.default_cut_value, 20000)
+})
+
+test('POST /sync/push rejects a doctor with an out-of-range pct default cut', async (t) => {
+  const app = await build(t)
+  const token = authToken(app as unknown as FastifyAppLike)
+  const docId = '01900000-0000-7000-8000-0000000000C3'
+  const res = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-1' },
+    payload: {
+      ops: [
+        jsonOp('01HZBB00000000000000000C03', 'doctors', docId, doctorPayload(docId, {
+          default_cut_kind: 'pct',
+          default_cut_value: 150,
+        })),
+      ],
+    },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].status_code, 422)
+})
+
+test('POST /sync/push rejects a doctor default cut missing one half', async (t) => {
+  const app = await build(t)
+  const token = authToken(app as unknown as FastifyAppLike)
+  const docId = '01900000-0000-7000-8000-0000000000C4'
+  const res = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-1' },
+    payload: {
+      ops: [
+        jsonOp('01HZBB00000000000000000C04', 'doctors', docId, doctorPayload(docId, {
+          default_cut_kind: 'pct',
+          default_cut_value: null,
+        })),
+      ],
+    },
+  })
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].status_code, 422)
+})
+
+test('POST /sync/push accepts a doctor with no default cut (older client)', async (t) => {
+  const app = await build(t)
+  const token = authToken(app as unknown as FastifyAppLike)
+  const docId = '01900000-0000-7000-8000-0000000000C5'
+  // An older client omits the default-cut keys entirely.
+  const legacy = doctorPayload(docId)
+  delete (legacy as Record<string, unknown>).default_cut_kind
+  delete (legacy as Record<string, unknown>).default_cut_value
+  const push = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-1' },
+    payload: { ops: [jsonOp('01HZBB00000000000000000C05', 'doctors', docId, legacy)] },
+  })
+  assert.strictEqual(push.statusCode, 200, push.payload)
+  assert.strictEqual(JSON.parse(push.payload).accepted[0].status, 'applied')
+
+  const pull = await app.inject({
+    method: 'GET',
+    url: '/sync/pull',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-2' },
+  })
+  const change = JSON.parse(pull.payload).changes.find(
+    (c: { entity: string, entity_id: string }) => c.entity === 'doctors' && c.entity_id === docId
+  )
+  const d = change.payload as Record<string, unknown>
+  assert.strictEqual(d.default_cut_kind ?? null, null)
+  assert.strictEqual(d.default_cut_value ?? null, null)
+})

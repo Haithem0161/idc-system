@@ -26,6 +26,8 @@ import ChecksGridPage from "@/pages/reception/checks-grid"
 import CheckWorkspacePage from "@/pages/reception/check-workspace"
 import NewVisitTabbedPage from "@/pages/reception/new-visit-tabbed"
 import VisitDetailPage from "@/pages/reception/visit-detail"
+import PatientsListPage from "@/pages/reception/patients/list"
+import PatientDetailPage from "@/pages/reception/patients/detail"
 import { ReceptionShell } from "@/components/reception/reception-shell"
 import InventoryListPage from "@/pages/inventory/list"
 import InventoryItemDetailOpsPage from "@/pages/inventory/detail"
@@ -89,6 +91,8 @@ export const router = createBrowserRouter([
               { path: "new", Component: NewVisitTabbedPage },
               { path: "checks/:slug", Component: CheckWorkspacePage },
               { path: "visits/:id", Component: VisitDetailPage },
+              { path: "patients", Component: PatientsListPage },
+              { path: "patients/:id", Component: PatientDetailPage },
             ],
           },
           {

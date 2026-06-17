@@ -194,7 +194,10 @@ export class SyncPushService {
               { op_id: op.op_id }
             )
           }
-          await this.store.upsertDoctor(row)
+          // Normalize the default cut (client migration 014) and mirror the
+          // Rust money-engine contract so a junk cut can never land in Postgres:
+          // both halves required together; pct 0..=100; fixed >= 0.
+          await this.store.upsertDoctor(normalizeDoctorRow(row, op.op_id))
           break
         }
         case 'doctor_check_pricing': {
@@ -289,7 +292,11 @@ export class SyncPushService {
               { op_id: op.op_id }
             )
           }
-          await this.store.upsertPatient(row)
+          // Normalize demographics (client migration 012) and mirror the Rust
+          // `clean_sex` contract so a junk `sex` can never land in Postgres:
+          // empty/whitespace -> null; 'M'/'F' (any case) accepted; anything
+          // else is a per-op rejection.
+          await this.store.upsertPatient(normalizePatientRow(row, op.op_id))
           break
         }
         case 'visits': {
@@ -619,6 +626,92 @@ function assertTenantMatches (rowTenant: string, tenantId: string, opId: string)
       403,
       { op_id: opId }
     )
+  }
+}
+
+/** Trim a nullable string field; empty/whitespace collapses to null. Mirrors
+ *  the desktop's `clean_opt`. */
+function cleanOpt (raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return trimmed.length === 0 ? null : trimmed
+}
+
+/**
+ * Normalize a pushed patient row's demographics (client migration 012),
+ * mirroring the Rust domain contract:
+ *  - text fields are trimmed; empty/whitespace -> null (`clean_opt`).
+ *  - `sex` accepts 'M'/'F' (any case) -> uppercased; empty -> null; anything
+ *    else is a per-op rejection (`clean_sex`).
+ *
+ * Returning a fresh record (rather than mutating in place) keeps the decoded
+ * payload immutable for any downstream conflict bookkeeping.
+ */
+function normalizePatientRow (row: PatientSyncRecord, opId: string): PatientSyncRecord {
+  const sexClean = cleanOpt(row.sex)
+  let sex: string | null = null
+  if (sexClean !== null) {
+    const upper = sexClean.toUpperCase()
+    if (upper !== 'M' && upper !== 'F') {
+      throw new DomainError('VALIDATION_ERROR', "sex must be 'M' or 'F'", 422, { op_id: opId })
+    }
+    sex = upper
+  }
+  return {
+    ...row,
+    phone: cleanOpt(row.phone),
+    sex,
+    birth_date: cleanOpt(row.birth_date),
+    file_no: cleanOpt(row.file_no),
+    notes: cleanOpt(row.notes),
+  }
+}
+
+/**
+ * Normalize a pushed doctor row's default cut (client migration 014), mirroring
+ * the Rust `clean_default_cut` contract:
+ *  - both halves are required together; one without the other is a rejection.
+ *  - `pct` values are 0..=100; `fixed` values are >= 0 (IQD).
+ *  - kind is lowercased; an unknown kind is a per-op rejection.
+ * Text fields (specialty / phone / notes) are trimmed to null when blank.
+ */
+function normalizeDoctorRow (row: DoctorSyncRecord, opId: string): DoctorSyncRecord {
+  const kindRaw = cleanOpt(row.default_cut_kind)
+  const value = row.default_cut_value ?? null
+  let kind: string | null = null
+  let cutValue: number | null = null
+  if (kindRaw === null && value === null) {
+    // no default cut -- fine.
+  } else if (kindRaw === null || value === null) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'default cut requires both a kind and a value',
+      422,
+      { op_id: opId }
+    )
+  } else {
+    const lower = kindRaw.toLowerCase()
+    if (lower === 'pct') {
+      if (value < 0 || value > 100) {
+        throw new DomainError('VALIDATION_ERROR', 'default cut percentage must be 0..=100', 422, { op_id: opId })
+      }
+    } else if (lower === 'fixed') {
+      if (value < 0) {
+        throw new DomainError('VALIDATION_ERROR', 'default cut amount must be non-negative', 422, { op_id: opId })
+      }
+    } else {
+      throw new DomainError('VALIDATION_ERROR', "default cut kind must be 'pct' or 'fixed'", 422, { op_id: opId })
+    }
+    kind = lower
+    cutValue = value
+  }
+  return {
+    ...row,
+    specialty: cleanOpt(row.specialty),
+    phone: cleanOpt(row.phone),
+    notes: cleanOpt(row.notes),
+    default_cut_kind: kind,
+    default_cut_value: cutValue,
   }
 }
 

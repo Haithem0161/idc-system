@@ -143,7 +143,7 @@ export default function VisitDetailPage () {
           </div>
           <dl className="panel-body grid grid-cols-1 gap-3 md:grid-cols-2">
             <Field label={t("reception.visit_detail.snapshot.patient")} value={snap?.patient_name ?? "—"} />
-            <Field label={t("reception.visit_detail.snapshot.doctor")} value={snap?.doctor_name ?? t("reception.new_visit.house")} />
+            <Field label={t("reception.visit_detail.snapshot.doctor")} value={snap?.doctor_name ?? t("reception.new_visit.internal")} />
             <Field label={t("reception.visit_detail.snapshot.operator")} value={snap?.operator_name ?? "—"} />
             <Field label={t("reception.visit_detail.snapshot.check")} value={snap?.check_type_name_ar ?? "—"} />
             <Field label={t("reception.visit_detail.snapshot.subtype")} value={snap?.check_subtype_name_ar ?? "—"} />

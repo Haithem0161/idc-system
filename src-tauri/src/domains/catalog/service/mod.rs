@@ -21,7 +21,9 @@ pub use check_subtype_service::{
 pub use check_type_service::{CheckTypeCreateInput, CheckTypeService, CheckTypeUpdateInput};
 pub use consumption_service::{ConsumptionCreateInput, ConsumptionService, ConsumptionUpdateInput};
 pub use doctor_pricing_service::{DoctorPricingService, DoctorPricingUpsertInput};
-pub use doctor_service::{DoctorCreateInput, DoctorService, DoctorUpdateInput};
+pub use doctor_service::{
+    DoctorCreateInput, DoctorService, DoctorUpdateInput, DuplicateDoctorGroup,
+};
 pub use inventory_item_service::{
     InventoryItemCreateInput, InventoryItemService, InventoryItemUpdateInput,
 };

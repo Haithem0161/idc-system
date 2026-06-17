@@ -125,7 +125,7 @@ export default function CheckWorkspacePage () {
                   {v.snapshots?.patient_name ?? "—"}
                 </td>
                 <td>
-                  {v.snapshots?.doctor_name ?? t("reception.new_visit.house")}
+                  {v.snapshots?.doctor_name ?? t("reception.new_visit.internal")}
                 </td>
                 <td>
                   {v.snapshots?.operator_name ?? "—"}

@@ -14,7 +14,7 @@ import {
 } from "@/features/catalog/queries"
 import { resolveLocaleName } from "@/lib/format/locale-name"
 import { AdminHeader, EmptyRow, ErrorBanner, FieldLabel } from "@/components/admin/admin-panel"
-import type { CutKindLiteral } from "@/lib/ipc"
+import type { CutKindLiteral, DoctorCutKindLiteral } from "@/lib/ipc"
 
 export default function DoctorDetailPage () {
   const { id = "" } = useParams<{ id: string }>()
@@ -37,6 +37,20 @@ export default function DoctorDetailPage () {
     cut_value: 30,
     price_override: "",
   })
+  // Default-cut editor state, seeded once from the loaded doctor. Blank value
+  // clears the default (sends default_cut: null); a value sends [kind, value].
+  const [defaultCutKind, setDefaultCutKind] = useState<DoctorCutKindLiteral>("pct")
+  const [defaultCutValue, setDefaultCutValue] = useState("")
+  const [cutSeeded, setCutSeeded] = useState(false)
+  if (detail.data && !cutSeeded) {
+    setDefaultCutKind((detail.data.doctor.default_cut_kind ?? "pct") as DoctorCutKindLiteral)
+    setDefaultCutValue(
+      detail.data.doctor.default_cut_value != null
+        ? String(detail.data.doctor.default_cut_value)
+        : "",
+    )
+    setCutSeeded(true)
+  }
 
   if (!detail.data) {
     return (
@@ -53,6 +67,10 @@ export default function DoctorDetailPage () {
     e.preventDefault()
     setError(null)
     const form = new FormData(e.currentTarget)
+    const cutRaw = defaultCutValue.trim()
+    // Blank -> clear the default cut (null). Otherwise send [kind, value].
+    const defaultCut: [DoctorCutKindLiteral, number] | null =
+      cutRaw === "" ? null : [defaultCutKind, Math.round(Number(cutRaw))]
     try {
       await update.mutateAsync({
         id: doctor.id,
@@ -60,6 +78,7 @@ export default function DoctorDetailPage () {
         specialty: (form.get("specialty") as string) || null,
         phone: (form.get("phone") as string) || null,
         notes: (form.get("notes") as string) || null,
+        default_cut: defaultCut,
       })
     } catch (err) {
       setError((err as { message?: string }).message ?? "Failed")
@@ -147,6 +166,41 @@ export default function DoctorDetailPage () {
               <input type="text" name="notes" defaultValue={doctor.notes ?? ""} className="input" />
             </FieldLabel>
           </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <FieldLabel label={t("admin.doctors.default_cut_kind", { defaultValue: "Default cut kind" })}>
+              <select
+                value={defaultCutKind}
+                onChange={(e) => setDefaultCutKind(e.target.value as DoctorCutKindLiteral)}
+                className="input"
+              >
+                <option value="pct">{t("admin.doctors.cut_pct", { defaultValue: "Percentage" })}</option>
+                <option value="fixed">{t("admin.doctors.cut_fixed", { defaultValue: "Fixed (IQD)" })}</option>
+              </select>
+            </FieldLabel>
+            <FieldLabel
+              label={
+                defaultCutKind === "pct"
+                  ? t("admin.doctors.default_cut_pct", { defaultValue: "Default cut %" })
+                  : t("admin.doctors.default_cut_iqd", { defaultValue: "Default cut (IQD)" })
+              }
+            >
+              <input
+                type="number"
+                min={0}
+                max={defaultCutKind === "pct" ? 100 : undefined}
+                value={defaultCutValue}
+                onChange={(e) => setDefaultCutValue(e.target.value)}
+                className="input font-mono"
+                placeholder={t("admin.doctors.default_cut_none", { defaultValue: "None" }) ?? ""}
+              />
+            </FieldLabel>
+          </div>
+          <p className="text-[11px] text-ink-3">
+            {t("admin.doctors.default_cut_hint", {
+              defaultValue:
+                "Used when no per-check pricing row below matches. Leave blank for no default (cut falls to 0).",
+            })}
+          </p>
           <ErrorBanner message={error} />
           <div className="flex justify-end">
             <button type="submit" disabled={update.isPending} className="btn btn-primary btn-sm">

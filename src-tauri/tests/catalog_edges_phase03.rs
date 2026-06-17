@@ -68,6 +68,8 @@ fn doctor(name: &str) -> Doctor {
         notes: None,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
+        default_cut_kind: None,
+        default_cut_value: None,
     })
     .unwrap()
 }
@@ -168,6 +170,8 @@ async fn edge_62_i18n_doctor_name_mixed_arabic_and_latin_round_trips_byte_stable
         notes: None,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
+        default_cut_kind: None,
+        default_cut_value: None,
     })
     .unwrap();
     let mut tx = pool.begin().await.unwrap();
@@ -188,6 +192,8 @@ async fn edge_62_i18n_check_type_arabic_name_searchable_with_arabic_prefix() {
         notes: None,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
+        default_cut_kind: None,
+        default_cut_value: None,
     })
     .unwrap();
     let mut tx = pool.begin().await.unwrap();
@@ -363,6 +369,8 @@ async fn edge_66_scale_doctor_fts_handles_200_doctors() {
             notes: None,
             entity_id: ENTITY_ID.into(),
             origin_device_id: None,
+            default_cut_kind: None,
+            default_cut_value: None,
         })
         .unwrap();
         let mut tx = pool.begin().await.unwrap();

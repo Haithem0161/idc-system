@@ -220,6 +220,12 @@ model Doctor {
   phone           String?
   isActive        Boolean   @default(true) @map("is_active")
   notes           String?
+  // Doctor-level default cut (client migration 014). Mirrored from the desktop
+  // SQLite schema so a pushed doctor row keeps these instead of dropping them.
+  // Both nullable and set/cleared together: defaultCutKind is 'pct' | 'fixed' |
+  // null, validated on push to mirror the Rust money-engine contract.
+  defaultCutKind  String?   @map("default_cut_kind")
+  defaultCutValue Int?      @map("default_cut_value")
   createdAt       DateTime  @map("created_at") @db.Timestamptz
   updatedAt       DateTime  @map("updated_at") @db.Timestamptz
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
@@ -233,6 +239,7 @@ model Doctor {
   visits      Visit[]
 
   @@index([entityId, name])
+  @@index([entityId, phone])
   @@map("doctors")
 }
 
@@ -393,6 +400,15 @@ model OperatorShift {
 model Patient {
   id              String    @id
   name            String
+  // Demographics (client migration 012). Mirrored from the desktop SQLite
+  // schema so a pushed patient row keeps these fields instead of dropping
+  // them on the round trip. All nullable; `sex` is 'M' | 'F' | null, validated
+  // on push to mirror the Rust `clean_sex` contract.
+  phone           String?
+  sex             String?
+  birthDate       String?   @map("birth_date")
+  fileNo          String?   @map("file_no")
+  notes           String?
   createdAt       DateTime  @map("created_at") @db.Timestamptz
   updatedAt       DateTime  @map("updated_at") @db.Timestamptz
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
@@ -405,6 +421,7 @@ model Patient {
   visits Visit[]
 
   @@index([entityId, name])
+  @@index([entityId, phone])
   @@map("patients")
 }
 

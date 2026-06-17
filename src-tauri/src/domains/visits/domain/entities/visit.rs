@@ -264,6 +264,23 @@ impl Visit {
         self.dirty = true;
         Ok(self)
     }
+
+    /// Re-attribute this visit to a different patient. Used by the patient
+    /// merge flow to fold a duplicate into a survivor; it is an identity
+    /// correction, valid in any status (draft/locked/voided), and never
+    /// touches the financial snapshot. Bumps the sync columns so the new
+    /// `patient_id` propagates. No-op (returns self unchanged) if already
+    /// pointing at `new_patient_id`.
+    pub fn reattribute_patient(mut self, new_patient_id: Uuid) -> Self {
+        if self.patient_id == new_patient_id {
+            return self;
+        }
+        self.patient_id = new_patient_id;
+        self.updated_at = Utc::now();
+        self.version += 1;
+        self.dirty = true;
+        self
+    }
 }
 
 #[cfg(test)]

@@ -21,6 +21,7 @@
     "aria_label": "Primary",
     "reception": "Reception",
     "shifts": "Shifts",
+    "patients": "Patients",
     "doctors": "Doctors",
     "operators": "Operators",
     "check_types": "Check types",

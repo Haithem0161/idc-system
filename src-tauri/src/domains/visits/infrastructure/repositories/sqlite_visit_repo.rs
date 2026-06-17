@@ -178,6 +178,7 @@ impl VisitRepo for SqliteVisitRepo {
                 ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?\
              ) ON CONFLICT(id) DO UPDATE SET \
                status = excluded.status, \
+               patient_id = excluded.patient_id, \
                check_subtype_id = excluded.check_subtype_id, \
                doctor_id = excluded.doctor_id, \
                operator_id = excluded.operator_id, \
@@ -254,6 +255,15 @@ impl VisitRepo for SqliteVisitRepo {
         let row: Option<VisitRow> = sqlx::query_as::<_, VisitRow>(&sql)
             .bind(id.to_string())
             .fetch_optional(&self.pool)
+            .await?;
+        row.map(VisitRow::into_domain).transpose()
+    }
+
+    async fn get_by_id_tx(&self, tx: &mut Tx<'_>, id: Uuid) -> AppResult<Option<Visit>> {
+        let sql = format!("SELECT {COLUMNS} FROM visits WHERE id = ?");
+        let row: Option<VisitRow> = sqlx::query_as::<_, VisitRow>(&sql)
+            .bind(id.to_string())
+            .fetch_optional(&mut **tx)
             .await?;
         row.map(VisitRow::into_domain).transpose()
     }

@@ -257,11 +257,27 @@ impl AuthService {
         password: &str,
         entity_id_hint: &str,
     ) -> AppResult<LoginResult> {
-        let user = self
-            .user_repo
-            .get_by_email(email, entity_id_hint)
-            .await?
-            .ok_or(AppError::NotAuthenticated)?;
+        // Resolve the user. Login is server-authoritative when online; offline
+        // we have only the local mirror and (usually) no real tenant hint --
+        // the login form intentionally does not ask for one. So when the hint
+        // is the unscoped default (or empty), resolve the tenant FROM the user
+        // by a tenant-agnostic email lookup, mirroring the server's
+        // `findByEmail`. A caller that DOES pass a concrete tenant still gets
+        // the exact scoped lookup. (Without this, an admin stored under a real
+        // tenant could never log in offline -- get_by_email("...", "unscoped")
+        // returned None even though the row exists.)
+        let explicit = !entity_id_hint.is_empty() && entity_id_hint != "unscoped";
+        let user = if explicit {
+            self.user_repo.get_by_email(email, entity_id_hint).await?
+        } else {
+            match self.user_repo.find_by_email(email).await? {
+                Some(u) => Some(u),
+                // Fall back to the literal unscoped tenant for genuinely
+                // single-tenant deployments whose rows live under 'unscoped'.
+                None => self.user_repo.get_by_email(email, "unscoped").await?,
+            }
+        };
+        let user = user.ok_or(AppError::NotAuthenticated)?;
         if !user.is_active {
             return Err(AppError::NotAuthenticated);
         }

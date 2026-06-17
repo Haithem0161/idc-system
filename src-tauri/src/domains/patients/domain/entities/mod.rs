@@ -1,3 +1,3 @@
 pub mod patient;
 
-pub use patient::{Patient, PatientNewInput};
+pub use patient::{Patient, PatientDemographicsInput, PatientNewInput};

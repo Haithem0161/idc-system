@@ -71,6 +71,7 @@ pub fn compute(inputs: &MoneyMathInputs<'_>) -> AppResult<VisitSnapshots> {
     let (doctor_cut, internal_pct, operator_cut) = cuts(
         price_iqd,
         inputs.operator,
+        inputs.doctor,
         inputs.doctor_pricing,
         &inputs.settings,
     )?;
@@ -111,35 +112,56 @@ fn effective_price(base: i64, pricing: Option<&DoctorCheckPricing>) -> i64 {
     }
 }
 
+/// Resolve a doctor cut from a `(kind, value)` pair against the visit price.
+/// Shared by the per-check `DoctorCheckPricing` override and the doctor-level
+/// default cut so the pct/fixed math never drifts between the two.
+fn cut_from_kind_value(price_iqd: i64, kind: &str, value: i64) -> AppResult<i64> {
+    match kind {
+        "pct" => {
+            if !(0..=100).contains(&value) {
+                return Err(AppError::Validation(
+                    "doctor cut percentage must be 0..=100".into(),
+                ));
+            }
+            Ok(price_iqd * value / 100)
+        }
+        "fixed" => Ok(value.max(0)),
+        other => Err(AppError::Validation(format!("unknown cut_kind: {other}"))),
+    }
+}
+
 fn cuts(
     price_iqd: i64,
     operator: &Operator,
+    doctor: Option<&Doctor>,
     pricing: Option<&DoctorCheckPricing>,
     settings: &MoneySettings,
 ) -> AppResult<(i64, Option<i64>, i64)> {
     let operator_cut = operator.base_cut_per_check_iqd;
 
-    match pricing {
-        Some(p) => {
-            let doctor_cut = match p.cut_kind.as_str() {
-                "pct" => {
-                    if p.cut_value < 0 || p.cut_value > 100 {
-                        return Err(AppError::Validation(
-                            "doctor cut percentage must be 0..=100".into(),
-                        ));
-                    }
-                    price_iqd * p.cut_value / 100
-                }
-                "fixed" => p.cut_value.max(0),
-                other => {
-                    return Err(AppError::Validation(format!("unknown cut_kind: {other}")));
-                }
+    match (doctor, pricing) {
+        (_, Some(p)) => {
+            // Per-check override wins over everything: explicit cut for this
+            // exact doctor + check (+ subtype).
+            let doctor_cut = cut_from_kind_value(price_iqd, p.cut_kind.as_str(), p.cut_value)?;
+            Ok((doctor_cut, None, operator_cut))
+        }
+        (Some(d), None) => {
+            // Referring doctor selected but no per-check DoctorCheckPricing row.
+            // Fall back to the doctor's negotiated DEFAULT cut when configured;
+            // otherwise the cut is zero (the historical behaviour). `internal_pct`
+            // MUST stay None -- it is the house-mode marker and Visit::lock
+            // rejects a doctor visit that carries one (invariant 6).
+            let doctor_cut = match (d.default_cut_kind.as_deref(), d.default_cut_value) {
+                (Some(kind), Some(value)) => cut_from_kind_value(price_iqd, kind, value)?,
+                _ => 0,
             };
             Ok((doctor_cut, None, operator_cut))
         }
-        None => {
-            // House mode: doctor_cut snapshot is the absolute share earned by
-            // the clinic-employed doctor, expressed via `internal_doctor_pct`.
+        (None, None) => {
+            // House / internal mode: doctor_cut snapshot is the absolute share
+            // earned by the clinic-employed doctor, expressed via
+            // `internal_doctor_pct`.
             if settings.internal_doctor_pct < 0 || settings.internal_doctor_pct > 100 {
                 return Err(AppError::Validation(
                     "internal_doctor_pct must be 0..=100".into(),
@@ -286,6 +308,8 @@ mod tests {
             specialty: None,
             phone: None,
             notes: None,
+            default_cut_kind: None,
+            default_cut_value: None,
             is_active: true,
             created_at: now,
             updated_at: now,
@@ -295,6 +319,14 @@ mod tests {
             last_synced_at: None,
             origin_device_id: None,
             entity_id: "t".into(),
+        }
+    }
+
+    fn doctor_with_default_cut(kind: &str, value: i64) -> Doctor {
+        Doctor {
+            default_cut_kind: Some(kind.into()),
+            default_cut_value: Some(value),
+            ..doctor()
         }
     }
 
@@ -454,6 +486,100 @@ mod tests {
         .unwrap();
         assert_eq!(snap.price_iqd, 200_000);
         assert_eq!(snap.doctor_cut_iqd, 20_000);
+    }
+
+    #[test]
+    fn doctor_without_pricing_row_keeps_internal_pct_none_and_zero_cut() {
+        // Referring doctor selected but no DoctorCheckPricing configured: price
+        // falls back to base, doctor cut is zero, and internal_pct must be None
+        // so Visit::lock (invariant 6) accepts the snapshot.
+        let ct = ct(false, Some(15_000));
+        let op = operator();
+        let doc = doctor();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "Pat",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.price_iqd, 15_000);
+        assert_eq!(snap.doctor_cut_iqd, 0);
+        assert_eq!(snap.internal_pct, None);
+        assert_eq!(snap.total_amount_iqd, 15_000);
+    }
+
+    #[test]
+    fn doctor_default_pct_cut_applies_when_no_per_check_row() {
+        // No DoctorCheckPricing row, but the doctor has a default 20% cut: the
+        // engine falls back to it instead of zero. internal_pct stays None
+        // (still doctor mode, not house mode).
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let doc = doctor_with_default_cut("pct", 20);
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "Pat",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 10_000); // 20% of 50000
+        assert_eq!(snap.internal_pct, None);
+    }
+
+    #[test]
+    fn doctor_default_fixed_cut_applies_when_no_per_check_row() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let doc = doctor_with_default_cut("fixed", 7_000);
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "Pat",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 7_000);
+        assert_eq!(snap.internal_pct, None);
+    }
+
+    #[test]
+    fn per_check_pricing_overrides_doctor_default_cut() {
+        // A doctor with a default cut still defers to an explicit per-check
+        // DoctorCheckPricing row when one exists.
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let doc = doctor_with_default_cut("pct", 20);
+        let row = pricing(doc.id, ct.id, CutKind::Fixed, 12_000, None);
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&row),
+            operator: &op,
+            patient_name: "Pat",
+            dye: false,
+            report: false,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 12_000); // per-check fixed cut, not the 20% default
     }
 
     #[test]

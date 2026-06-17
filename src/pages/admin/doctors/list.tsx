@@ -5,6 +5,7 @@ import { Plus, X } from "lucide-react"
 
 import { useDoctorCreate, useDoctors } from "@/features/catalog/queries"
 import { AdminHeader, EmptyRow, ErrorBanner, FieldLabel } from "@/components/admin/admin-panel"
+import type { DoctorCutKindLiteral } from "@/lib/ipc"
 
 export default function DoctorsListPage () {
   const { t } = useTranslation()
@@ -19,6 +20,8 @@ export default function DoctorsListPage () {
   const [name, setName] = useState("")
   const [specialty, setSpecialty] = useState("")
   const [phone, setPhone] = useState("")
+  const [cutKind, setCutKind] = useState<DoctorCutKindLiteral>("pct")
+  const [cutValue, setCutValue] = useState("")
   const [error, setError] = useState<string | null>(null)
 
   const total = list.data?.length ?? 0
@@ -27,6 +30,8 @@ export default function DoctorsListPage () {
     setName("")
     setSpecialty("")
     setPhone("")
+    setCutKind("pct")
+    setCutValue("")
     setError(null)
     setCreating(false)
   }
@@ -34,12 +39,17 @@ export default function DoctorsListPage () {
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError(null)
+    const cutRaw = cutValue.trim()
     try {
       await create.mutateAsync({
         name,
         specialty: specialty || null,
         phone: phone || null,
         notes: null,
+        // Both halves go together; omit entirely when no default cut is set.
+        ...(cutRaw === ""
+          ? {}
+          : { default_cut_kind: cutKind, default_cut_value: Math.round(Number(cutRaw)) }),
       })
       reset()
     } catch (err) {
@@ -96,6 +106,35 @@ export default function DoctorsListPage () {
                 <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="input" />
               </FieldLabel>
             </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <FieldLabel label={t("admin.doctors.default_cut_kind", { defaultValue: "Default cut kind" })}>
+                <select
+                  value={cutKind}
+                  onChange={(e) => setCutKind(e.target.value as DoctorCutKindLiteral)}
+                  className="input"
+                >
+                  <option value="pct">{t("admin.doctors.cut_pct", { defaultValue: "Percentage" })}</option>
+                  <option value="fixed">{t("admin.doctors.cut_fixed", { defaultValue: "Fixed (IQD)" })}</option>
+                </select>
+              </FieldLabel>
+              <FieldLabel
+                label={
+                  cutKind === "pct"
+                    ? t("admin.doctors.default_cut_pct", { defaultValue: "Default cut %" })
+                    : t("admin.doctors.default_cut_iqd", { defaultValue: "Default cut (IQD)" })
+                }
+              >
+                <input
+                  type="number"
+                  min={0}
+                  max={cutKind === "pct" ? 100 : undefined}
+                  value={cutValue}
+                  onChange={(e) => setCutValue(e.target.value)}
+                  className="input font-mono"
+                  placeholder={t("admin.doctors.default_cut_none", { defaultValue: "None" }) ?? ""}
+                />
+              </FieldLabel>
+            </div>
             <ErrorBanner message={error} />
             <div className="flex justify-end gap-2">
               <button type="button" onClick={reset} className="btn btn-ghost btn-sm">
@@ -116,6 +155,7 @@ export default function DoctorsListPage () {
               <th>{t("admin.doctors.name", { defaultValue: "Name" })}</th>
               <th>{t("admin.doctors.specialty", { defaultValue: "Specialty" })}</th>
               <th>{t("admin.doctors.phone", { defaultValue: "Phone" })}</th>
+              <th>{t("admin.doctors.default_cut", { defaultValue: "Default cut" })}</th>
               <th>{t("admin.status", { defaultValue: "Status" })}</th>
               <th className="text-end">{t("admin.actions", { defaultValue: "Actions" })}</th>
             </tr>
@@ -126,6 +166,13 @@ export default function DoctorsListPage () {
                 <td className="font-medium text-ink">{d.name}</td>
                 <td className="text-[12px] text-ink-3">{d.specialty ?? "—"}</td>
                 <td className="font-mono text-[12px] text-ink-3">{d.phone ?? "—"}</td>
+                <td className="font-mono text-[12px] text-ink-3">
+                  {d.default_cut_kind === "pct"
+                    ? `${d.default_cut_value}%`
+                    : d.default_cut_kind === "fixed"
+                      ? `${(d.default_cut_value ?? 0).toLocaleString()} IQD`
+                      : "—"}
+                </td>
                 <td>
                   <span className={`status-pill ${d.is_active ? "is-success" : ""}`}>
                     {d.is_active
@@ -144,7 +191,7 @@ export default function DoctorsListPage () {
               </tr>
             ))}
             {total === 0 ? (
-              <EmptyRow colSpan={5} message={t("admin.doctors.empty", { defaultValue: "No doctors yet" })} />
+              <EmptyRow colSpan={6} message={t("admin.doctors.empty", { defaultValue: "No doctors yet" })} />
             ) : null}
           </tbody>
         </table>

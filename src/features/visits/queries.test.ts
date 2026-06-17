@@ -72,6 +72,11 @@ function patient(overrides: Partial<PatientRecord> = {}): PatientRecord {
   return {
     id: UUID_PATIENT,
     name: "Layla",
+    phone: null,
+    sex: null,
+    birth_date: null,
+    file_no: null,
+    notes: null,
     created_at: "2026-05-14T10:00:00Z",
     updated_at: "2026-05-14T10:00:00Z",
     deleted_at: null,

@@ -242,15 +242,17 @@ async fn auth_login_wrong_password_returns_not_authenticated() {
 }
 
 #[tokio::test]
-async fn auth_login_defaults_entity_id_hint_to_unscoped_when_missing() {
+async fn auth_login_with_no_hint_resolves_tenant_from_user_offline() {
     let rig = rig(None).await;
     bootstrap_superadmin(&rig).await;
     auth_logout_impl(&rig.state).await.unwrap();
 
-    // Same bootstrap created the user under "tenant-1". With no hint, the
-    // implementation defaults to "unscoped" -- which fails offline since the
-    // local row lives under "tenant-1". This pins the default behaviour.
-    let err = auth_login_impl(
+    // The bootstrap created the user under "tenant-1". The login form supplies
+    // no tenant hint (the IPC defaults it to "unscoped"). Offline login must
+    // resolve the tenant FROM the user and succeed -- not lock the user out.
+    // (Previously this defaulted to a tenant-scoped "unscoped" lookup that
+    // returned None, so a real-tenant admin could never log in offline.)
+    let result = auth_login_impl(
         &rig.state,
         LoginArgs {
             email: "admin@idc.io".into(),
@@ -259,8 +261,10 @@ async fn auth_login_defaults_entity_id_hint_to_unscoped_when_missing() {
         },
     )
     .await
-    .unwrap_err();
-    assert!(matches!(err, AppError::NotAuthenticated));
+    .unwrap();
+    assert_eq!(result.user.entity_id, "tenant-1");
+    // The session context is populated with the resolved user.
+    assert!(rig.state.get_current_user().await.is_some());
 }
 
 // --- auth_logout ---------------------------------------------------------

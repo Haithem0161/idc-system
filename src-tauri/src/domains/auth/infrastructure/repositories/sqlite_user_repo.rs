@@ -83,6 +83,27 @@ impl UserRepo for SqliteUserRepo {
         row.map(UserRow::into_domain).transpose()
     }
 
+    async fn find_by_email(&self, email: &str) -> AppResult<Option<User>> {
+        // Fetch up to two matches so we can detect (and refuse) an ambiguous
+        // email that exists under more than one tenant. Exactly one match ->
+        // resolve it; zero or many -> None (the caller treats that as "not
+        // authenticated" rather than guessing a tenant).
+        let rows: Vec<UserRow> = sqlx::query_as::<_, UserRow>(
+            "SELECT * FROM users WHERE email = ? AND deleted_at IS NULL LIMIT 2",
+        )
+        .bind(email.to_lowercase())
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.len() == 1 {
+            rows.into_iter()
+                .next()
+                .map(UserRow::into_domain)
+                .transpose()
+        } else {
+            Ok(None)
+        }
+    }
+
     async fn list(&self, filter: UserListFilter) -> AppResult<Vec<User>> {
         let rows: Vec<UserRow> = if filter.include_inactive {
             sqlx::query_as::<_, UserRow>(

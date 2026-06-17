@@ -19,8 +19,8 @@ use crate::domains::catalog::domain::value_objects::CutKind;
 use crate::domains::catalog::service::{
     CheckSubtypeCreateInput, CheckSubtypeUpdateInput, CheckTypeCreateInput, CheckTypeUpdateInput,
     ConsumptionCreateInput, ConsumptionUpdateInput, DoctorCreateInput, DoctorPricingUpsertInput,
-    DoctorUpdateInput, InventoryItemCreateInput, InventoryItemUpdateInput, OperatorCreateInput,
-    OperatorUpdateInput,
+    DoctorUpdateInput, DuplicateDoctorGroup, InventoryItemCreateInput, InventoryItemUpdateInput,
+    OperatorCreateInput, OperatorUpdateInput,
 };
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -316,6 +316,59 @@ pub async fn doctors_soft_delete(state: State<'_, AppState>, args: IdArgs) -> Ap
     let svc = catalog(&state)?;
     svc.doctors
         .soft_delete(uid, role, Uuid::parse_str(&args.id)?)
+        .await
+}
+
+#[derive(Debug, Serialize)]
+pub struct DuplicateDoctorGroupDto {
+    pub kind: String,
+    pub key: String,
+    pub doctor_ids: Vec<String>,
+}
+
+impl From<&DuplicateDoctorGroup> for DuplicateDoctorGroupDto {
+    fn from(g: &DuplicateDoctorGroup) -> Self {
+        Self {
+            kind: g.kind.clone(),
+            key: g.key.clone(),
+            doctor_ids: g.doctor_ids.iter().map(|id| id.to_string()).collect(),
+        }
+    }
+}
+
+#[tauri::command]
+#[instrument(skip(state))]
+pub async fn doctors_find_duplicates(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<DuplicateDoctorGroupDto>> {
+    let (_, _, entity_id) = current_actor(&state).await?;
+    let svc = catalog(&state)?;
+    let groups = svc.doctors.find_duplicates(&entity_id).await?;
+    Ok(groups.iter().map(DuplicateDoctorGroupDto::from).collect())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DoctorsWithPhoneArgs {
+    pub phone: String,
+    #[serde(default)]
+    pub exclude_id: Option<String>,
+}
+
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn doctors_with_phone(
+    state: State<'_, AppState>,
+    args: DoctorsWithPhoneArgs,
+) -> AppResult<Vec<Doctor>> {
+    let (_, _, entity_id) = current_actor(&state).await?;
+    let svc = catalog(&state)?;
+    let exclude = args
+        .exclude_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()?;
+    svc.doctors
+        .doctors_with_phone(&entity_id, &args.phone, exclude)
         .await
 }
 

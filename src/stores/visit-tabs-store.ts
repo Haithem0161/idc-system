@@ -27,7 +27,14 @@ interface VisitTabsState {
   ownerUserId: string | null
   tabs: VisitTab[]
   activeTabId: string | null
-  openTab: (checkTypeId: string) => string
+  /**
+   * A patient stashed by "New visit for this patient" on the patient detail
+   * page. The checks grid reads + clears it so the next opened tab binds the
+   * patient. Not persisted (transient hand-off only).
+   */
+  pendingPatient: { id: string; name: string } | null
+  setPendingPatient: (p: { id: string; name: string } | null) => void
+  openTab: (checkTypeId: string, prefill?: Partial<VisitTabForm>) => string
   closeTab: (tabId: string) => void
   setActiveTab: (tabId: string | null) => void
   updateTabForm: (tabId: string, patch: Partial<VisitTabForm>) => void
@@ -70,8 +77,11 @@ export const useVisitTabsStore = create<VisitTabsState>()(
       ownerUserId: null,
       tabs: [],
       activeTabId: null,
+      pendingPatient: null,
 
-      openTab: (checkTypeId) => {
+      setPendingPatient: (p) => set({ pendingPatient: p }),
+
+      openTab: (checkTypeId, prefill) => {
         const tabId = makeTabId()
         set((s) => ({
           tabs: [
@@ -80,7 +90,7 @@ export const useVisitTabsStore = create<VisitTabsState>()(
               tabId,
               checkTypeId,
               draftVisitId: null,
-              form: { ...emptyForm },
+              form: { ...emptyForm, ...prefill },
             },
           ],
           activeTabId: tabId,

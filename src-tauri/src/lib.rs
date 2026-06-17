@@ -37,14 +37,14 @@ use crate::domains::catalog::commands::{
     check_subtypes_create, check_subtypes_list_by_type, check_subtypes_soft_delete,
     check_subtypes_update, check_types_create, check_types_get, check_types_list,
     check_types_soft_delete, check_types_toggle_subtypes, check_types_update,
-    doctor_pricing_soft_delete, doctor_pricing_upsert, doctors_create, doctors_get, doctors_list,
-    doctors_set_active, doctors_soft_delete, doctors_update, inventory_catalog_create,
-    inventory_catalog_get, inventory_catalog_list, inventory_catalog_soft_delete,
-    inventory_catalog_update, inventory_consumption_create, inventory_consumption_list_by_type,
-    inventory_consumption_soft_delete, inventory_consumption_update,
-    operator_specialties_soft_delete, operator_specialties_upsert, operators_create, operators_get,
-    operators_list, operators_set_active, operators_soft_delete, operators_update,
-    pricing_effective,
+    doctor_pricing_soft_delete, doctor_pricing_upsert, doctors_create, doctors_find_duplicates,
+    doctors_get, doctors_list, doctors_set_active, doctors_soft_delete, doctors_update,
+    doctors_with_phone, inventory_catalog_create, inventory_catalog_get, inventory_catalog_list,
+    inventory_catalog_soft_delete, inventory_catalog_update, inventory_consumption_create,
+    inventory_consumption_list_by_type, inventory_consumption_soft_delete,
+    inventory_consumption_update, operator_specialties_soft_delete, operator_specialties_upsert,
+    operators_create, operators_get, operators_list, operators_set_active, operators_soft_delete,
+    operators_update, pricing_effective,
 };
 use crate::domains::catalog::domain::repositories::{
     CheckSubtypeRepo, CheckTypeRepo, DoctorPricingRepo, DoctorRepo, InventoryConsumptionRepo,
@@ -64,7 +64,9 @@ use crate::domains::inventory::commands::{
 use crate::domains::inventory::service::InventoryAdjustmentServiceConfig;
 use crate::domains::inventory::InventoryAdjustmentService;
 use crate::domains::patients::commands::{
-    patients_create, patients_get, patients_search, patients_update,
+    patients_create, patients_find_duplicates, patients_get, patients_list, patients_list_visits,
+    patients_merge, patients_restore, patients_search, patients_soft_delete, patients_stats,
+    patients_update, patients_update_demographics,
 };
 use crate::domains::patients::domain::repositories::PatientRepo;
 use crate::domains::patients::infrastructure::SqlitePatientRepo;
@@ -212,6 +214,8 @@ pub fn run() {
             doctors_update,
             doctors_set_active,
             doctors_soft_delete,
+            doctors_find_duplicates,
+            doctors_with_phone,
             // catalog: doctor pricing
             doctor_pricing_upsert,
             doctor_pricing_soft_delete,
@@ -251,6 +255,14 @@ pub fn run() {
             patients_create,
             patients_get,
             patients_update,
+            patients_list,
+            patients_list_visits,
+            patients_stats,
+            patients_find_duplicates,
+            patients_update_demographics,
+            patients_soft_delete,
+            patients_restore,
+            patients_merge,
             // visits
             visits_checks_grid,
             visits_list_today_by_check,
@@ -422,6 +434,7 @@ async fn bootstrap(
     let patient_service = Arc::new(PatientService::new(
         pool.clone(),
         patient_repo.clone(),
+        visit_repo.clone(),
         audit_repo.clone(),
         outbox_repo.clone(),
         device_id.clone(),

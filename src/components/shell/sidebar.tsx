@@ -12,6 +12,7 @@ import {
   LogOut,
   Microscope,
   HardHat,
+  UsersRound,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -66,6 +67,12 @@ export function Sidebar() {
           key: "shifts",
           to: "/reception/shifts",
           icon: HardHat,
+          enabled: role === "receptionist" || role === "superadmin",
+        },
+        {
+          key: "patients",
+          to: "/reception/patients",
+          icon: UsersRound,
           enabled: role === "receptionist" || role === "superadmin",
         },
         // Operations inventory removed from nav: inventory is managed from the

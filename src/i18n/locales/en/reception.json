@@ -10,7 +10,9 @@
       "open_workspace": "Open workspace",
       "empty": "No active checks configured. Set them up in admin first.",
       "house_only": "House",
-      "has_subtypes": "subtypes"
+      "has_subtypes": "subtypes",
+      "pending_patient": "New visit for {{name}} — pick a check to begin.",
+      "pending_patient_clear": "Clear"
     },
     "workspace": {
       "title": "{{check}}",
@@ -45,6 +47,8 @@
       "patient": "Patient",
       "patient_placeholder": "Type to search or add a new patient",
       "patient_create_hint": "Press Enter to add as a new patient.",
+      "patient_create": "Add \"{{name}}\"",
+      "patient_no_results": "No matching patients.",
       "subtype": "Subtype",
       "subtype_required": "Pick a subtype",
       "doctor": "Doctor",
@@ -75,7 +79,23 @@
         "lock_failed": "Lock failed.",
         "locked": "Visit locked. Receipt rendered.",
         "void_too_short": "Reason must be at least 5 characters."
-      }
+      },
+      "internal": "Internal",
+      "internal_hint": "No referring doctor",
+      "doctor_search_placeholder": "Search or add a doctor",
+      "doctor_create": "Add \"{{name}}\"",
+      "doctor_no_results": "No matching doctors.",
+      "doctor_create_title": "New doctor",
+      "doctor_field_name": "Name",
+      "doctor_field_cut": "Default cut",
+      "doctor_field_cut_kind": "Kind",
+      "doctor_cut_pct": "Percent",
+      "doctor_cut_fixed": "Fixed (IQD)",
+      "doctor_field_phone": "Phone",
+      "doctor_field_specialty": "Specialty",
+      "doctor_name_dup": "A doctor with this name already exists.",
+      "doctor_phone_dup": "Another doctor already uses this phone.",
+      "doctor_create_submit": "Create doctor"
     },
     "tabs": {
       "new_visit": "New visit",

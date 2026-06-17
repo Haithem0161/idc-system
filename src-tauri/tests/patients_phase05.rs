@@ -72,9 +72,11 @@ async fn seed() -> Fixture {
     user_repo.upsert(&mut tx, &receptionist).await.unwrap();
     tx.commit().await.unwrap();
 
+    let visit_repo: Arc<dyn VisitRepo> = Arc::new(SqliteVisitRepo::new(pool.clone()));
     let service = Arc::new(PatientService::new(
         pool.clone(),
         patient_repo,
+        visit_repo,
         audit,
         outbox,
         DEVICE_ID.to_string(),
@@ -452,4 +454,201 @@ async fn patient_outbox_op_is_enqueued_on_create() {
             .await
             .unwrap();
     assert!(count.0 >= 1);
+}
+
+// ---- patient archive (demographics, stats, visits, merge, restore) --------
+
+/// Seed a check type + a draft visit for `patient_id`, returning the visit id.
+async fn seed_visit_for(f: &Fixture, patient_id: Uuid) -> Uuid {
+    let ct_repo: Arc<dyn CheckTypeRepo> = Arc::new(SqliteCheckTypeRepo::new(f.pool.clone()));
+    let ct = CheckType::try_new(CheckTypeNewInput {
+        name_ar: "ا".into(),
+        name_en: Some("T".into()),
+        has_subtypes: false,
+        base_price_iqd: Some(1_000),
+        dye_supported: false,
+        report_supported: false,
+        sort_order: 0,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    })
+    .unwrap();
+    let mut tx = f.pool.begin().await.unwrap();
+    ct_repo.upsert(&mut tx, &ct).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let v = Visit::create_draft(VisitCreateDraftInput {
+        patient_id,
+        receptionist_user_id: f.receptionist.id,
+        check_type_id: ct.id,
+        check_subtype_id: None,
+        doctor_id: None,
+        dye: false,
+        report: false,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    })
+    .unwrap();
+    let id = v.id;
+    let v_repo: Arc<dyn VisitRepo> = Arc::new(SqliteVisitRepo::new(f.pool.clone()));
+    let mut tx = f.pool.begin().await.unwrap();
+    v_repo.upsert(&mut tx, &v).await.unwrap();
+    tx.commit().await.unwrap();
+    id
+}
+
+async fn mk_patient(f: &Fixture, name: &str) -> Patient {
+    f.service
+        .create(
+            f.receptionist.id,
+            ENTITY_ID,
+            PatientCreateInput { name: name.into() },
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn update_demographics_persists_and_validates_sex() {
+    use app_lib::domains::patients::domain::entities::PatientDemographicsInput;
+    let f = seed().await;
+    let p = mk_patient(&f, "Layla").await;
+
+    let updated = f
+        .service
+        .update_demographics(
+            f.receptionist.id,
+            p.id,
+            PatientDemographicsInput {
+                phone: Some("0770 12 34".into()),
+                sex: Some("f".into()),
+                birth_date: Some("1990-01-01".into()),
+                file_no: Some("F-7".into()),
+                notes: Some("  vip ".into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.sex.as_deref(), Some("F"));
+    assert_eq!(updated.notes.as_deref(), Some("vip"));
+    assert!(updated.version > p.version);
+
+    // Invalid sex rejected.
+    let bad = f
+        .service
+        .update_demographics(
+            f.receptionist.id,
+            p.id,
+            PatientDemographicsInput {
+                sex: Some("Z".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert!(bad.is_err());
+}
+
+#[tokio::test]
+async fn restore_undeletes_a_soft_deleted_patient() {
+    let f = seed().await;
+    let p = mk_patient(&f, "Layla").await;
+    f.service
+        .soft_delete(f.receptionist.id, p.id)
+        .await
+        .unwrap();
+    let restored = f.service.restore(f.receptionist.id, p.id).await.unwrap();
+    assert!(restored.deleted_at.is_none());
+    assert!(restored.version > p.version);
+}
+
+#[tokio::test]
+async fn stats_counts_visits_and_drafts() {
+    let f = seed().await;
+    let p = mk_patient(&f, "Layla").await;
+    seed_visit_for(&f, p.id).await;
+    seed_visit_for(&f, p.id).await;
+    let stats = f.service.stats(p.id).await.unwrap();
+    assert_eq!(stats.total_visits, 2);
+    assert_eq!(stats.draft_count, 2);
+    // No locked visits seeded -> nothing spent yet.
+    assert_eq!(stats.total_spent_iqd, 0);
+}
+
+#[tokio::test]
+async fn list_visits_returns_patient_history_newest_first() {
+    let f = seed().await;
+    let p = mk_patient(&f, "Layla").await;
+    seed_visit_for(&f, p.id).await;
+    let visits = f.service.list_visits(p.id, 50, 0).await.unwrap();
+    assert_eq!(visits.len(), 1);
+    assert_eq!(visits[0].status, "draft");
+}
+
+#[tokio::test]
+async fn find_duplicates_groups_same_name() {
+    let f = seed().await;
+    mk_patient(&f, "Layla Hashim").await;
+    mk_patient(&f, "layla hashim").await; // case-insensitive collision
+    mk_patient(&f, "Omar").await; // unique
+    let groups = f.service.find_duplicates(ENTITY_ID).await.unwrap();
+    let name_groups: Vec<_> = groups.iter().filter(|g| g.kind == "name").collect();
+    assert_eq!(name_groups.len(), 1);
+    assert_eq!(name_groups[0].patient_ids.len(), 2);
+}
+
+#[tokio::test]
+async fn merge_repoints_visits_tombstones_merged_and_enqueues_ops() {
+    let f = seed().await;
+    let survivor = mk_patient(&f, "Layla Hashim").await;
+    let merged = mk_patient(&f, "Layla Hashim").await;
+    let v1 = seed_visit_for(&f, merged.id).await;
+    let v2 = seed_visit_for(&f, merged.id).await;
+
+    f.service
+        .merge(f.receptionist.id, survivor.id, merged.id)
+        .await
+        .unwrap();
+
+    // (a) both visits now point at the survivor
+    for vid in [v1, v2] {
+        let (pid,): (String,) = sqlx::query_as("SELECT patient_id FROM visits WHERE id = ?")
+            .bind(vid.to_string())
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+        assert_eq!(pid, survivor.id.to_string());
+    }
+
+    // (b) merged patient is tombstoned
+    let merged_after = f.service.get(merged.id).await.unwrap();
+    assert!(merged_after.deleted_at.is_some());
+
+    // (c) outbox carries an op for each re-pointed visit + the tombstone
+    let (visit_ops,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM outbox WHERE entity = 'visits' AND entity_id IN (?, ?)",
+    )
+    .bind(v1.to_string())
+    .bind(v2.to_string())
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    assert_eq!(visit_ops, 2);
+    let (patient_ops,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE entity = 'patients' AND entity_id = ?")
+            .bind(merged.id.to_string())
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    assert!(patient_ops >= 1);
+}
+
+#[tokio::test]
+async fn merge_rejects_self_merge() {
+    let f = seed().await;
+    let p = mk_patient(&f, "Layla").await;
+    assert!(f
+        .service
+        .merge(f.receptionist.id, p.id, p.id)
+        .await
+        .is_err());
 }

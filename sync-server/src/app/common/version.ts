@@ -50,4 +50,4 @@ export const SERVER_VERSION: string = resolveVersion()
  * Bump this in lockstep whenever a client migration changes a synced column's
  * shape, and set `MIN_CLIENT_SCHEMA_VERSION` to enforce the floor.
  */
-export const SERVER_SCHEMA_VERSION = 11
+export const SERVER_SCHEMA_VERSION = 14

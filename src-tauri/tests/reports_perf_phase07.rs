@@ -176,6 +176,8 @@ async fn rig() -> Rig {
         notes: None,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
+        default_cut_kind: None,
+        default_cut_value: None,
     })
     .unwrap();
     let doctor_pricing = app_lib::domains::catalog::domain::entities::DoctorCheckPricing::try_new(
@@ -253,6 +255,7 @@ async fn rig() -> Rig {
     let patient_service = Arc::new(PatientService::new(
         pool.clone(),
         patient_repo.clone(),
+        visit_repo.clone(),
         audit.clone(),
         outbox.clone(),
         DEVICE_ID.to_string(),

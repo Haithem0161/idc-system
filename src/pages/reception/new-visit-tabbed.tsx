@@ -1,11 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 
 import { AdminHeader, ErrorBanner, FieldLabel } from "@/components/admin/admin-panel"
 import { FeatureToggle } from "@/components/ui/feature-toggle"
 import { OperatorPickerDialog } from "@/components/reception/operator-picker-dialog"
+import { PatientCombobox } from "@/components/patients/patient-combobox"
 import {
   RunningTotalPanel,
   type RunningTotalLine,
@@ -15,7 +16,6 @@ import {
   patientKeys,
   useChecksGrid,
   usePatientCreate,
-  usePatientSearch,
   usePricingEffective,
   useQualifiedOperators,
   useVisitCreateDraft,
@@ -29,7 +29,8 @@ import {
 } from "@/features/settings/queries"
 import { invoke } from "@/lib/ipc"
 import { formatIpcError } from "@/lib/errors"
-import { useCheckSubtypes, useDoctors } from "@/features/catalog/queries"
+import { useCheckSubtypes } from "@/features/catalog/queries"
+import { DoctorCombobox } from "@/components/catalog/doctor-combobox"
 import {
   selectActiveTab,
   useVisitTabsStore,
@@ -68,7 +69,6 @@ export default function NewVisitTabbedPage () {
   const { data: subtypes } = useCheckSubtypes(
     checkType?.has_subtypes ? (activeTab?.checkTypeId ?? null) : null,
   )
-  const { data: doctors } = useDoctors({ include_inactive: false })
 
   // --- Running total -------------------------------------------------------
   // Mirror the canonical Rust money_math: total = price + dye_cost + report.
@@ -157,11 +157,6 @@ export default function NewVisitTabbedPage () {
   const { data: qualifiedOperators } = useQualifiedOperators(
     operatorPickerOpen ? (activeTab?.checkTypeId ?? null) : null,
   )
-  // Defer the search term so the suggestion query trails the keystrokes
-  // (paired with the min-length gate in usePatientSearch) instead of firing
-  // a fresh request on every character.
-  const deferredPatientName = useDeferredValue(activeTab?.form.patientName ?? "")
-  const { data: patientMatches } = usePatientSearch(deferredPatientName)
 
   const patientCreate = usePatientCreate()
   const visitCreate = useVisitCreateDraft()
@@ -365,40 +360,24 @@ export default function NewVisitTabbedPage () {
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-5 lg:col-span-2 panel panel-body">
           <FieldLabel label={t("reception.new_visit.patient")}>
-            <input
-              className="input"
-              placeholder={t("reception.new_visit.patient_placeholder")}
+            <PatientCombobox
               value={form.patientName}
-              onChange={(e) => {
+              hasSelection={Boolean(form.patientId)}
+              placeholder={t("reception.new_visit.patient_placeholder")}
+              hint={t("reception.new_visit.patient_create_hint")}
+              createLabel={(name) =>
+                t("reception.new_visit.patient_create", { name })
+              }
+              noResultsLabel={t("reception.new_visit.patient_no_results")}
+              onType={(name) =>
                 // Typing invalidates a previously-committed patient.
-                patchForm({
-                  patientName: e.target.value,
-                  patientId: null,
-                })
-              }}
-              onBlur={(e) => {
-                const v = e.target.value.trim()
-                if (v.length === 0) return
-                if (form.patientId) return
-                void handlePatientCommit(v)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  void handlePatientCommit((e.target as HTMLInputElement).value)
-                }
-              }}
-              list="patient-search"
-              data-testid="patient-input"
+                patchForm({ patientName: name, patientId: null })
+              }
+              onSelectPatient={(p) =>
+                patchForm({ patientId: p.id, patientName: p.name })
+              }
+              onCommit={(name) => void handlePatientCommit(name)}
             />
-            <datalist id="patient-search">
-              {(patientMatches ?? []).map((p) => (
-                <option key={p.id} value={p.name} />
-              ))}
-            </datalist>
-            <p className="mt-1 text-[11px] text-ink-3">
-              {t("reception.new_visit.patient_create_hint")}
-            </p>
           </FieldLabel>
 
           {checkType?.has_subtypes ? (
@@ -426,18 +405,10 @@ export default function NewVisitTabbedPage () {
           ) : null}
 
           <FieldLabel label={t("reception.new_visit.doctor")}>
-            <select
-              className="input"
-              value={form.doctorId ?? ""}
-              onChange={(e) => patchForm({ doctorId: e.target.value || null })}
-            >
-              <option value="">{t("reception.new_visit.house")}</option>
-              {(doctors ?? []).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+            <DoctorCombobox
+              value={form.doctorId ?? null}
+              onChange={(doctorId) => patchForm({ doctorId })}
+            />
           </FieldLabel>
 
           <div className="flex flex-wrap gap-3">

@@ -13,6 +13,16 @@ use crate::error::{AppError, AppResult};
 pub struct Patient {
     pub id: Uuid,
     pub name: String,
+    /// Optional demographics. The new-visit flow leaves all of these `None`;
+    /// they are captured/edited only from the Patients archive.
+    pub phone: Option<String>,
+    /// `"M"` or `"F"` when set; validated by `clean_sex`.
+    pub sex: Option<String>,
+    /// ISO `YYYY-MM-DD`. Age is derived in the UI.
+    pub birth_date: Option<String>,
+    /// Clinic file / medical-record number.
+    pub file_no: Option<String>,
+    pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
@@ -30,12 +40,46 @@ pub struct PatientNewInput {
     pub origin_device_id: Option<String>,
 }
 
+/// Demographic edit payload for `Patient::update_demographics`. Every field is
+/// optional; an explicit `Some("")` clears the field (normalized to `None`),
+/// while `None` is also treated as "clear". The command layer passes the full
+/// set on every save, so this is a replace, not a partial patch.
+#[derive(Debug, Clone, Default)]
+pub struct PatientDemographicsInput {
+    pub phone: Option<String>,
+    pub sex: Option<String>,
+    pub birth_date: Option<String>,
+    pub file_no: Option<String>,
+    pub notes: Option<String>,
+}
+
 fn clean_name(raw: &str) -> AppResult<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err(AppError::Validation("patient name required".into()));
     }
     Ok(trimmed.to_string())
+}
+
+/// Trim an optional free-text field; empty-after-trim collapses to `None` so a
+/// cleared input is stored as NULL rather than an empty string.
+fn clean_opt(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// Validate `sex`: accepts `M`/`F` (any case, trimmed); empty -> `None`;
+/// anything else is a validation error.
+fn clean_sex(raw: Option<&str>) -> AppResult<Option<String>> {
+    match clean_opt(raw) {
+        None => Ok(None),
+        Some(s) => match s.to_ascii_uppercase().as_str() {
+            "M" => Ok(Some("M".into())),
+            "F" => Ok(Some("F".into())),
+            _ => Err(AppError::Validation("sex must be 'M' or 'F'".into())),
+        },
+    }
 }
 
 impl Patient {
@@ -48,6 +92,11 @@ impl Patient {
         Ok(Self {
             id: Uuid::now_v7(),
             name,
+            phone: None,
+            sex: None,
+            birth_date: None,
+            file_no: None,
+            notes: None,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -57,6 +106,34 @@ impl Patient {
             origin_device_id: input.origin_device_id,
             entity_id: input.entity_id,
         })
+    }
+
+    /// Replace the demographic fields. Validates `sex`, normalizes blanks to
+    /// `None`, and bumps the sync columns. Refuses on a tombstoned patient.
+    pub fn update_demographics(mut self, input: PatientDemographicsInput) -> AppResult<Self> {
+        if self.deleted_at.is_some() {
+            return Err(AppError::Validation("patient is deleted".into()));
+        }
+        self.phone = clean_opt(input.phone.as_deref());
+        self.sex = clean_sex(input.sex.as_deref())?;
+        self.birth_date = clean_opt(input.birth_date.as_deref());
+        self.file_no = clean_opt(input.file_no.as_deref());
+        self.notes = clean_opt(input.notes.as_deref());
+        self.updated_at = Utc::now();
+        self.version += 1;
+        self.dirty = true;
+        Ok(self)
+    }
+
+    /// Inverse of `soft_delete`: clear the tombstone and bump the sync columns
+    /// so the un-delete propagates.
+    pub fn restore(mut self) -> Self {
+        let now = Utc::now();
+        self.deleted_at = None;
+        self.updated_at = now;
+        self.version += 1;
+        self.dirty = true;
+        self
     }
 
     pub fn rename(mut self, new_name: &str) -> AppResult<Self> {
@@ -166,5 +243,78 @@ mod tests {
         assert!(deleted.deleted_at.is_some());
         assert_eq!(deleted.version, p.version + 1);
         assert!(deleted.dirty);
+    }
+
+    #[test]
+    fn try_new_leaves_demographics_none() {
+        let p = Patient::try_new(input("Layla")).unwrap();
+        assert!(p.phone.is_none());
+        assert!(p.sex.is_none());
+        assert!(p.birth_date.is_none());
+        assert!(p.file_no.is_none());
+        assert!(p.notes.is_none());
+    }
+
+    fn demo(sex: Option<&str>) -> PatientDemographicsInput {
+        PatientDemographicsInput {
+            phone: Some("0770 000 1234".into()),
+            sex: sex.map(str::to_string),
+            birth_date: Some("1990-05-01".into()),
+            file_no: Some("F-42".into()),
+            notes: Some("  recurring patient ".into()),
+        }
+    }
+
+    #[test]
+    fn update_demographics_sets_fields_trims_and_bumps_version() {
+        let p = Patient::try_new(input("Layla")).unwrap();
+        let v0 = p.version;
+        let u = p.update_demographics(demo(Some("f"))).unwrap();
+        assert_eq!(u.phone.as_deref(), Some("0770 000 1234"));
+        assert_eq!(u.sex.as_deref(), Some("F")); // lowercased input normalized
+        assert_eq!(u.birth_date.as_deref(), Some("1990-05-01"));
+        assert_eq!(u.file_no.as_deref(), Some("F-42"));
+        assert_eq!(u.notes.as_deref(), Some("recurring patient")); // trimmed
+        assert_eq!(u.version, v0 + 1);
+        assert!(u.dirty);
+    }
+
+    #[test]
+    fn update_demographics_blanks_collapse_to_none() {
+        let p = Patient::try_new(input("Layla")).unwrap();
+        let u = p
+            .update_demographics(PatientDemographicsInput {
+                phone: Some("   ".into()),
+                sex: Some("".into()),
+                birth_date: None,
+                file_no: Some("".into()),
+                notes: None,
+            })
+            .unwrap();
+        assert!(u.phone.is_none());
+        assert!(u.sex.is_none());
+        assert!(u.file_no.is_none());
+    }
+
+    #[test]
+    fn update_demographics_rejects_invalid_sex() {
+        let p = Patient::try_new(input("Layla")).unwrap();
+        assert!(p.update_demographics(demo(Some("X"))).is_err());
+    }
+
+    #[test]
+    fn update_demographics_rejects_when_deleted() {
+        let p = Patient::try_new(input("Layla")).unwrap().soft_delete();
+        assert!(p.update_demographics(demo(Some("M"))).is_err());
+    }
+
+    #[test]
+    fn restore_clears_deleted_at_and_bumps_version() {
+        let deleted = Patient::try_new(input("Layla")).unwrap().soft_delete();
+        let v = deleted.version;
+        let restored = deleted.restore();
+        assert!(restored.deleted_at.is_none());
+        assert_eq!(restored.version, v + 1);
+        assert!(restored.dirty);
     }
 }

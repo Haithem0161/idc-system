@@ -27,12 +27,15 @@ impl DoctorRepo for SqliteDoctorRepo {
     async fn upsert(&self, tx: &mut Tx<'_>, doc: &Doctor) -> AppResult<()> {
         sqlx::query(
             "INSERT INTO doctors (\
-                id, name, specialty, phone, is_active, notes, created_at, updated_at, \
+                id, name, specialty, phone, is_active, notes, \
+                default_cut_kind, default_cut_value, created_at, updated_at, \
                 deleted_at, version, dirty, last_synced_at, origin_device_id, entity_id\
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) \
+             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) \
              ON CONFLICT(id) DO UPDATE SET \
                name = excluded.name, specialty = excluded.specialty, phone = excluded.phone, \
                is_active = excluded.is_active, notes = excluded.notes, \
+               default_cut_kind = excluded.default_cut_kind, \
+               default_cut_value = excluded.default_cut_value, \
                updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, \
                version = excluded.version, dirty = excluded.dirty, \
                last_synced_at = excluded.last_synced_at",
@@ -43,6 +46,8 @@ impl DoctorRepo for SqliteDoctorRepo {
         .bind(doc.phone.as_deref())
         .bind(doc.is_active as i64)
         .bind(doc.notes.as_deref())
+        .bind(doc.default_cut_kind.as_deref())
+        .bind(doc.default_cut_value)
         .bind(dt_to_str(doc.created_at))
         .bind(dt_to_str(doc.updated_at))
         .bind(dt_opt_to_str(doc.deleted_at))
@@ -155,6 +160,8 @@ struct DoctorRow {
     phone: Option<String>,
     is_active: i64,
     notes: Option<String>,
+    default_cut_kind: Option<String>,
+    default_cut_value: Option<i64>,
     created_at: String,
     updated_at: String,
     deleted_at: Option<String>,
@@ -174,6 +181,8 @@ impl DoctorRow {
             phone: self.phone,
             is_active: self.is_active != 0,
             notes: self.notes,
+            default_cut_kind: self.default_cut_kind,
+            default_cut_value: self.default_cut_value,
             created_at: parse_dt(&self.created_at)?,
             updated_at: parse_dt(&self.updated_at)?,
             deleted_at: parse_dt_opt(self.deleted_at.as_deref())?,

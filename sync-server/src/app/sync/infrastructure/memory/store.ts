@@ -81,6 +81,11 @@ export interface DoctorSyncRecord {
   phone: string | null
   is_active: boolean
   notes: string | null
+  // Doctor-level default cut (client migration 014). Nullable; absent on
+  // payloads pushed by an older client, so consumers coerce undefined -> null.
+  // Both set/cleared together; default_cut_kind is 'pct' | 'fixed' | null.
+  default_cut_kind: string | null
+  default_cut_value: number | null
   entity_id: string
   version: number
   updated_at: string
@@ -178,6 +183,13 @@ export interface OperatorShiftSyncRecord {
 export interface PatientSyncRecord {
   id: string
   name: string
+  // Demographics (client migration 012). Nullable; absent on payloads pushed
+  // by an older client, so every consumer coerces `undefined` to `null`.
+  phone: string | null
+  sex: string | null
+  birth_date: string | null
+  file_no: string | null
+  notes: string | null
   entity_id: string
   version: number
   created_at: string

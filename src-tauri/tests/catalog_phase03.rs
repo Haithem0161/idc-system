@@ -87,6 +87,8 @@ fn new_doctor(name: &str, specialty: Option<&str>) -> Doctor {
         notes: None,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
+        default_cut_kind: None,
+        default_cut_value: None,
     })
     .unwrap()
 }

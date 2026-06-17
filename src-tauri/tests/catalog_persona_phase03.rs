@@ -188,6 +188,8 @@ async fn p3_mariam_superadmin_catalog_day_walks_every_phase_03_ipc() {
                 specialty: Some("Cardiology".into()),
                 phone: Some("0770-100".into()),
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -203,6 +205,8 @@ async fn p3_mariam_superadmin_catalog_day_walks_every_phase_03_ipc() {
                 specialty: Some("Radiology".into()),
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await

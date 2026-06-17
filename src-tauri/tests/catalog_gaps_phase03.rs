@@ -190,6 +190,8 @@ async fn p03_g05_doctors_list_includes_inactive_doctor_when_include_id_matches()
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -270,6 +272,8 @@ async fn p03_g08_doctor_pricing_upsert_enqueues_outbox_row() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -316,6 +320,8 @@ async fn p03_g19_doctors_list_excludes_soft_deleted_even_when_include_inactive()
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -389,6 +395,8 @@ async fn p03_g24_pull_apply_overwrites_local_future_dated_updated_at() {
         notes: None,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
+        default_cut_kind: None,
+        default_cut_value: None,
     })
     .unwrap();
     let mut tx = pool.begin().await.unwrap();
@@ -458,6 +466,8 @@ async fn p03_g33_doctor_update_bumps_version_and_marks_dirty() {
                 specialty: None,
                 phone: None,
                 notes: None,
+                default_cut_kind: None,
+                default_cut_value: None,
             },
         )
         .await
@@ -660,6 +670,8 @@ async fn p03_g14_doctor_pricing_cut_kind_round_trips_via_lowercase_wire_format()
         notes: None,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
+        default_cut_kind: None,
+        default_cut_value: None,
     })
     .unwrap();
     let mut tx = pool.begin().await.unwrap();

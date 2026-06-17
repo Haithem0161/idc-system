@@ -14,13 +14,21 @@ export default function ChecksGridPage () {
 
   const openTab = useVisitTabsStore((s) => s.openTab)
   const tabsCount = useVisitTabsStore((s) => s.tabs.length)
+  const pendingPatient = useVisitTabsStore((s) => s.pendingPatient)
+  const setPendingPatient = useVisitTabsStore((s) => s.setPendingPatient)
 
   function startVisit (checkTypeId: string) {
     if (tabsCount >= VISIT_TAB_CAP) {
       window.alert(t("reception.tabs.cap_reached"))
       return
     }
-    openTab(checkTypeId)
+    // If we arrived here from "New visit for this patient", bind that patient
+    // into the new tab and clear the hand-off.
+    const prefill = pendingPatient
+      ? { patientId: pendingPatient.id, patientName: pendingPatient.name }
+      : undefined
+    if (pendingPatient) setPendingPatient(null)
+    openTab(checkTypeId, prefill)
     navigate("/reception/new")
   }
 
@@ -37,6 +45,22 @@ export default function ChecksGridPage () {
         )}
       />
       <ErrorBanner message={error ? formatIpcError(error, t) : null} />
+      {pendingPatient ? (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-line-2 bg-paper-2 px-4 py-2.5 text-[13px]">
+          <span className="text-ink-2">
+            {t("reception.checks_grid.pending_patient", {
+              name: pendingPatient.name,
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPendingPatient(null)}
+            className="text-[12px] font-medium text-ink-3 hover:text-crimson"
+          >
+            {t("reception.checks_grid.pending_patient_clear")}
+          </button>
+        </div>
+      ) : null}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {(cards ?? []).map((card) => {
           const localized =

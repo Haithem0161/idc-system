@@ -14,6 +14,14 @@ pub struct Doctor {
     pub phone: Option<String>,
     pub is_active: bool,
     pub notes: Option<String>,
+    /// Doctor-level default cut kind: `"pct"` or `"fixed"` when set. Applied by
+    /// the money engine when no per-check `DoctorCheckPricing` row matches.
+    /// `None` means the doctor has no default (cut falls to 0 without a
+    /// per-check row). Always set/cleared together with `default_cut_value`.
+    pub default_cut_kind: Option<String>,
+    /// Doctor-level default cut value: a percentage (0..=100) when kind is
+    /// `"pct"`, or an absolute IQD amount (>= 0) when kind is `"fixed"`.
+    pub default_cut_value: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
@@ -30,6 +38,8 @@ pub struct DoctorNewInput {
     pub specialty: Option<String>,
     pub phone: Option<String>,
     pub notes: Option<String>,
+    pub default_cut_kind: Option<String>,
+    pub default_cut_value: Option<i64>,
     pub entity_id: String,
     pub origin_device_id: Option<String>,
 }
@@ -40,10 +50,51 @@ pub struct DoctorUpdate {
     pub specialty: Option<Option<String>>,
     pub phone: Option<Option<String>>,
     pub notes: Option<Option<String>>,
+    /// Outer `Some` = caller is changing the default cut; inner pair is the new
+    /// `(kind, value)` (or `None` to clear it). Outer `None` = leave as-is.
+    pub default_cut: Option<Option<(String, i64)>>,
 }
 
 fn clean_optional(s: Option<String>) -> Option<String> {
     s.map(|x| x.trim().to_string()).filter(|x| !x.is_empty())
+}
+
+/// Validate and normalize a doctor default cut. Accepts `(kind, value)` where
+/// kind is `pct` (value 0..=100) or `fixed` (value >= 0; IQD). Both halves are
+/// required together. Returns the normalized `(kind, value)` or a validation
+/// error. Mirrors the per-check cut rules in `money_math` so the default and
+/// the override share one contract.
+fn clean_default_cut(
+    kind: Option<String>,
+    value: Option<i64>,
+) -> AppResult<(Option<String>, Option<i64>)> {
+    match (kind, value) {
+        (None, None) => Ok((None, None)),
+        (Some(k), Some(v)) => match k.trim().to_lowercase().as_str() {
+            "pct" => {
+                if !(0..=100).contains(&v) {
+                    return Err(AppError::Validation(
+                        "default cut percentage must be 0..=100".into(),
+                    ));
+                }
+                Ok((Some("pct".into()), Some(v)))
+            }
+            "fixed" => {
+                if v < 0 {
+                    return Err(AppError::Validation(
+                        "default cut amount must be non-negative".into(),
+                    ));
+                }
+                Ok((Some("fixed".into()), Some(v)))
+            }
+            _ => Err(AppError::Validation(
+                "default cut kind must be 'pct' or 'fixed'".into(),
+            )),
+        },
+        _ => Err(AppError::Validation(
+            "default cut requires both a kind and a value".into(),
+        )),
+    }
 }
 
 impl Doctor {
@@ -52,6 +103,8 @@ impl Doctor {
         if name.is_empty() {
             return Err(AppError::Validation("doctor name required".into()));
         }
+        let (default_cut_kind, default_cut_value) =
+            clean_default_cut(input.default_cut_kind, input.default_cut_value)?;
         let now = Utc::now();
         Ok(Self {
             id: Uuid::now_v7(),
@@ -60,6 +113,8 @@ impl Doctor {
             phone: clean_optional(input.phone),
             is_active: true,
             notes: clean_optional(input.notes),
+            default_cut_kind,
+            default_cut_value,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -87,6 +142,15 @@ impl Doctor {
         }
         if let Some(n) = patch.notes {
             self.notes = clean_optional(n);
+        }
+        if let Some(cut) = patch.default_cut {
+            let (kind, value) = match cut {
+                Some((k, v)) => (Some(k), Some(v)),
+                None => (None, None),
+            };
+            let (k, v) = clean_default_cut(kind, value)?;
+            self.default_cut_kind = k;
+            self.default_cut_value = v;
         }
         self.updated_at = Utc::now();
         self.version += 1;
@@ -123,6 +187,8 @@ mod tests {
             specialty: None,
             phone: None,
             notes: None,
+            default_cut_kind: None,
+            default_cut_value: None,
             entity_id: "t".into(),
             origin_device_id: None,
         }
@@ -148,6 +214,8 @@ mod tests {
             specialty: Some("  ".into()),
             phone: Some("  ".into()),
             notes: Some("  ".into()),
+            default_cut_kind: None,
+            default_cut_value: None,
             entity_id: "t".into(),
             origin_device_id: None,
         })
@@ -164,6 +232,8 @@ mod tests {
             specialty: Some("  Cardio  ".into()),
             phone: Some("  555  ".into()),
             notes: Some("  test  ".into()),
+            default_cut_kind: None,
+            default_cut_value: None,
             entity_id: "t".into(),
             origin_device_id: None,
         })
@@ -215,6 +285,8 @@ mod tests {
             specialty: Some("Cardio".into()),
             phone: Some("555".into()),
             notes: Some("note".into()),
+            default_cut_kind: None,
+            default_cut_value: None,
             entity_id: "t".into(),
             origin_device_id: None,
         })
@@ -251,5 +323,89 @@ mod tests {
         assert!(!after.is_active);
         assert!(after.dirty);
         assert_eq!(after.version, v0 + 1);
+    }
+
+    fn input_with_cut(name: &str, kind: Option<&str>, value: Option<i64>) -> DoctorNewInput {
+        DoctorNewInput {
+            default_cut_kind: kind.map(str::to_string),
+            default_cut_value: value,
+            ..input(name)
+        }
+    }
+
+    #[test]
+    fn try_new_accepts_and_normalizes_pct_default_cut() {
+        let d = Doctor::try_new(input_with_cut("X", Some("PCT"), Some(15))).unwrap();
+        assert_eq!(d.default_cut_kind.as_deref(), Some("pct"));
+        assert_eq!(d.default_cut_value, Some(15));
+    }
+
+    #[test]
+    fn try_new_accepts_fixed_default_cut() {
+        let d = Doctor::try_new(input_with_cut("X", Some("fixed"), Some(20000))).unwrap();
+        assert_eq!(d.default_cut_kind.as_deref(), Some("fixed"));
+        assert_eq!(d.default_cut_value, Some(20000));
+    }
+
+    #[test]
+    fn try_new_rejects_pct_out_of_range() {
+        assert!(Doctor::try_new(input_with_cut("X", Some("pct"), Some(101))).is_err());
+        assert!(Doctor::try_new(input_with_cut("X", Some("pct"), Some(-1))).is_err());
+    }
+
+    #[test]
+    fn try_new_rejects_negative_fixed_cut() {
+        assert!(Doctor::try_new(input_with_cut("X", Some("fixed"), Some(-1))).is_err());
+    }
+
+    #[test]
+    fn try_new_rejects_unknown_cut_kind() {
+        assert!(Doctor::try_new(input_with_cut("X", Some("flat"), Some(10))).is_err());
+    }
+
+    #[test]
+    fn try_new_rejects_partial_default_cut() {
+        // kind without value, or value without kind, are both invalid.
+        assert!(Doctor::try_new(input_with_cut("X", Some("pct"), None)).is_err());
+        assert!(Doctor::try_new(input_with_cut("X", None, Some(10))).is_err());
+    }
+
+    #[test]
+    fn try_new_allows_no_default_cut() {
+        let d = Doctor::try_new(input_with_cut("X", None, None)).unwrap();
+        assert!(d.default_cut_kind.is_none());
+        assert!(d.default_cut_value.is_none());
+    }
+
+    #[test]
+    fn with_updated_fields_sets_and_clears_default_cut() {
+        let d = Doctor::try_new(input("X")).unwrap();
+        let set = d
+            .with_updated_fields(DoctorUpdate {
+                default_cut: Some(Some(("pct".into(), 30))),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(set.default_cut_kind.as_deref(), Some("pct"));
+        assert_eq!(set.default_cut_value, Some(30));
+
+        let cleared = set
+            .with_updated_fields(DoctorUpdate {
+                default_cut: Some(None),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(cleared.default_cut_kind.is_none());
+        assert!(cleared.default_cut_value.is_none());
+    }
+
+    #[test]
+    fn with_updated_fields_rejects_invalid_default_cut() {
+        let d = Doctor::try_new(input("X")).unwrap();
+        let res = d.with_updated_fields(DoctorUpdate {
+            default_cut: Some(Some(("pct".into(), 200))),
+            ..Default::default()
+        });
+        assert!(res.is_err());
     }
 }

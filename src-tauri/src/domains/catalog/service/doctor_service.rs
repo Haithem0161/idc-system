@@ -26,6 +26,12 @@ pub struct DoctorCreateInput {
     pub specialty: Option<String>,
     pub phone: Option<String>,
     pub notes: Option<String>,
+    /// Optional doctor-level default cut. Both halves must be present together
+    /// (`pct`/`fixed` + value) or both absent; validated in `Doctor::try_new`.
+    #[serde(default)]
+    pub default_cut_kind: Option<String>,
+    #[serde(default)]
+    pub default_cut_value: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -34,6 +40,35 @@ pub struct DoctorUpdateInput {
     pub specialty: Option<Option<String>>,
     pub phone: Option<Option<String>>,
     pub notes: Option<Option<String>>,
+    /// Outer `Some` = the caller is changing the default cut. Inner pair is the
+    /// new `(kind, value)`, or `None` to clear it. Outer `None` = leave as-is.
+    #[serde(default)]
+    pub default_cut: Option<Option<(String, i64)>>,
+}
+
+/// A set of doctors that look like duplicates (same normalized name, or same
+/// digit-only phone). `kind` is `"name"` or `"phone"`.
+#[derive(Debug, Clone)]
+pub struct DuplicateDoctorGroup {
+    pub kind: String,
+    pub key: String,
+    pub doctor_ids: Vec<Uuid>,
+}
+
+/// Case- and whitespace-folded name key for duplicate grouping. Collapses runs
+/// of whitespace to a single space and lowercases. Matches the patient-archive
+/// normalization so the two behave the same.
+fn normalize_name(name: &str) -> String {
+    name.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// Digit-only phone key for duplicate grouping (strips spaces, dashes, parens,
+/// leading +). An empty result means "no usable phone".
+fn normalize_phone(phone: &str) -> String {
+    phone.chars().filter(|c| c.is_ascii_digit()).collect()
 }
 
 #[derive(Clone)]
@@ -104,6 +139,97 @@ impl DoctorService {
             .ok_or_else(|| AppError::NotFound(format!("doctor {id}")))
     }
 
+    /// Group live doctors that look like duplicates, by normalized name
+    /// (case/space-folded) and by digit-only phone. Mirrors the patient
+    /// duplicate-detection contract. Only groups with 2+ members are returned.
+    pub async fn find_duplicates(&self, entity_id: &str) -> AppResult<Vec<DuplicateDoctorGroup>> {
+        let doctors = self
+            .repo
+            .list(
+                crate::domains::catalog::domain::repositories::CatalogListFilter {
+                    entity_id: entity_id.to_string(),
+                    include_deleted: false,
+                    include_inactive: true,
+                    query: None,
+                },
+            )
+            .await?;
+
+        let mut by_name: std::collections::HashMap<String, Vec<Uuid>> =
+            std::collections::HashMap::new();
+        let mut by_phone: std::collections::HashMap<String, Vec<Uuid>> =
+            std::collections::HashMap::new();
+        for d in &doctors {
+            let name_key = normalize_name(&d.name);
+            if !name_key.is_empty() {
+                by_name.entry(name_key).or_default().push(d.id);
+            }
+            if let Some(phone_key) = d.phone.as_deref().map(normalize_phone) {
+                if !phone_key.is_empty() {
+                    by_phone.entry(phone_key).or_default().push(d.id);
+                }
+            }
+        }
+
+        let mut groups = Vec::new();
+        for (key, ids) in by_name {
+            if ids.len() > 1 {
+                groups.push(DuplicateDoctorGroup {
+                    kind: "name".into(),
+                    key,
+                    doctor_ids: ids,
+                });
+            }
+        }
+        for (key, ids) in by_phone {
+            if ids.len() > 1 {
+                groups.push(DuplicateDoctorGroup {
+                    kind: "phone".into(),
+                    key,
+                    doctor_ids: ids,
+                });
+            }
+        }
+        groups.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.key.cmp(&b.key)));
+        Ok(groups)
+    }
+
+    /// Return the live doctors (excluding `exclude_id`) whose digit-only phone
+    /// matches `phone`. Used to warn before saving a duplicate phone. Empty
+    /// `phone` returns no matches.
+    pub async fn doctors_with_phone(
+        &self,
+        entity_id: &str,
+        phone: &str,
+        exclude_id: Option<Uuid>,
+    ) -> AppResult<Vec<Doctor>> {
+        let target = normalize_phone(phone);
+        if target.is_empty() {
+            return Ok(vec![]);
+        }
+        let doctors = self
+            .repo
+            .list(
+                crate::domains::catalog::domain::repositories::CatalogListFilter {
+                    entity_id: entity_id.to_string(),
+                    include_deleted: false,
+                    include_inactive: true,
+                    query: None,
+                },
+            )
+            .await?;
+        Ok(doctors
+            .into_iter()
+            .filter(|d| Some(d.id) != exclude_id)
+            .filter(|d| {
+                d.phone
+                    .as_deref()
+                    .map(normalize_phone)
+                    .is_some_and(|p| p == target)
+            })
+            .collect())
+    }
+
     pub async fn get_with_pricings(
         &self,
         id: Uuid,
@@ -126,6 +252,8 @@ impl DoctorService {
             specialty: input.specialty,
             phone: input.phone,
             notes: input.notes,
+            default_cut_kind: input.default_cut_kind,
+            default_cut_value: input.default_cut_value,
             entity_id: entity_id.to_string(),
             origin_device_id: Some(self.device_id.clone()),
         })?;
@@ -165,6 +293,7 @@ impl DoctorService {
             specialty: input.specialty,
             phone: input.phone,
             notes: input.notes,
+            default_cut: input.default_cut,
         })?;
         let write = UpsertDoctorWrite {
             before: Some(current),

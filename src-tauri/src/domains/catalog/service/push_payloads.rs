@@ -88,6 +88,11 @@ pub struct DoctorPushPayload {
     pub phone: Option<String>,
     pub is_active: bool,
     pub notes: Option<String>,
+    // Doctor-level default cut (migration 014). The sync server's Doctor model +
+    // sync record must carry these same nullable columns or they are dropped on
+    // the round-trip. Both set/cleared together.
+    pub default_cut_kind: Option<String>,
+    pub default_cut_value: Option<i64>,
     pub entity_id: String,
     pub version: i64,
     pub updated_at: String,
@@ -104,6 +109,8 @@ impl From<&Doctor> for DoctorPushPayload {
             phone: d.phone.clone(),
             is_active: d.is_active,
             notes: d.notes.clone(),
+            default_cut_kind: d.default_cut_kind.clone(),
+            default_cut_value: d.default_cut_value,
             entity_id: d.entity_id.clone(),
             version: d.version,
             updated_at: d.updated_at.to_rfc3339(),

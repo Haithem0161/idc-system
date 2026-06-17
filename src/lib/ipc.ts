@@ -157,6 +157,11 @@ export type CommandMap = {
     result: DoctorRecord
   }
   doctors_soft_delete: { args: { args: { id: string } }; result: null }
+  doctors_find_duplicates: { args: void; result: DuplicateDoctorGroupRecord[] }
+  doctors_with_phone: {
+    args: { args: { phone: string; exclude_id?: string | null } }
+    result: DoctorRecord[]
+  }
   // Catalog: doctor pricing
   doctor_pricing_upsert: {
     args: { args: DoctorPricingUpsertArgs }
@@ -278,6 +283,56 @@ export type CommandMap = {
   patients_update: {
     args: { args: { id: string; name: string } }
     result: PatientRecord
+  }
+  // ---- Patient archive ----
+  patients_list: {
+    args: {
+      args: {
+        query?: string
+        include_deleted?: boolean
+        sort?: PatientSortLiteral
+        limit?: number
+        offset?: number
+      }
+    }
+    result: PatientRecord[]
+  }
+  patients_list_visits: {
+    args: { args: { id: string; limit?: number; offset?: number } }
+    result: PatientVisitSummary[]
+  }
+  patients_stats: {
+    args: { args: { id: string } }
+    result: PatientStatsRecord
+  }
+  patients_find_duplicates: {
+    args: void
+    result: DuplicateGroupRecord[]
+  }
+  patients_update_demographics: {
+    args: {
+      args: {
+        id: string
+        phone?: string | null
+        sex?: "M" | "F" | null
+        birth_date?: string | null
+        file_no?: string | null
+        notes?: string | null
+      }
+    }
+    result: PatientRecord
+  }
+  patients_soft_delete: {
+    args: { args: { id: string } }
+    result: null
+  }
+  patients_restore: {
+    args: { args: { id: string } }
+    result: PatientRecord
+  }
+  patients_merge: {
+    args: { args: { survivor_id: string; merged_id: string } }
+    result: null
   }
   // ---- Phase 5: visits ----
   visits_checks_grid: { args: void; result: ChecksGridCardRecord[] }
@@ -529,6 +584,8 @@ export interface CheckSubtypeUpdateArgs {
   sort_order?: number
 }
 
+export type DoctorCutKindLiteral = "pct" | "fixed"
+
 export interface DoctorRecord {
   id: string
   name: string
@@ -536,6 +593,9 @@ export interface DoctorRecord {
   phone: string | null
   is_active: boolean
   notes: string | null
+  // Doctor-level default cut (migration 014). Both null or both set together.
+  default_cut_kind: DoctorCutKindLiteral | null
+  default_cut_value: number | null
   created_at: string
   updated_at: string
   version: number
@@ -547,6 +607,8 @@ export interface DoctorCreateArgs {
   specialty?: string | null
   phone?: string | null
   notes?: string | null
+  default_cut_kind?: DoctorCutKindLiteral | null
+  default_cut_value?: number | null
 }
 
 export interface DoctorUpdateArgs {
@@ -555,6 +617,15 @@ export interface DoctorUpdateArgs {
   specialty?: string | null
   phone?: string | null
   notes?: string | null
+  // Outer presence = "change the default cut"; value is [kind, value] or null
+  // (clear). Omit the field entirely to leave the default cut unchanged.
+  default_cut?: [DoctorCutKindLiteral, number] | null
+}
+
+export interface DuplicateDoctorGroupRecord {
+  kind: "name" | "phone"
+  key: string
+  doctor_ids: string[]
 }
 
 export interface DoctorPricingRecord {
@@ -761,12 +832,55 @@ export interface ShiftOverlapPair {
 export interface PatientRecord {
   id: string
   name: string
+  // Optional demographics (patient archive). Name-only patients (created from
+  // the new-visit flow) leave these null.
+  phone: string | null
+  sex: "M" | "F" | null
+  birth_date: string | null
+  file_no: string | null
+  notes: string | null
   created_at: string
   updated_at: string
   deleted_at: string | null
   version: number
   dirty: boolean
   entity_id: string
+}
+
+export type PatientSortLiteral =
+  | "name_asc"
+  | "name_desc"
+  | "created_desc"
+  | "updated_desc"
+
+/** A single row in a patient's visit-history table (from visit snapshots). */
+export interface PatientVisitSummary {
+  id: string
+  status: "draft" | "locked" | "voided"
+  locked_at: string | null
+  created_at: string
+  total_amount_iqd: number | null
+  check_type_name_ar: string | null
+  check_type_name_en: string | null
+  doctor_name: string | null
+  void_reason: string | null
+}
+
+/** Aggregate stats for the patient detail header. */
+export interface PatientStatsRecord {
+  total_visits: number
+  /** Sum of locked-visit totals. */
+  total_spent_iqd: number
+  last_visit_at: string | null
+  draft_count: number
+  voided_count: number
+}
+
+/** A group of patients that collide on name or phone. */
+export interface DuplicateGroupRecord {
+  kind: "name" | "phone"
+  key: string
+  patient_ids: string[]
 }
 
 export interface ChecksGridCardRecord {

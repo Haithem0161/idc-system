@@ -16,6 +16,7 @@ import type {
   DoctorPricingUpsertArgs,
   DoctorRecord,
   DoctorUpdateArgs,
+  DuplicateDoctorGroupRecord,
   InventoryItemCreateArgs,
   InventoryItemRecord,
   InventoryItemUpdateArgs,
@@ -31,6 +32,7 @@ export const catalogKeys = {
   checkSubtypes: (typeId: string) => ["catalog", "checkSubtypes", typeId] as const,
   doctors: ["catalog", "doctors"] as const,
   doctor: (id: string) => ["catalog", "doctors", id] as const,
+  doctorDuplicates: ["catalog", "doctors", "duplicates"] as const,
   operators: ["catalog", "operators"] as const,
   operator: (id: string) => ["catalog", "operators", id] as const,
   inventoryItems: ["catalog", "inventory"] as const,
@@ -192,6 +194,29 @@ export function useDoctorSoftDelete () {
   return useMutation({
     mutationFn: (id: string) => invoke("doctors_soft_delete", { args: { id } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: catalogKeys.doctors }),
+  })
+}
+
+export function useDoctorDuplicates (enabled = true) {
+  return useQuery({
+    queryKey: catalogKeys.doctorDuplicates,
+    enabled: enabled && isTauri(),
+    queryFn: (): Promise<DuplicateDoctorGroupRecord[]> => invoke("doctors_find_duplicates"),
+  })
+}
+
+/**
+ * Look up live doctors whose digit-only phone matches `phone`, excluding one id
+ * (the doctor being edited). Used to warn before saving a duplicate phone. The
+ * query is disabled for an empty phone so we never round-trip for nothing.
+ */
+export function useDoctorsWithPhone (phone: string, excludeId?: string | null) {
+  const trimmed = phone.trim()
+  return useQuery({
+    queryKey: [...catalogKeys.doctors, "byPhone", trimmed, excludeId ?? null] as const,
+    enabled: trimmed.length > 0 && isTauri(),
+    queryFn: (): Promise<DoctorRecord[]> =>
+      invoke("doctors_with_phone", { args: { phone: trimmed, exclude_id: excludeId ?? null } }),
   })
 }
 

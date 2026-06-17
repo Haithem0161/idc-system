@@ -245,6 +245,11 @@ export class PrismaEntityStore implements SyncEntityStore {
           phone: row.phone,
           isActive: row.is_active,
           notes: row.notes,
+          // Default cut (client migration 014). `?? null` so a row pushed by an
+          // older client that omits these keys clears them rather than leaving
+          // the prior value -- matching the desktop's overwrite-on-save form.
+          defaultCutKind: row.default_cut_kind ?? null,
+          defaultCutValue: row.default_cut_value ?? null,
           createdAt: new Date(row.updated_at),
           updatedAt: new Date(row.updated_at),
           deletedAt: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -410,6 +415,15 @@ export class PrismaEntityStore implements SyncEntityStore {
         const data: Prisma.PatientUncheckedCreateInput = {
           id: row.id,
           name: row.name,
+          // Demographics (client migration 012). `?? null` so a row pushed by
+          // an older client that omits these keys clears them rather than
+          // leaving the prior value -- matching the desktop's overwrite-on-save
+          // semantics for the demographics form.
+          phone: row.phone ?? null,
+          sex: row.sex ?? null,
+          birthDate: row.birth_date ?? null,
+          fileNo: row.file_no ?? null,
+          notes: row.notes ?? null,
           createdAt: new Date(row.created_at),
           updatedAt: new Date(row.updated_at),
           deletedAt: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -902,6 +916,8 @@ function toDoctorSyncRecord (r: {
   phone: string | null
   isActive: boolean
   notes: string | null
+  defaultCutKind: string | null
+  defaultCutValue: number | null
   entityId: string
   version: number
   updatedAt: Date
@@ -915,6 +931,8 @@ function toDoctorSyncRecord (r: {
     phone: r.phone,
     is_active: r.isActive,
     notes: r.notes,
+    default_cut_kind: r.defaultCutKind,
+    default_cut_value: r.defaultCutValue,
     entity_id: r.entityId,
     version: r.version,
     updated_at: r.updatedAt.toISOString(),
@@ -1096,6 +1114,11 @@ function toOperatorShiftSyncRecord (r: {
 function toPatientSyncRecord (r: {
   id: string
   name: string
+  phone: string | null
+  sex: string | null
+  birthDate: string | null
+  fileNo: string | null
+  notes: string | null
   entityId: string
   version: number
   createdAt: Date
@@ -1106,6 +1129,11 @@ function toPatientSyncRecord (r: {
   return {
     id: r.id,
     name: r.name,
+    phone: r.phone,
+    sex: r.sex,
+    birth_date: r.birthDate,
+    file_no: r.fileNo,
+    notes: r.notes,
     entity_id: r.entityId,
     version: r.version,
     created_at: r.createdAt.toISOString(),
