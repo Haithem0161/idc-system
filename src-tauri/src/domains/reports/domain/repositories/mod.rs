@@ -1,6 +1,9 @@
 //! Repository port (trait) for the reports bounded context. Pure trait, no
 //! sqlx imports here.
 
+mod frozen_close;
+pub use frozen_close::FrozenCloseRepo;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

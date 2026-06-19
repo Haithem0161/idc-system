@@ -49,6 +49,8 @@ pub enum AuditAction {
     ConflictResolve,
     Vacuum,
     DailyCloseRun,
+    DailyCloseSign,
+    DailyCloseReopen,
 }
 
 impl AuditAction {
@@ -68,6 +70,8 @@ impl AuditAction {
             Self::ConflictResolve => "conflict_resolve",
             Self::Vacuum => "vacuum",
             Self::DailyCloseRun => "daily_close_run",
+            Self::DailyCloseSign => "daily_close_sign",
+            Self::DailyCloseReopen => "daily_close_reopen",
         }
     }
 }
@@ -208,10 +212,11 @@ mod tests {
     // AuditAction ---------------------------------------------------------
 
     #[test]
-    fn audit_action_enumerates_all_fourteen_phase01_to_phase07_variants() {
-        // Phase-01 §7.36 final enum -- this list is load-bearing for the
-        // server-side CHECK and the audit-vacuum tracker. If a variant is
-        // added or renamed, this test fails on purpose.
+    fn audit_action_enumerates_all_variants() {
+        // Phase-01 §7.36 final enum, extended with the signed/reopen daily-close
+        // actions -- this list is load-bearing for the server-side CHECK and the
+        // audit-vacuum tracker. If a variant is added or renamed, this test fails
+        // on purpose.
         let all: Vec<(&str, AuditAction)> = vec![
             ("create", AuditAction::Create),
             ("update", AuditAction::Update),
@@ -227,8 +232,10 @@ mod tests {
             ("conflict_resolve", AuditAction::ConflictResolve),
             ("vacuum", AuditAction::Vacuum),
             ("daily_close_run", AuditAction::DailyCloseRun),
+            ("daily_close_sign", AuditAction::DailyCloseSign),
+            ("daily_close_reopen", AuditAction::DailyCloseReopen),
         ];
-        assert_eq!(all.len(), 14);
+        assert_eq!(all.len(), 16);
         for (expected, action) in all {
             assert_eq!(action.as_str(), expected);
             assert_eq!(format!("{}", action), expected);
@@ -252,6 +259,8 @@ mod tests {
             AuditAction::ConflictResolve,
             AuditAction::Vacuum,
             AuditAction::DailyCloseRun,
+            AuditAction::DailyCloseSign,
+            AuditAction::DailyCloseReopen,
         ] {
             let json = serde_json::to_value(action).unwrap();
             let back: AuditAction = serde_json::from_value(json.clone()).unwrap();

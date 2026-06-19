@@ -59,6 +59,19 @@ ALTER TABLE inventory_adjustments
      OR (reason = 'consume_visit')
   );
 
+-- Daily close: in-force partial-unique index. Mirrors the desktop SQLite
+-- partial index `daily_close_active_per_day` (client migration 015). At most
+-- one IN-FORCE close per (entity_id, target_date): a not-yet-reopened,
+-- not-deleted row. A reopened day falls out of the index (reopened_at set), so
+-- it can be frozen again as a fresh row -- which is exactly why a plain
+-- `@@unique([entityId, targetDate])` is WRONG here (it would block the
+-- legitimate reopen-then-refreeze flow). Conflict policy stays LWW-by-id; this
+-- index only backstops the business uniqueness rule as defense-in-depth.
+DROP INDEX IF EXISTS daily_close_active_per_day;
+CREATE UNIQUE INDEX daily_close_active_per_day
+  ON daily_close (entity_id, target_date)
+  WHERE reopened_at IS NULL AND deleted_at IS NULL;
+
 -- Phase-05 §7.53: visits CHECK extension for the 7 name-snapshot columns.
 -- A locked visit must carry all required snapshots; a draft must not. The
 -- service layer (push-service.validateVisit) enforces this at the API

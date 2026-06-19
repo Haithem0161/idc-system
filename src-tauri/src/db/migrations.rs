@@ -68,6 +68,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "014_doctor_default_cut.sql",
         include_str!("../../migrations/014_doctor_default_cut.sql"),
     ),
+    (
+        "015_daily_close.sql",
+        include_str!("../../migrations/015_daily_close.sql"),
+    ),
 ];
 
 /// The local sync schema version: the count of embedded migrations. Sent to the

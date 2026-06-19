@@ -38,6 +38,7 @@ use app_lib::domains::patients::domain::repositories::PatientRepo;
 use app_lib::domains::patients::infrastructure::SqlitePatientRepo;
 use app_lib::domains::patients::service::{PatientCreateInput, PatientService};
 use app_lib::domains::receipts::ReceiptRenderOptions;
+use app_lib::domains::reports::infrastructure::SqliteFrozenCloseRepo;
 use app_lib::domains::shifts::domain::entities::operator_shift::OperatorShiftOpenInput;
 use app_lib::domains::shifts::domain::entities::OperatorShift;
 use app_lib::domains::shifts::domain::repositories::OperatorShiftRepo;
@@ -253,6 +254,7 @@ async fn rig() -> Rig {
         consumption: cons_repo,
         inventory_items: item_repo,
         shifts: shift_repo,
+        frozen_close: Arc::new(SqliteFrozenCloseRepo::new(pool.clone())),
         audit_repo: audit,
         outbox_repo: outbox,
         receipts_dir,

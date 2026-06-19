@@ -482,6 +482,22 @@ export type CommandMap = {
     args: { args: { date: string } }
     result: DailyCloseRecord
   }
+  reports_sign_daily_close: {
+    args: { args: { date: string } }
+    result: FrozenCloseRecord
+  }
+  reports_reopen_daily_close: {
+    args: { args: { date: string; reason: string } }
+    result: FrozenCloseRecord
+  }
+  reports_frozen_close_for_date: {
+    args: { args: { date: string } }
+    result: FrozenCloseRecord | null
+  }
+  reports_list_daily_closes: {
+    args: { args: { from_date: string; to_date: string } }
+    result: FrozenCloseRecord[]
+  }
   reports_export_visits_csv: {
     args: { args: { filters: ReportsVisitsArgs; path: string } }
     result: { path: string }
@@ -1267,6 +1283,33 @@ export interface DailyCloseRecord {
   provisional: boolean
   input_hash: string
   generated_at: string
+}
+
+/** A signed, frozen daily close (mirrors the Rust `FrozenClose` entity). */
+export interface FrozenCloseRecord {
+  id: string
+  target_date: string
+  tz_offset: string
+  input_hash: string
+  total_revenue_iqd: number
+  total_doctor_cuts_iqd: number
+  total_operator_cuts_iqd: number
+  total_inventory_consumption_value_iqd: number
+  net_iqd: number
+  locked_count: number
+  voided_count: number
+  voided_value_iqd: number
+  signed_by_user_id: string
+  signed_by_name: string
+  signed_at: string
+  reopened_at: string | null
+  reopened_by_user_id: string | null
+  reopen_reason: string | null
+  created_at: string
+  updated_at: string
+  version: number
+  origin_device_id: string | null
+  entity_id: string
 }
 
 export async function invoke<K extends keyof CommandMap>(

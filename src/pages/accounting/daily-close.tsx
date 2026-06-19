@@ -1,14 +1,24 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { save } from "@tauri-apps/plugin-dialog"
+import { Lock, AlertTriangle } from "lucide-react"
 
 import {
   useDailyClose,
   useDailyCloseRerun,
   useExportDailyClosePdf,
+  useFrozenClose,
+  useSignDailyClose,
+  useReopenDailyClose,
 } from "@/features/reports/queries"
+import {
+  SignCloseDialog,
+  ReopenCloseDialog,
+} from "@/components/accounting/sign-close-dialog"
+import { CloseMonthOverview } from "@/components/accounting/close-month-overview"
 import { formatHours, formatIqd } from "@/lib/format/money"
-import type { DailyCloseRecord } from "@/lib/ipc"
+import type { DailyCloseRecord, FrozenCloseRecord } from "@/lib/ipc"
+import { useAuthStore } from "@/stores/auth-store"
 import { cn } from "@/lib/utils"
 
 function todayLocal (): string {
@@ -31,10 +41,43 @@ function yesterdayLocal (): string {
 export default function AccountingDailyClosePage () {
   const { t, i18n } = useTranslation()
   const [date, setDate] = useState<string>(todayLocal())
+  const [signOpen, setSignOpen] = useState(false)
+  const [reopenOpen, setReopenOpen] = useState(false)
   const close = useDailyClose(date)
+  const frozen = useFrozenClose(date)
   const rerun = useDailyCloseRerun()
   const exportPdf = useExportDailyClosePdf()
+  const sign = useSignDailyClose()
+  const reopen = useReopenDailyClose()
   const locale = i18n.language === "ar" ? "ar-IQ" : "en-GB"
+  const role = useAuthStore((s) =>
+    s.state.kind === "authenticated" ? s.state.role : null
+  )
+
+  const frozenClose = frozen.data ?? null
+  const isFrozen = frozenClose !== null
+  // Tamper / staleness check: a frozen day whose live recomputation no longer
+  // matches the snapshot hash means the underlying data drifted (e.g. a
+  // reopen-edit-refreeze cycle elsewhere, or clock skew). Surface it.
+  const recomputedSinceFreeze =
+    isFrozen && close.data !== undefined && close.data.input_hash !== frozenClose.input_hash
+  const canSign =
+    !isFrozen &&
+    close.data !== undefined &&
+    !close.data.provisional &&
+    (role === "accountant" || role === "superadmin")
+  const canReopen = isFrozen && role === "superadmin"
+  const signBlockedReason = (() => {
+    if (isFrozen) return null
+    if (!close.data) return null
+    if (close.data.provisional) {
+      return t("accounting.daily_close.sign_blocked_pending", {
+        defaultValue: "Cannot freeze: {{n}} ops still pending sync.",
+        n: close.data.pending_sync,
+      })
+    }
+    return null
+  })()
 
   const onExport = async () => {
     if (!close.data) return
@@ -47,6 +90,19 @@ export default function AccountingDailyClosePage () {
     if (!path) return
     await exportPdf.mutateAsync({ date: close.data.target_date, path })
   }
+
+  const onConfirmSign = async () => {
+    await sign.mutateAsync({ date }).catch(() => undefined)
+    setSignOpen(false)
+  }
+  const onConfirmReopen = async (reason: string) => {
+    await reopen.mutateAsync({ date, reason }).catch(() => undefined)
+    setReopenOpen(false)
+  }
+
+  const netLabel = close.data
+    ? formatIqd(close.data.net_iqd, { locale, withSuffix: true })
+    : "—"
 
   return (
     <div className="space-y-6">
@@ -76,23 +132,40 @@ export default function AccountingDailyClosePage () {
           <button
             type="button"
             onClick={() => rerun.mutate({ date })}
-            disabled={rerun.isPending}
+            disabled={rerun.isPending || isFrozen}
+            title={
+              isFrozen
+                ? t("accounting.daily_close.frozen_run_disabled", {
+                    defaultValue: "This day is frozen.",
+                  })
+                : undefined
+            }
             className="btn btn-ink btn-sm shrink-0 whitespace-nowrap"
           >
             {rerun.isPending
               ? t("accounting.daily_close.running", { defaultValue: "Running…" })
               : t("accounting.daily_close.run_close", { defaultValue: "Run close" })}
           </button>
-          <button
-            type="button"
-            disabled
-            title={t("accounting.daily_close.sign_disabled_tooltip", {
-              defaultValue: "Available in v0.2",
-            })}
-            className="btn btn-primary btn-sm shrink-0 whitespace-nowrap opacity-50"
-          >
-            {t("accounting.daily_close.sign", { defaultValue: "Sign and freeze" })}
-          </button>
+          {canReopen ? (
+            <button
+              type="button"
+              onClick={() => setReopenOpen(true)}
+              className="btn btn-danger btn-sm shrink-0 whitespace-nowrap"
+            >
+              {t("accounting.daily_close.reopen", { defaultValue: "Reopen" })}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSignOpen(true)}
+              disabled={!canSign}
+              title={signBlockedReason ?? undefined}
+              className="btn btn-primary btn-sm shrink-0 whitespace-nowrap"
+            >
+              <Lock className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden />
+              {t("accounting.daily_close.sign", { defaultValue: "Sign and freeze" })}
+            </button>
+          )}
           <button
             type="button"
             onClick={onExport}
@@ -106,11 +179,78 @@ export default function AccountingDailyClosePage () {
         </div>
       </header>
 
-      {close.data ? (
-        <DailyCloseBody close={close.data} locale={locale} />
-      ) : (
-        <div className="h-[300px] animate-pulse rounded-lg bg-paper-2" />
-      )}
+      {isFrozen ? <FrozenBanner close={frozenClose} locale={locale} /> : null}
+      {recomputedSinceFreeze ? <RecomputedBanner /> : null}
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_300px]">
+        <div className="min-w-0 space-y-6">
+          {close.data ? (
+            <DailyCloseBody close={close.data} locale={locale} />
+          ) : (
+            <div className="h-[300px] animate-pulse rounded-lg bg-paper-2" />
+          )}
+        </div>
+        <CloseMonthOverview selectedDate={date} onSelect={setDate} />
+      </div>
+
+      <SignCloseDialog
+        open={signOpen}
+        targetDate={date}
+        netLabel={netLabel}
+        busy={sign.isPending}
+        onConfirm={onConfirmSign}
+        onClose={() => setSignOpen(false)}
+      />
+      <ReopenCloseDialog
+        open={reopenOpen}
+        targetDate={date}
+        busy={reopen.isPending}
+        onConfirm={onConfirmReopen}
+        onClose={() => setReopenOpen(false)}
+      />
+    </div>
+  )
+}
+
+/** The "this day is frozen" banner: signer attestation + when, plus the hash. */
+function FrozenBanner ({ close, locale }: { close: FrozenCloseRecord; locale: string }) {
+  const { t } = useTranslation()
+  const signedAt = new Date(close.signed_at).toLocaleString(
+    locale === "ar-IQ" ? "ar-IQ" : "en-GB",
+    { dateStyle: "medium", timeStyle: "short" }
+  )
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-success/30 bg-success-soft px-4 py-3">
+      <Lock className="h-4 w-4 flex-none text-success" strokeWidth={2} aria-hidden />
+      <span className="text-[13px] font-semibold text-success">
+        {t("accounting.daily_close.frozen_badge", { defaultValue: "Frozen" })}
+      </span>
+      <span className="text-[12px] text-ink-2">
+        {t("accounting.daily_close.frozen_by", {
+          defaultValue: "Signed by {{name}} · {{when}}",
+          name: close.signed_by_name,
+          when: signedAt,
+        })}
+      </span>
+      <span className="ms-auto font-mono text-[10px] text-ink-3">
+        hash {close.input_hash.slice(0, 6)}
+      </span>
+    </div>
+  )
+}
+
+/** Shown when a frozen day's live recomputation no longer matches its hash. */
+function RecomputedBanner () {
+  const { t } = useTranslation()
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-gold/30 bg-gold-soft px-4 py-3">
+      <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-gold" strokeWidth={1.8} aria-hidden />
+      <p className="text-[12px] text-ink-2">
+        {t("accounting.daily_close.recomputed_warning", {
+          defaultValue:
+            "The live data for this frozen day no longer matches the signed snapshot. The frozen figures above remain the source of truth; investigate the drift before reopening.",
+        })}
+      </p>
     </div>
   )
 }

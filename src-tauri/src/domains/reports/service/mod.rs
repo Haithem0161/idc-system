@@ -21,7 +21,8 @@ use crate::domains::reports::domain::entities::{
     OperatorShiftRow, TrendMatrix, VisitRow, VisitsReport, VisitsReportFilters,
     VisitsReportGroupBy, VisitsReportTotals,
 };
-use crate::domains::reports::domain::repositories::ReportsReadModel;
+use crate::domains::reports::domain::entities::{FrozenClose, FrozenCloseNewInput};
+use crate::domains::reports::domain::repositories::{FrozenCloseRepo, ReportsReadModel};
 use crate::domains::reports::domain::services::input_hash::DailyCloseHashInput;
 use crate::domains::reports::domain::services::money_trend::{trend_cell, TrendInputs};
 use crate::domains::reports::domain::services::{
@@ -44,6 +45,7 @@ pub const MAX_LOCAL_RANGE_DAYS: i64 = 90;
 pub struct ReportsServiceConfig {
     pub pool: SqlitePool,
     pub read_model: Arc<dyn ReportsReadModel>,
+    pub frozen_close_repo: Arc<dyn FrozenCloseRepo>,
     pub audit_repo: Arc<dyn AuditRepo>,
     pub outbox_repo: Arc<dyn OutboxRepo>,
     pub device_id: String,
@@ -53,6 +55,7 @@ pub struct ReportsServiceConfig {
 pub struct ReportsService {
     pool: SqlitePool,
     read: Arc<dyn ReportsReadModel>,
+    frozen: Arc<dyn FrozenCloseRepo>,
     audit: Arc<dyn AuditRepo>,
     outbox: Arc<dyn OutboxRepo>,
     device_id: String,
@@ -78,18 +81,80 @@ pub struct ExportResult {
     pub path: PathBuf,
 }
 
+/// JSON push payload for a frozen daily close. Field names mirror the
+/// sync-server `DailyCloseSyncRecord` / Prisma model exactly.
+#[derive(Debug, Serialize)]
+pub struct FrozenClosePushPayload {
+    pub id: String,
+    pub target_date: String,
+    pub tz_offset: String,
+    pub input_hash: String,
+    pub total_revenue_iqd: i64,
+    pub total_doctor_cuts_iqd: i64,
+    pub total_operator_cuts_iqd: i64,
+    pub total_inventory_consumption_value_iqd: i64,
+    pub net_iqd: i64,
+    pub locked_count: i64,
+    pub voided_count: i64,
+    pub voided_value_iqd: i64,
+    pub signed_by_user_id: String,
+    pub signed_by_name: String,
+    pub signed_at: String,
+    pub reopened_at: Option<String>,
+    pub reopened_by_user_id: Option<String>,
+    pub reopen_reason: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+    pub version: i64,
+    pub origin_device_id: Option<String>,
+    pub entity_id: String,
+}
+
+impl From<&FrozenClose> for FrozenClosePushPayload {
+    fn from(c: &FrozenClose) -> Self {
+        Self {
+            id: c.id.to_string(),
+            target_date: c.target_date.format("%Y-%m-%d").to_string(),
+            tz_offset: c.tz_offset.clone(),
+            input_hash: c.input_hash.clone(),
+            total_revenue_iqd: c.total_revenue_iqd,
+            total_doctor_cuts_iqd: c.total_doctor_cuts_iqd,
+            total_operator_cuts_iqd: c.total_operator_cuts_iqd,
+            total_inventory_consumption_value_iqd: c.total_inventory_consumption_value_iqd,
+            net_iqd: c.net_iqd,
+            locked_count: c.locked_count,
+            voided_count: c.voided_count,
+            voided_value_iqd: c.voided_value_iqd,
+            signed_by_user_id: c.signed_by_user_id.to_string(),
+            signed_by_name: c.signed_by_name.clone(),
+            signed_at: c.signed_at.to_rfc3339(),
+            reopened_at: c.reopened_at.map(|d| d.to_rfc3339()),
+            reopened_by_user_id: c.reopened_by_user_id.map(|u| u.to_string()),
+            reopen_reason: c.reopen_reason.clone(),
+            created_at: c.created_at.to_rfc3339(),
+            updated_at: c.updated_at.to_rfc3339(),
+            deleted_at: None,
+            version: c.version,
+            origin_device_id: c.origin_device_id.clone(),
+            entity_id: c.entity_id.clone(),
+        }
+    }
+}
+
 impl ReportsService {
     pub fn new(cfg: ReportsServiceConfig) -> Self {
         Self {
             pool: cfg.pool,
             read: cfg.read_model,
+            frozen: cfg.frozen_close_repo,
             audit: cfg.audit_repo,
             outbox: cfg.outbox_repo,
             device_id: cfg.device_id,
         }
     }
 
-    fn require_role(role: UserRole, allowed: &[UserRole]) -> AppResult<()> {
+    pub fn require_role(role: UserRole, allowed: &[UserRole]) -> AppResult<()> {
         if allowed.contains(&role) {
             Ok(())
         } else {
@@ -594,6 +659,177 @@ impl ReportsService {
         self.outbox.enqueue(&mut tx, &outbox_row).await?;
         tx.commit().await.map_err(AppError::from)?;
         Ok(())
+    }
+
+    // ---- Sign & freeze (the materialized daily_close entity) --------------
+
+    /// Sign and freeze a reconciled day. Recomputes the close, refuses if the
+    /// day still has pending-sync ops (provisional data) or is already frozen,
+    /// then materializes a `FrozenClose`, enqueues it for sync, and writes a
+    /// `daily_close_sign` audit row -- all in one transaction. From then on the
+    /// day is immutable (lock/void reject) until a superadmin reopens it.
+    #[instrument(skip(self, settings_snapshot, signer_name))]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn sign_daily_close(
+        &self,
+        actor_user_id: Uuid,
+        signer_name: String,
+        entity_id: &str,
+        target_date: NaiveDate,
+        settings_snapshot: BTreeMap<String, String>,
+    ) -> AppResult<FrozenClose> {
+        // Recompute from live data (this also writes the per-run audit row).
+        let close = self
+            .daily_close(actor_user_id, entity_id, target_date, settings_snapshot)
+            .await?;
+
+        // Gate 1: no provisional data -- you cannot freeze a day other devices
+        // might still be writing to (PRD §7.2.5).
+        if close.provisional {
+            return Err(AppError::Validation(format!(
+                "cannot freeze a provisional day: {} ops still pending sync",
+                close.pending_sync
+            )));
+        }
+
+        // Gate 2: not already frozen.
+        if self
+            .frozen
+            .find_in_force_for_date(entity_id, target_date)
+            .await?
+            .is_some()
+        {
+            return Err(AppError::Conflict("this day is already frozen".into()));
+        }
+
+        let now = Utc::now();
+        let frozen = FrozenClose::try_new(
+            FrozenCloseNewInput {
+                target_date,
+                tz_offset: close.tz_offset.clone(),
+                input_hash: close.input_hash.clone(),
+                total_revenue_iqd: close.total_revenue_iqd,
+                total_doctor_cuts_iqd: close.total_doctor_cuts_iqd,
+                total_operator_cuts_iqd: close.total_operator_cuts_iqd,
+                total_inventory_consumption_value_iqd: close.total_inventory_consumption_value_iqd,
+                net_iqd: close.net_iqd,
+                locked_count: close.locked_count,
+                voided_count: close.voided_count,
+                voided_value_iqd: close.voided_value_iqd,
+                signed_by_user_id: actor_user_id,
+                signed_by_name: signer_name,
+                entity_id: entity_id.to_string(),
+                origin_device_id: Some(self.device_id.clone()),
+            },
+            now,
+        )?;
+
+        let payload = serde_json::to_vec(&FrozenClosePushPayload::from(&frozen))?;
+        let op = OutboxOp::new("daily_close", frozen.id.to_string(), payload);
+        let audit = AuditEntry::create(AuditCreateInput {
+            actor_user_id,
+            action: AuditAction::DailyCloseSign,
+            entity: "daily_close".into(),
+            entity_id: target_date.format("%Y-%m-%d").to_string(),
+            delta: serde_json::json!({
+                "close_id": frozen.id.to_string(),
+                "input_hash": frozen.input_hash,
+                "net_iqd": frozen.net_iqd,
+                "locked_count": frozen.locked_count,
+                "signed_at": frozen.signed_at.to_rfc3339(),
+            }),
+            ip: None,
+            device_id: self.device_id.clone(),
+            entity_id_tenant: entity_id.into(),
+        });
+        let audit_payload = encode_audit_payload(&audit)?;
+        let audit_op = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
+
+        let mut tx = self.pool.begin().await.map_err(AppError::from)?;
+        self.frozen.insert(&mut tx, &frozen).await?;
+        self.audit.append(&mut tx, &audit).await?;
+        self.outbox.enqueue(&mut tx, &op).await?;
+        self.outbox.enqueue(&mut tx, &audit_op).await?;
+        tx.commit().await.map_err(AppError::from)?;
+
+        Ok(frozen)
+    }
+
+    /// Reopen (unfreeze) a frozen day. Superadmin-only (enforced at the command
+    /// boundary). Tombstones the in-force close, re-allowing edits for the day,
+    /// enqueues the tombstone for sync, and writes a `daily_close_reopen` audit
+    /// row. Errors if the day is not currently frozen.
+    #[instrument(skip(self, reason))]
+    pub async fn reopen_daily_close(
+        &self,
+        actor_user_id: Uuid,
+        entity_id: &str,
+        target_date: NaiveDate,
+        reason: String,
+    ) -> AppResult<FrozenClose> {
+        let mut frozen = self
+            .frozen
+            .find_in_force_for_date(entity_id, target_date)
+            .await?
+            .ok_or_else(|| AppError::NotFound("no frozen close for this day".into()))?;
+
+        let now = Utc::now();
+        frozen.reopen(actor_user_id, reason.clone(), now)?;
+
+        let payload = serde_json::to_vec(&FrozenClosePushPayload::from(&frozen))?;
+        let op = OutboxOp::new("daily_close", frozen.id.to_string(), payload);
+        let audit = AuditEntry::create(AuditCreateInput {
+            actor_user_id,
+            action: AuditAction::DailyCloseReopen,
+            entity: "daily_close".into(),
+            entity_id: target_date.format("%Y-%m-%d").to_string(),
+            delta: serde_json::json!({
+                "close_id": frozen.id.to_string(),
+                "reason": frozen.reopen_reason,
+                "reopened_at": now.to_rfc3339(),
+            }),
+            ip: None,
+            device_id: self.device_id.clone(),
+            entity_id_tenant: entity_id.into(),
+        });
+        let audit_payload = encode_audit_payload(&audit)?;
+        let audit_op = OutboxOp::new("audit_log", audit.id.to_string(), audit_payload);
+
+        let mut tx = self.pool.begin().await.map_err(AppError::from)?;
+        self.frozen.save_reopen(&mut tx, &frozen).await?;
+        self.audit.append(&mut tx, &audit).await?;
+        self.outbox.enqueue(&mut tx, &op).await?;
+        self.outbox.enqueue(&mut tx, &audit_op).await?;
+        tx.commit().await.map_err(AppError::from)?;
+
+        Ok(frozen)
+    }
+
+    /// The in-force frozen close for a day, if any (backs the page's frozen
+    /// badge + the recomputed-since-freeze discrepancy check).
+    #[instrument(skip(self))]
+    pub async fn frozen_close_for_date(
+        &self,
+        entity_id: &str,
+        target_date: NaiveDate,
+    ) -> AppResult<Option<FrozenClose>> {
+        self.frozen
+            .find_in_force_for_date(entity_id, target_date)
+            .await
+    }
+
+    /// All closes (in-force + reopened) in a date range, newest first. Backs the
+    /// month overview.
+    #[instrument(skip(self))]
+    pub async fn list_frozen_closes(
+        &self,
+        entity_id: &str,
+        from_date: NaiveDate,
+        to_date: NaiveDate,
+    ) -> AppResult<Vec<FrozenClose>> {
+        self.frozen
+            .list_in_range(entity_id, from_date, to_date)
+            .await
     }
 
     // ---- Exports ----------------------------------------------------------

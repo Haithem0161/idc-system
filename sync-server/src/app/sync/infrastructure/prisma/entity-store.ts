@@ -6,6 +6,7 @@ import type {
   CheckSubtypeSyncRecord,
   CheckTypeSyncRecord,
   ConsumptionSyncRecord,
+  DailyCloseSyncRecord,
   DoctorPricingSyncRecord,
   DoctorSyncRecord,
   InventoryAdjustmentSyncRecord,
@@ -614,6 +615,57 @@ export class PrismaEntityStore implements SyncEntityStore {
     )
   }
 
+  // ---- daily close ---------------------------------------------------------
+
+  /**
+   * Signed & frozen daily close (client migration 015). LWW (version-gated):
+   * the freeze is version 1; a superadmin reopen is version 2 of the same id,
+   * so the reopen overwrites the freeze cleanly. The in-force partial-unique
+   * invariant (one not-reopened, not-deleted close per (entity_id, target_date))
+   * is enforced by the raw-SQL index `daily_close_active_per_day` in
+   * init-custom-sql.sql -- NOT by a plain `@@unique`, which would block a
+   * legitimate reopen-then-refreeze.
+   */
+  async upsertDailyClose (row: DailyCloseSyncRecord): Promise<{ applied: boolean }> {
+    return this.lwwUpsert<DailyCloseSyncRecord>(
+      row,
+      async () => loadVersionMeta(this.prisma.dailyClose, row.id),
+      async () => {
+        const data: Prisma.DailyCloseUncheckedCreateInput = {
+          id: row.id,
+          targetDate: row.target_date,
+          tzOffset: row.tz_offset,
+          inputHash: row.input_hash,
+          totalRevenueIqd: row.total_revenue_iqd,
+          totalDoctorCutsIqd: row.total_doctor_cuts_iqd,
+          totalOperatorCutsIqd: row.total_operator_cuts_iqd,
+          totalInventoryConsumptionValueIqd: row.total_inventory_consumption_value_iqd,
+          netIqd: row.net_iqd,
+          lockedCount: row.locked_count,
+          voidedCount: row.voided_count,
+          voidedValueIqd: row.voided_value_iqd,
+          signedByUserId: row.signed_by_user_id,
+          signedByName: row.signed_by_name,
+          signedAt: new Date(row.signed_at),
+          reopenedAt: row.reopened_at ? new Date(row.reopened_at) : null,
+          reopenedByUserId: row.reopened_by_user_id ?? null,
+          reopenReason: row.reopen_reason ?? null,
+          createdAt: new Date(row.created_at),
+          updatedAt: new Date(row.updated_at),
+          deletedAt: row.deleted_at ? new Date(row.deleted_at) : null,
+          version: row.version,
+          originDeviceId: row.origin_device_id ?? null,
+          entityId: row.entity_id,
+        }
+        await this.prisma.dailyClose.upsert({
+          where: { id: row.id },
+          create: data,
+          update: { ...data, createdAt: undefined },
+        })
+      }
+    )
+  }
+
   // ---- pull aggregation ----------------------------------------------------
 
   /**
@@ -641,7 +693,7 @@ export class PrismaEntityStore implements SyncEntityStore {
     const [
       users, settings, checkTypes, checkSubtypes, doctors, doctorPricings,
       operators, operatorSpecialties, inventoryItems, consumptionMaps,
-      operatorShifts, patients, visits, inventoryAdjustments,
+      operatorShifts, patients, visits, inventoryAdjustments, dailyCloses,
     ] = await Promise.all([
       this.prisma.user.findMany({ where: { entityId: tenantId, ...sinceWhere }, orderBy, take: TAKE_CAP }),
       this.prisma.setting.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
@@ -659,6 +711,10 @@ export class PrismaEntityStore implements SyncEntityStore {
       this.prisma.visit.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
       // Additive adjustments: keep tombstones for symmetry.
       this.prisma.inventoryAdjustment.findMany({ where: { entityId: tenantId, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      // Daily close = LWW. A reopened close keeps reopened_at set but is never
+      // tombstoned, so it must still propagate (peers learn the day is editable
+      // again); filter only on deletedAt, which is unused for this entity.
+      this.prisma.dailyClose.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
     ])
 
     const changes: ChangeRow[] = []
@@ -676,6 +732,7 @@ export class PrismaEntityStore implements SyncEntityStore {
     pushChanges(changes, 'patients', patients, (r) => toPatientSyncRecord(r))
     pushChanges(changes, 'visits', visits, (r) => toVisitSyncRecord(r))
     pushChanges(changes, 'inventory_adjustments', inventoryAdjustments, (r) => toInventoryAdjustmentSyncRecord(r))
+    pushChanges(changes, 'daily_close', dailyCloses, (r) => toDailyCloseSyncRecord(r))
     return changes
   }
 
@@ -1240,6 +1297,60 @@ function toInventoryAdjustmentSyncRecord (r: {
     visit_id: r.visitId,
     note: r.note,
     by_user_id: r.byUserId,
+    entity_id: r.entityId,
+    version: r.version,
+    created_at: r.createdAt.toISOString(),
+    updated_at: r.updatedAt.toISOString(),
+    deleted_at: isoOrNull(r.deletedAt),
+    origin_device_id: r.originDeviceId,
+  }
+}
+
+function toDailyCloseSyncRecord (r: {
+  id: string
+  targetDate: string
+  tzOffset: string
+  inputHash: string
+  totalRevenueIqd: number
+  totalDoctorCutsIqd: number
+  totalOperatorCutsIqd: number
+  totalInventoryConsumptionValueIqd: number
+  netIqd: number
+  lockedCount: number
+  voidedCount: number
+  voidedValueIqd: number
+  signedByUserId: string
+  signedByName: string
+  signedAt: Date
+  reopenedAt: Date | null
+  reopenedByUserId: string | null
+  reopenReason: string | null
+  entityId: string
+  version: number
+  createdAt: Date
+  updatedAt: Date
+  deletedAt: Date | null
+  originDeviceId: string | null
+}): DailyCloseSyncRecord {
+  return {
+    id: r.id,
+    target_date: r.targetDate,
+    tz_offset: r.tzOffset,
+    input_hash: r.inputHash,
+    total_revenue_iqd: r.totalRevenueIqd,
+    total_doctor_cuts_iqd: r.totalDoctorCutsIqd,
+    total_operator_cuts_iqd: r.totalOperatorCutsIqd,
+    total_inventory_consumption_value_iqd: r.totalInventoryConsumptionValueIqd,
+    net_iqd: r.netIqd,
+    locked_count: r.lockedCount,
+    voided_count: r.voidedCount,
+    voided_value_iqd: r.voidedValueIqd,
+    signed_by_user_id: r.signedByUserId,
+    signed_by_name: r.signedByName,
+    signed_at: r.signedAt.toISOString(),
+    reopened_at: isoOrNull(r.reopenedAt),
+    reopened_by_user_id: r.reopenedByUserId,
+    reopen_reason: r.reopenReason,
     entity_id: r.entityId,
     version: r.version,
     created_at: r.createdAt.toISOString(),

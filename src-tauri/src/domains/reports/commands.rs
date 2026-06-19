@@ -17,7 +17,8 @@ use uuid::Uuid;
 use crate::domains::auth::domain::value_objects::UserRole;
 use crate::domains::reports::domain::entities::{
     DailyClose, DashboardKpis, DashboardTops, DateRange, DoctorDrilldown, DoctorEarningsRow,
-    OperatorDrilldown, OperatorEarningsRow, VisitsReport, VisitsReportFilters, VisitsReportGroupBy,
+    FrozenClose, OperatorDrilldown, OperatorEarningsRow, VisitsReport, VisitsReportFilters,
+    VisitsReportGroupBy,
 };
 use crate::domains::reports::service::ReportsService;
 use crate::error::{AppError, AppResult};
@@ -267,6 +268,108 @@ pub async fn reports_daily_close(
         snapshot.insert(k.clone(), v.to_string());
     }
     svc.daily_close(user_id, &entity_id, date, snapshot).await
+}
+
+// ---- sign / freeze --------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct SignDailyCloseArgs {
+    pub date: String,
+}
+
+/// Sign & freeze a reconciled day. Accountant or superadmin. Refuses if the day
+/// still has pending-sync ops or is already frozen.
+#[instrument(skip(state))]
+#[tauri::command]
+pub async fn reports_sign_daily_close(
+    args: SignDailyCloseArgs,
+    state: State<'_, AppState>,
+) -> AppResult<FrozenClose> {
+    let ctx = state
+        .get_current_user()
+        .await
+        .ok_or(AppError::NotAuthenticated)?;
+    let user_id = Uuid::parse_str(&ctx.user_id)?;
+    let role = UserRole::parse(&ctx.role)
+        .ok_or_else(|| AppError::Validation(format!("unknown role: {}", ctx.role)))?;
+    ReportsService::require_reports_role(role)?;
+    let signer_name = ctx.name.clone().unwrap_or_else(|| ctx.email.clone());
+    let svc = service(state.inner())?;
+    let date = NaiveDate::parse_from_str(&args.date, "%Y-%m-%d")
+        .map_err(|e| AppError::Validation(format!("date: {e}")))?;
+    let settings = state.settings_snapshot().await;
+    let mut snapshot: BTreeMap<String, String> = BTreeMap::new();
+    for (k, v) in (*settings).iter() {
+        snapshot.insert(k.clone(), v.to_string());
+    }
+    svc.sign_daily_close(user_id, signer_name, &ctx.entity_id, date, snapshot)
+        .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReopenDailyCloseArgs {
+    pub date: String,
+    pub reason: String,
+}
+
+/// Reopen (unfreeze) a frozen day. Superadmin only.
+#[instrument(skip(state))]
+#[tauri::command]
+pub async fn reports_reopen_daily_close(
+    args: ReopenDailyCloseArgs,
+    state: State<'_, AppState>,
+) -> AppResult<FrozenClose> {
+    let (user_id, role, entity_id) = actor(state.inner()).await?;
+    ReportsService::require_role(role, &[UserRole::Superadmin])?;
+    let svc = service(state.inner())?;
+    let date = NaiveDate::parse_from_str(&args.date, "%Y-%m-%d")
+        .map_err(|e| AppError::Validation(format!("date: {e}")))?;
+    svc.reopen_daily_close(user_id, &entity_id, date, args.reason)
+        .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FrozenCloseForDateArgs {
+    pub date: String,
+}
+
+/// The in-force frozen close for a day, if any. Accountant or superadmin.
+#[instrument(skip(state))]
+#[tauri::command]
+pub async fn reports_frozen_close_for_date(
+    args: FrozenCloseForDateArgs,
+    state: State<'_, AppState>,
+) -> AppResult<Option<FrozenClose>> {
+    let (_user_id, role, entity_id) = actor(state.inner()).await?;
+    ReportsService::require_reports_role(role)?;
+    let svc = service(state.inner())?;
+    let date = NaiveDate::parse_from_str(&args.date, "%Y-%m-%d")
+        .map_err(|e| AppError::Validation(format!("date: {e}")))?;
+    svc.frozen_close_for_date(&entity_id, date).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListFrozenClosesArgs {
+    pub from_date: String,
+    pub to_date: String,
+}
+
+/// All closes (in-force + reopened) in a date range, newest first. Backs the
+/// month overview. Accountant or superadmin.
+#[instrument(skip(state))]
+#[tauri::command]
+pub async fn reports_list_daily_closes(
+    args: ListFrozenClosesArgs,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<FrozenClose>> {
+    let (_user_id, role, entity_id) = actor(state.inner()).await?;
+    ReportsService::require_reports_role(role)?;
+    let svc = service(state.inner())?;
+    let from = NaiveDate::parse_from_str(&args.from_date, "%Y-%m-%d")
+        .map_err(|e| AppError::Validation(format!("from_date: {e}")))?;
+    let to = NaiveDate::parse_from_str(&args.to_date, "%Y-%m-%d")
+        .map_err(|e| AppError::Validation(format!("to_date: {e}")))?;
+    svc.list_frozen_closes(&entity_id, from, to).await
 }
 
 // ---- exports --------------------------------------------------------------

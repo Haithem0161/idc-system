@@ -821,3 +821,94 @@ pub(crate) async fn apply_visits_change(
     .await?;
     Ok(())
 }
+
+/// Apply a pulled `daily_close` (signed/frozen close). LWW via the atomic
+/// version gate: the freeze is version 1, a superadmin reopen is version 2 of
+/// the same id, so a peer device's reopen overwrites the local freeze cleanly.
+/// The NOT NULL snapshot columns are always present in a well-formed payload;
+/// missing optional reopen columns bind NULL.
+pub(crate) async fn apply_daily_close_change(
+    tx: &mut crate::db::Tx<'_>,
+    change: &PullChange,
+) -> AppResult<()> {
+    let p = &change.payload;
+    let id = p.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+    if id.is_empty() {
+        return Ok(());
+    }
+    let incoming_version = change.version;
+    let now = chrono::Utc::now().to_rfc3339();
+    let i64_field = |key: &str| p.get(key).and_then(|v| v.as_i64()).unwrap_or(0);
+    sqlx::query(
+        "INSERT INTO daily_close ( \
+            id, target_date, tz_offset, input_hash, \
+            total_revenue_iqd, total_doctor_cuts_iqd, total_operator_cuts_iqd, \
+            total_inventory_consumption_value_iqd, net_iqd, locked_count, \
+            voided_count, voided_value_iqd, \
+            signed_by_user_id, signed_by_name, signed_at, \
+            reopened_at, reopened_by_user_id, reopen_reason, \
+            created_at, updated_at, deleted_at, version, dirty, \
+            last_synced_at, origin_device_id, entity_id \
+         ) VALUES (?,?,?,?, ?,?,?, ?,?,?, ?,?, ?,?,?, ?,?,?, ?,?,?,?,0, ?,?,?) \
+         ON CONFLICT(id) DO UPDATE SET \
+            reopened_at = excluded.reopened_at, \
+            reopened_by_user_id = excluded.reopened_by_user_id, \
+            reopen_reason = excluded.reopen_reason, \
+            updated_at = excluded.updated_at, \
+            deleted_at = excluded.deleted_at, \
+            version = excluded.version, \
+            dirty = 0, \
+            last_synced_at = excluded.last_synced_at, \
+            origin_device_id = excluded.origin_device_id \
+         WHERE daily_close.version < excluded.version \
+           AND daily_close.dirty = 0",
+    )
+    .bind(id)
+    .bind(p.get("target_date").and_then(|v| v.as_str()).unwrap_or(""))
+    .bind(p.get("tz_offset").and_then(|v| v.as_str()).unwrap_or(""))
+    .bind(p.get("input_hash").and_then(|v| v.as_str()).unwrap_or(""))
+    .bind(i64_field("total_revenue_iqd"))
+    .bind(i64_field("total_doctor_cuts_iqd"))
+    .bind(i64_field("total_operator_cuts_iqd"))
+    .bind(i64_field("total_inventory_consumption_value_iqd"))
+    .bind(i64_field("net_iqd"))
+    .bind(i64_field("locked_count"))
+    .bind(i64_field("voided_count"))
+    .bind(i64_field("voided_value_iqd"))
+    .bind(
+        p.get("signed_by_user_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+    )
+    .bind(
+        p.get("signed_by_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+    )
+    .bind(
+        p.get("signed_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&change.updated_at),
+    )
+    .bind(p.get("reopened_at").and_then(|v| v.as_str()))
+    .bind(p.get("reopened_by_user_id").and_then(|v| v.as_str()))
+    .bind(p.get("reopen_reason").and_then(|v| v.as_str()))
+    .bind(
+        p.get("created_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&change.updated_at),
+    )
+    .bind(
+        p.get("updated_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&change.updated_at),
+    )
+    .bind(p.get("deleted_at").and_then(|v| v.as_str()))
+    .bind(incoming_version)
+    .bind(now)
+    .bind(p.get("origin_device_id").and_then(|v| v.as_str()))
+    .bind(p.get("entity_id").and_then(|v| v.as_str()).unwrap_or(""))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}

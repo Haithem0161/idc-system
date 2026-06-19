@@ -2,6 +2,7 @@ import type {
   CheckSubtypeSyncRecord,
   CheckTypeSyncRecord,
   ConsumptionSyncRecord,
+  DailyCloseSyncRecord,
   DoctorPricingSyncRecord,
   DoctorSyncRecord,
   InventoryAdjustmentSyncRecord,
@@ -43,6 +44,12 @@ export interface SyncEntityStore {
 
   upsertInventoryAdjustment (row: InventoryAdjustmentSyncRecord): Promise<{ applied: boolean, duplicate: boolean }>
   upsertOperatorShift (row: OperatorShiftSyncRecord): Promise<{ applied: boolean }>
+
+  /**
+   * Signed & frozen daily close. LWW (version-gated): the freeze is version 1;
+   * a superadmin reopen is version 2 of the same id.
+   */
+  upsertDailyClose (row: DailyCloseSyncRecord): Promise<{ applied: boolean }>
 
   /**
    * Used by push-service validators to pre-check parent invariants

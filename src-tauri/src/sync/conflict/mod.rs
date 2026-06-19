@@ -74,7 +74,12 @@ pub fn policy_for(entity: &str) -> Policy {
         | "operator_specialties"
         | "inventory_items"
         | "inventory_consumption_map"
-        | "patients" => Policy::LastWriteWins,
+        | "patients"
+        // daily_close: a signed close is created once (version 1) and only ever
+        // mutated by a superadmin reopen (version 2). Both transitions apply
+        // cleanly through the atomic version gate; cross-device same-day
+        // uniqueness is enforced server-side. LWW is the right local policy.
+        | "daily_close" => Policy::LastWriteWins,
         // manual: domain-critical, must reconcile via the resolver UI.
         "settings" | "visits" => Policy::Manual,
         _ => Policy::Manual,

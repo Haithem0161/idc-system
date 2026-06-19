@@ -8,6 +8,7 @@ import {
   type DashboardTopsRecord,
   type DoctorDrilldownRecord,
   type DoctorEarningsRecord,
+  type FrozenCloseRecord,
   type OperatorDrilldownRecord,
   type OperatorEarningsRecord,
   type ReportsRangeArgs,
@@ -27,6 +28,9 @@ export const reportsKeys = {
   operator: (id: string, range: ReportsRangeArgs) =>
     [...reportsKeys.all, "operator", id, range] as const,
   dailyClose: (date: string) => [...reportsKeys.all, "dailyClose", date] as const,
+  frozenClose: (date: string) => [...reportsKeys.all, "frozenClose", date] as const,
+  frozenList: (from: string, to: string) =>
+    [...reportsKeys.all, "frozenList", from, to] as const,
 }
 
 export function useDashboardKpis (range: ReportsRangeArgs) {
@@ -129,6 +133,53 @@ export function useDailyCloseRerun () {
     mutationFn: ({ date }) => invoke("reports_daily_close", { args: { date } }),
     onSuccess: (data) => {
       qc.setQueryData(reportsKeys.dailyClose(data.target_date), data)
+    },
+  })
+}
+
+/** The in-force frozen close for a day, if any (drives the frozen badge). */
+export function useFrozenClose (date: string | null | undefined) {
+  return useQuery<FrozenCloseRecord | null>({
+    queryKey: reportsKeys.frozenClose(date ?? ""),
+    enabled: isTauri() && Boolean(date),
+    queryFn: () => invoke("reports_frozen_close_for_date", { args: { date: date! } }),
+    staleTime: 5_000,
+  })
+}
+
+/** All closes (in-force + reopened) in a range, newest first (month overview). */
+export function useFrozenCloseList (fromDate: string, toDate: string) {
+  return useQuery<FrozenCloseRecord[]>({
+    queryKey: reportsKeys.frozenList(fromDate, toDate),
+    enabled: isTauri() && Boolean(fromDate) && Boolean(toDate),
+    queryFn: () =>
+      invoke("reports_list_daily_closes", {
+        args: { from_date: fromDate, to_date: toDate },
+      }),
+    staleTime: 10_000,
+  })
+}
+
+export function useSignDailyClose () {
+  const qc = useQueryClient()
+  return useMutation<FrozenCloseRecord, Error, { date: string }>({
+    mutationFn: ({ date }) => invoke("reports_sign_daily_close", { args: { date } }),
+    onSuccess: (data) => {
+      qc.setQueryData(reportsKeys.frozenClose(data.target_date), data)
+      void qc.invalidateQueries({ queryKey: reportsKeys.all })
+    },
+  })
+}
+
+export function useReopenDailyClose () {
+  const qc = useQueryClient()
+  return useMutation<FrozenCloseRecord, Error, { date: string; reason: string }>({
+    mutationFn: ({ date, reason }) =>
+      invoke("reports_reopen_daily_close", { args: { date, reason } }),
+    onSuccess: (data) => {
+      // The day is no longer frozen -> drop the in-force record from cache.
+      qc.setQueryData(reportsKeys.frozenClose(data.target_date), null)
+      void qc.invalidateQueries({ queryKey: reportsKeys.all })
     },
   })
 }

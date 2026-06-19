@@ -3,11 +3,13 @@
 // AuditRowSchema (per-row), and AuditQueryResponseSchema (envelope).
 //
 // Critical invariants pinned:
-// - The 14-action and 15-entity closed enums (mirror phase-01 §7.36 + the
+// - The 16-action and 16-entity closed enums (mirror phase-01 §7.36 + the
 //   phase-07 §7.18 `daily_close_run` extension + phase-08's exhaustive
-//   syncable-entity list). A regression that adds a new action/entity
-//   server-side WITHOUT extending these arrays would silently accept
-//   queries that the route handler can't honor.
+//   syncable-entity list + the signed-close `daily_close_sign` /
+//   `daily_close_reopen` actions and the materialized `daily_close` entity).
+//   A regression that adds a new action/entity server-side WITHOUT extending
+//   these arrays would silently accept queries that the route handler can't
+//   honor.
 // - entity_id_prefix bounds (4..36 chars; UUID format constraint).
 // - text search bounds (2..100 chars).
 // - limit is a string-typed integer (Fastify query params are always
@@ -47,15 +49,18 @@ if (!FormatRegistry.Has('uuid')) {
 
 // --- ACTION_VALUES / ENTITY_VALUES exhaustiveness ----------------
 
-test('ACTION_VALUES enumerates exactly the 14 phase-09 actions', () => {
+test('ACTION_VALUES enumerates exactly the 16 phase-09 actions', () => {
   // Pinning the count + the exact set guards against (a) silent drops
   // when a future refactor renames or removes an action, and (b) silent
-  // additions that bypass the audit query path's enumeration.
-  assert.equal(ACTION_VALUES.length, 14, 'must list exactly 14 actions')
+  // additions that bypass the audit query path's enumeration. The two
+  // signed-close actions join the set alongside the materialized
+  // daily_close entity (client migration 015).
+  assert.equal(ACTION_VALUES.length, 16, 'must list exactly 16 actions')
   for (const expected of [
     'create', 'update', 'soft_delete', 'lock', 'void', 'discard',
     'clock_in', 'clock_out', 'password_change', 'login', 'logout',
     'conflict_resolve', 'vacuum', 'daily_close_run',
+    'daily_close_sign', 'daily_close_reopen',
   ]) {
     assert.ok(
       ACTION_VALUES.includes(expected as never),
@@ -64,13 +69,14 @@ test('ACTION_VALUES enumerates exactly the 14 phase-09 actions', () => {
   }
 })
 
-test('ENTITY_VALUES enumerates exactly the 15 syncable entities', () => {
-  assert.equal(ENTITY_VALUES.length, 15, 'must list exactly 15 entities')
+test('ENTITY_VALUES enumerates exactly the 16 syncable entities', () => {
+  assert.equal(ENTITY_VALUES.length, 16, 'must list exactly 16 entities')
   for (const expected of [
     'users', 'settings', 'check_types', 'check_subtypes', 'doctors',
     'doctor_check_pricing', 'operators', 'operator_specialties',
     'operator_shifts', 'patients', 'visits', 'inventory_items',
     'inventory_consumption_map', 'inventory_adjustments', 'audit_log',
+    'daily_close',
   ]) {
     assert.ok(
       ENTITY_VALUES.includes(expected as never),

@@ -10,6 +10,7 @@ import type {
   CheckSubtypeSyncRecord,
   CheckTypeSyncRecord,
   ConsumptionSyncRecord,
+  DailyCloseSyncRecord,
   DoctorPricingSyncRecord,
   DoctorSyncRecord,
   InventoryAdjustmentSyncRecord,
@@ -384,6 +385,27 @@ export class SyncPushService {
           assertTenantMatches(row.entity_id, tenantId, op.op_id)
           validateOperatorShift(row, op.op_id)
           await this.store.upsertOperatorShift(row)
+          break
+        }
+        case 'daily_close': {
+          // A signed close is authored by an accountant or superadmin (local
+          // ReportsService gates sign to [accountant, superadmin]); a reopen is
+          // superadmin-only locally and arrives as version 2 of the same id.
+          // The server accepts the payload from either of those roles and
+          // trusts the local audit row (daily_close_sign / daily_close_reopen)
+          // for the finer transition-level role gate. LWW (version-gated).
+          if (!actor || (actor.role !== 'accountant' && actor.role !== 'superadmin')) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'daily_close push requires accountant or superadmin role',
+              403,
+              { op_id: op.op_id }
+            )
+          }
+          const row = decodeJsonPayload<DailyCloseSyncRecord>(op.payload_b64, op.op_id)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          validateDailyClose(row, op.op_id)
+          await this.store.upsertDailyClose(normalizeDailyCloseRow(row))
           break
         }
         default:
@@ -776,5 +798,56 @@ function validateAdjustment (
       422,
       { op_id: opId }
     )
+  }
+}
+
+/**
+ * Validate a signed daily-close push (client migration 015). The totals are
+ * i64 amounts (plain numbers) so the only structural invariants are the
+ * required identifiers, a non-empty input_hash, and a >= 1 version (the freeze
+ * is version 1; a reopen is version 2). The reopen tombstone columns are
+ * checked for coherence: if the day is reopened, who reopened it must be set.
+ */
+function validateDailyClose (row: DailyCloseSyncRecord, opId: string): void {
+  if (row.target_date.trim().length === 0) {
+    throw new DomainError('VALIDATION_ERROR', 'daily_close target_date required', 422, { op_id: opId })
+  }
+  if (row.input_hash.trim().length === 0) {
+    throw new DomainError('VALIDATION_ERROR', 'daily_close input_hash required', 422, { op_id: opId })
+  }
+  if (!row.signed_by_user_id) {
+    throw new DomainError('VALIDATION_ERROR', 'daily_close signed_by_user_id required', 422, { op_id: opId })
+  }
+  if (row.signed_by_name.trim().length === 0) {
+    throw new DomainError('VALIDATION_ERROR', 'daily_close signed_by_name required', 422, { op_id: opId })
+  }
+  if (!row.signed_at) {
+    throw new DomainError('VALIDATION_ERROR', 'daily_close signed_at required', 422, { op_id: opId })
+  }
+  if (row.version < 1) {
+    throw new DomainError('VALIDATION_ERROR', 'daily_close version must be >= 1', 422, { op_id: opId })
+  }
+  // A reopened close (reopened_at set) must record who reopened it. The freeze
+  // path leaves all three reopen columns null.
+  if (row.reopened_at != null && !row.reopened_by_user_id) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'reopened daily_close requires reopened_by_user_id',
+      422,
+      { op_id: opId }
+    )
+  }
+}
+
+/**
+ * Normalize a pushed daily-close row, mirroring the desktop's overwrite-on-save
+ * semantics: the nullable reopen text columns are trimmed to null when blank so
+ * a whitespace-only reopen_reason never lands in Postgres.
+ */
+function normalizeDailyCloseRow (row: DailyCloseSyncRecord): DailyCloseSyncRecord {
+  return {
+    ...row,
+    reopened_by_user_id: cleanOpt(row.reopened_by_user_id),
+    reopen_reason: cleanOpt(row.reopen_reason),
   }
 }

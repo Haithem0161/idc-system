@@ -32,6 +32,8 @@ use crate::domains::catalog::domain::repositories::{
 use crate::domains::patients::domain::entities::Patient;
 use crate::domains::patients::domain::repositories::PatientRepo;
 use crate::domains::receipts::{render as render_receipts, ReceiptArtifacts, ReceiptRenderOptions};
+use crate::domains::reports::domain::repositories::FrozenCloseRepo;
+use crate::domains::reports::domain::services::{baghdad_offset_seconds, utc_to_local_date};
 use crate::domains::shifts::domain::repositories::OperatorShiftRepo;
 use crate::domains::sync::domain::entities::OutboxOp;
 use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo};
@@ -129,6 +131,7 @@ pub struct VisitServiceConfig {
     pub consumption: Arc<dyn InventoryConsumptionRepo>,
     pub inventory_items: Arc<dyn InventoryItemRepo>,
     pub shifts: Arc<dyn OperatorShiftRepo>,
+    pub frozen_close: Arc<dyn FrozenCloseRepo>,
     pub audit_repo: Arc<dyn AuditRepo>,
     pub outbox_repo: Arc<dyn OutboxRepo>,
     pub receipts_dir: PathBuf,
@@ -151,6 +154,7 @@ pub struct VisitService {
     #[allow(dead_code)]
     inventory_items: Arc<dyn InventoryItemRepo>,
     shifts: Arc<dyn OperatorShiftRepo>,
+    frozen_close: Arc<dyn FrozenCloseRepo>,
     writer: AuditWriter,
     receipts_dir: PathBuf,
     device_id: String,
@@ -173,6 +177,7 @@ impl VisitService {
             consumption: cfg.consumption,
             inventory_items: cfg.inventory_items,
             shifts: cfg.shifts,
+            frozen_close: cfg.frozen_close,
             writer,
             receipts_dir: cfg.receipts_dir,
             device_id: cfg.device_id,
@@ -207,6 +212,30 @@ impl VisitService {
             .get_by_id(id)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("visit {id}")))
+    }
+
+    /// Immutability guard: reject a mutation that would change the totals of a
+    /// frozen day. `instant` is the UTC moment whose local day is affected -- for
+    /// a lock it's "now" (the lock adds revenue to today's close); for a void
+    /// it's the visit's `locked_at` (the void changes that day's close). A
+    /// superadmin must reopen the close before the day can be touched again.
+    async fn ensure_day_not_frozen(
+        &self,
+        entity_id: &str,
+        instant: DateTime<Utc>,
+    ) -> AppResult<()> {
+        let day = utc_to_local_date(instant, baghdad_offset_seconds());
+        if self
+            .frozen_close
+            .find_in_force_for_date(entity_id, day)
+            .await?
+            .is_some()
+        {
+            return Err(AppError::Conflict(format!(
+                "the day {day} is frozen; a superadmin must reopen the daily close before editing it"
+            )));
+        }
+        Ok(())
     }
 
     pub async fn get(&self, id: Uuid) -> AppResult<Visit> {
@@ -629,6 +658,10 @@ impl VisitService {
                 current.status.as_str()
             )));
         }
+        // Immutability: a lock adds revenue to TODAY's close; refuse if today is
+        // already signed & frozen (a superadmin must reopen it first).
+        self.ensure_day_not_frozen(&current.entity_id, Utc::now())
+            .await?;
         // §7.13: re-validate the patient.
         // Operator eligibility -- compute fresh and reject if the chosen
         // operator is not in the qualified set (§7.12 TOCTOU guard).
@@ -757,6 +790,12 @@ impl VisitService {
                 current.status.as_str()
             )));
         }
+        // Immutability: a void reverses revenue from the day the visit was
+        // LOCKED on; refuse if that day is signed & frozen. A locked visit
+        // always has `locked_at`; fall back to now if somehow absent.
+        let affected_day_instant = current.locked_at.unwrap_or_else(Utc::now);
+        self.ensure_day_not_frozen(&current.entity_id, affected_day_instant)
+            .await?;
         let trimmed = reason.trim();
         if trimmed.chars().count() < 5 {
             return Err(AppError::Validation(

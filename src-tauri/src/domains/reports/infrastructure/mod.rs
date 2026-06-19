@@ -1,3 +1,3 @@
 pub mod repositories;
 
-pub use repositories::SqliteReportsReadModel;
+pub use repositories::{SqliteFrozenCloseRepo, SqliteReportsReadModel};

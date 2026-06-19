@@ -51,7 +51,7 @@ use app_lib::domains::reports::domain::entities::{
     DateRange, VisitsReport, VisitsReportFilters, VisitsReportGroupBy,
 };
 use app_lib::domains::reports::domain::repositories::ReportsReadModel;
-use app_lib::domains::reports::infrastructure::SqliteReportsReadModel;
+use app_lib::domains::reports::infrastructure::{SqliteFrozenCloseRepo, SqliteReportsReadModel};
 use app_lib::domains::reports::service::{ReportsService, ReportsServiceConfig};
 use app_lib::domains::shifts::domain::entities::operator_shift::OperatorShiftOpenInput;
 use app_lib::domains::shifts::domain::entities::OperatorShift;
@@ -280,6 +280,7 @@ async fn seed() -> Fixture {
         consumption: cons_repo,
         inventory_items: item_repo,
         shifts: shift_repo,
+        frozen_close: Arc::new(SqliteFrozenCloseRepo::new(pool.clone())),
         audit_repo: audit.clone(),
         outbox_repo: outbox.clone(),
         receipts_dir,
@@ -290,6 +291,7 @@ async fn seed() -> Fixture {
     let reports_service = Arc::new(ReportsService::new(ReportsServiceConfig {
         pool: pool.clone(),
         read_model,
+        frozen_close_repo: Arc::new(SqliteFrozenCloseRepo::new(pool.clone())),
         audit_repo: audit,
         outbox_repo: outbox,
         device_id: DEVICE_ID.to_string(),
@@ -1243,4 +1245,232 @@ async fn role_gate_rejects_receptionist_for_dashboard_tops() {
     assert!(ReportsService::require_reports_role(UserRole::Receptionist).is_err());
     assert!(ReportsService::require_reports_role(UserRole::Accountant).is_ok());
     assert!(ReportsService::require_reports_role(UserRole::Superadmin).is_ok());
+}
+
+// ---- sign & freeze ---------------------------------------------------------
+
+fn close_settings() -> BTreeMap<String, String> {
+    let mut s: BTreeMap<String, String> = BTreeMap::new();
+    s.insert("dye_cost_iqd".into(), "2000".into());
+    s.insert("report_cost_iqd".into(), "3000".into());
+    s.insert("internal_doctor_pct".into(), "40".into());
+    s
+}
+
+/// Simulate "everything synced" by clearing the outbox, so the freeze gate
+/// (`pending_sync == 0`) is satisfiable. In production the sync engine drains
+/// the outbox after a successful push; in tests we drain it directly.
+async fn drain_outbox(pool: &SqlitePool) {
+    sqlx::query("DELETE FROM outbox")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// Sign a reconciled day: it materializes a frozen close, enqueues it for sync,
+/// and writes a `daily_close_sign` audit row.
+#[tokio::test]
+async fn sign_freezes_the_day_and_enqueues_for_sync() {
+    let f = seed().await;
+    let _ = lock_visit(&f, false, Some(f.doctor.id)).await;
+    let target = baghdad_today();
+    drain_outbox(&f.pool).await; // everything synced -> day is not provisional
+
+    let frozen = f
+        .reports_service
+        .sign_daily_close(
+            f.superadmin.id,
+            "Karrar".into(),
+            ENTITY_ID,
+            target,
+            close_settings(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(frozen.target_date, target);
+    assert!(frozen.is_in_force());
+    assert_eq!(frozen.signed_by_name, "Karrar");
+
+    // The frozen snapshot must equal the live recomputation for the same day:
+    // the freeze captures exactly what the report shows (no drift at sign time).
+    let live = f
+        .reports_service
+        .daily_close(f.superadmin.id, ENTITY_ID, target, close_settings())
+        .await
+        .unwrap();
+    assert_eq!(frozen.net_iqd, live.net_iqd);
+    assert_eq!(frozen.total_revenue_iqd, live.total_revenue_iqd);
+    assert_eq!(frozen.input_hash, live.input_hash);
+    assert_eq!(frozen.locked_count, live.locked_count);
+
+    // The in-force close is found by date.
+    let found = f
+        .reports_service
+        .frozen_close_for_date(ENTITY_ID, target)
+        .await
+        .unwrap();
+    assert_eq!(found.map(|c| c.id), Some(frozen.id));
+
+    // A daily_close row was enqueued to the outbox for sync.
+    let outbox: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE entity = 'daily_close'")
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+    assert_eq!(outbox.0, 1);
+
+    // The sign audit row exists.
+    let audit: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM audit_log WHERE entity = 'daily_close' AND action = 'daily_close_sign'",
+    )
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    assert_eq!(audit.0, 1);
+}
+
+/// Double-sign is rejected: a day can only be frozen once (until reopened).
+#[tokio::test]
+async fn sign_twice_is_rejected() {
+    let f = seed().await;
+    let _ = lock_visit(&f, false, Some(f.doctor.id)).await;
+    let target = baghdad_today();
+    drain_outbox(&f.pool).await;
+    f.reports_service
+        .sign_daily_close(
+            f.superadmin.id,
+            "Karrar".into(),
+            ENTITY_ID,
+            target,
+            close_settings(),
+        )
+        .await
+        .unwrap();
+    let second = f
+        .reports_service
+        .sign_daily_close(
+            f.superadmin.id,
+            "Karrar".into(),
+            ENTITY_ID,
+            target,
+            close_settings(),
+        )
+        .await;
+    assert!(second.is_err(), "second freeze of the same day must fail");
+}
+
+/// Immutability: once today is frozen, locking a new visit (which would change
+/// today's totals) is rejected. After a superadmin reopens, locking works again.
+#[tokio::test]
+async fn freezing_blocks_further_locks_until_reopened() {
+    let f = seed().await;
+    // Lock one visit, then freeze today.
+    let _ = lock_visit(&f, false, Some(f.doctor.id)).await;
+    let target = baghdad_today();
+    drain_outbox(&f.pool).await;
+    f.reports_service
+        .sign_daily_close(
+            f.superadmin.id,
+            "Karrar".into(),
+            ENTITY_ID,
+            target,
+            close_settings(),
+        )
+        .await
+        .unwrap();
+
+    // A new draft for today cannot be locked -- the day is frozen.
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: Some(f.doctor.id),
+                dye: false,
+                report: false,
+            },
+        )
+        .await
+        .unwrap();
+    let blocked = f
+        .visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await;
+    assert!(blocked.is_err(), "lock on a frozen day must be rejected");
+
+    // Superadmin reopens the day.
+    f.reports_service
+        .reopen_daily_close(
+            f.superadmin.id,
+            ENTITY_ID,
+            target,
+            "correcting an omission".into(),
+        )
+        .await
+        .unwrap();
+
+    // The day is no longer in force.
+    let after = f
+        .reports_service
+        .frozen_close_for_date(ENTITY_ID, target)
+        .await
+        .unwrap();
+    assert!(after.is_none(), "reopened day must not be in force");
+
+    // Now the same draft locks successfully.
+    let ok = f
+        .visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await;
+    assert!(ok.is_ok(), "lock after reopen must succeed");
+
+    // Reopen wrote its own audit row.
+    let audit: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM audit_log WHERE entity = 'daily_close' AND action = 'daily_close_reopen'",
+    )
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    assert_eq!(audit.0, 1);
+}
+
+/// A provisional day (pending-sync ops outstanding) cannot be frozen.
+#[tokio::test]
+async fn cannot_freeze_a_provisional_day() {
+    let f = seed().await;
+    // Locking a visit enqueues outbox ops, so pending_sync > 0 -> provisional.
+    let _ = lock_visit(&f, false, Some(f.doctor.id)).await;
+    let target = baghdad_today();
+    let res = f
+        .reports_service
+        .sign_daily_close(
+            f.superadmin.id,
+            "Karrar".into(),
+            ENTITY_ID,
+            target,
+            close_settings(),
+        )
+        .await;
+    assert!(
+        res.is_err(),
+        "a day with pending-sync ops must not be freezable"
+    );
 }

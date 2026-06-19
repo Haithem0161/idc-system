@@ -135,6 +135,7 @@ const APPLY_ORDER: &[&str] = &[
     "patients",
     "visits",
     "inventory_adjustments",
+    "daily_close",
     "audit_log",
 ];
 
@@ -255,6 +256,14 @@ async fn apply_changes(
                     crate::sync::conflict::Policy::Manual
                 );
                 crate::sync::puller_entities::apply_visits_change(tx, change).await?;
+                applied += 1;
+            }
+            "daily_close" => {
+                debug_assert_eq!(
+                    crate::sync::conflict::policy_for("daily_close"),
+                    crate::sync::conflict::Policy::LastWriteWins
+                );
+                crate::sync::puller_entities::apply_daily_close_change(tx, change).await?;
                 applied += 1;
             }
             other => {

@@ -44,7 +44,7 @@ use app_lib::domains::patients::service::{PatientCreateInput, PatientService};
 use app_lib::domains::receipts::ReceiptRenderOptions;
 use app_lib::domains::reports::domain::entities::{DateRange, VisitsReportFilters};
 use app_lib::domains::reports::domain::repositories::ReportsReadModel;
-use app_lib::domains::reports::infrastructure::SqliteReportsReadModel;
+use app_lib::domains::reports::infrastructure::{SqliteFrozenCloseRepo, SqliteReportsReadModel};
 use app_lib::domains::reports::service::{ReportsService, ReportsServiceConfig};
 use app_lib::domains::shifts::domain::entities::operator_shift::OperatorShiftOpenInput;
 use app_lib::domains::shifts::domain::entities::OperatorShift;
@@ -287,6 +287,7 @@ async fn rig() -> Rig {
         consumption: cons_repo,
         inventory_items: item_repo,
         shifts: shift_repo,
+        frozen_close: Arc::new(SqliteFrozenCloseRepo::new(pool.clone())),
         audit_repo: audit.clone(),
         outbox_repo: outbox.clone(),
         receipts_dir,
@@ -297,6 +298,7 @@ async fn rig() -> Rig {
     let reports = Arc::new(ReportsService::new(ReportsServiceConfig {
         pool: pool.clone(),
         read_model,
+        frozen_close_repo: Arc::new(SqliteFrozenCloseRepo::new(pool.clone())),
         audit_repo: audit,
         outbox_repo: outbox,
         device_id: DEVICE_ID.to_string(),

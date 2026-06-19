@@ -251,6 +251,41 @@ export interface InventoryAdjustmentSyncRecord {
   origin_device_id: string | null
 }
 
+// ---- Daily close (signed & frozen) ---------------------------------------
+
+/**
+ * Signed & frozen daily close (client migration 015). Field names mirror the
+ * desktop `FrozenClosePushPayload` exactly. Conflict policy is LAST-WRITE-WINS,
+ * version-gated: the freeze is version 1; a superadmin reopen is version 2 of
+ * the same id (sets `reopened_at` + reopen metadata).
+ */
+export interface DailyCloseSyncRecord {
+  id: string
+  target_date: string
+  tz_offset: string
+  input_hash: string
+  total_revenue_iqd: number
+  total_doctor_cuts_iqd: number
+  total_operator_cuts_iqd: number
+  total_inventory_consumption_value_iqd: number
+  net_iqd: number
+  locked_count: number
+  voided_count: number
+  voided_value_iqd: number
+  signed_by_user_id: string
+  signed_by_name: string
+  signed_at: string
+  reopened_at: string | null
+  reopened_by_user_id: string | null
+  reopen_reason: string | null
+  entity_id: string
+  version: number
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  origin_device_id: string | null
+}
+
 export type CatalogSyncRecord =
   | CheckTypeSyncRecord
   | CheckSubtypeSyncRecord
@@ -283,6 +318,7 @@ export class MemorySyncStore implements
   readonly patients = new Map<string, PatientSyncRecord>()
   readonly visits = new Map<string, VisitSyncRecord>()
   readonly inventoryAdjustments = new Map<string, InventoryAdjustmentSyncRecord>()
+  readonly dailyCloses = new Map<string, DailyCloseSyncRecord>()
   private readonly processed = new Map<string, { tenantId: string, response: ProcessedOpResponse, processedAt: Date }>()
   private readonly cursors = new Map<string, string>()
   private readonly conflicts = new Map<string, ParkedConflict & {
@@ -396,6 +432,18 @@ export class MemorySyncStore implements
 
   async upsertPatient (row: PatientSyncRecord): Promise<{ applied: boolean }> {
     return upsertLWW(this.patients, row)
+  }
+
+  /**
+   * `daily_close` follows LAST-WRITE-WINS (version-gated). The freeze is
+   * version 1; a superadmin reopen is version 2 of the same id, so the reopen
+   * (higher version) always wins over the freeze cleanly -- no conflict park.
+   * The additive-on-id semantics (a second offline freeze of the same day is
+   * ignored) are enforced by the in-force partial-unique index in Postgres;
+   * the in-memory store mirrors the version gate only.
+   */
+  async upsertDailyClose (row: DailyCloseSyncRecord): Promise<{ applied: boolean }> {
+    return upsertLWW(this.dailyCloses, row)
   }
 
   /**
@@ -610,7 +658,16 @@ export class MemorySyncStore implements
       ),
     ]
 
-    const merged = [...auditChanges, ...userChanges, ...settingChanges, ...catalogChanges, ...shiftChanges, ...receptionChanges]
+    // Daily close = LWW. A reopened close keeps reopened_at set but is never
+    // tombstoned, so it must still propagate (peers learn the day is editable
+    // again); only deleted_at hides a row, and that column is unused here.
+    const dailyCloseChanges: ChangeRow[] = mapCatalogChanges(
+      'daily_close',
+      this.dailyCloses,
+      tenantId
+    )
+
+    const merged = [...auditChanges, ...userChanges, ...settingChanges, ...catalogChanges, ...shiftChanges, ...receptionChanges, ...dailyCloseChanges]
       .sort((a, b) => {
         const cmp = a.updated_at.localeCompare(b.updated_at)
         return cmp !== 0 ? cmp : a.entity_id.localeCompare(b.entity_id)

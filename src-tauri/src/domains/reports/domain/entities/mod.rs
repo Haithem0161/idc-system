@@ -4,6 +4,8 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::error::{AppError, AppResult};
+
 /// Date range as an absolute closed-open UTC interval. The caller resolves
 /// local-day boundaries to UTC via the tz offset declared in phase-07 §7.8
 /// (Iraq, fixed UTC+03:00 year-round, no DST).
@@ -270,4 +272,211 @@ pub struct DashboardTops {
     pub top_doctors: Vec<DoctorEarningsRow>,
     pub top_operators: Vec<OperatorEarningsRow>,
     pub top_check_types: Vec<CheckTypeDailyRow>,
+}
+
+/// A signed, frozen daily close (the PRD §11.1 / phase-07 §7.12 Horizon-1
+/// entity). Materialized when an accountant "signs and freezes" a reconciled
+/// day: it captures the totals snapshot plus the `input_hash` freeze key and the
+/// signer's attestation, and renders that day immutable until a superadmin
+/// reopens it. Additive-only: created once, never mutated in place except the
+/// reopen tombstone.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FrozenClose {
+    pub id: Uuid,
+    pub target_date: NaiveDate,
+    pub tz_offset: String,
+    pub input_hash: String,
+
+    pub total_revenue_iqd: i64,
+    pub total_doctor_cuts_iqd: i64,
+    pub total_operator_cuts_iqd: i64,
+    pub total_inventory_consumption_value_iqd: i64,
+    pub net_iqd: i64,
+    pub locked_count: i64,
+    pub voided_count: i64,
+    pub voided_value_iqd: i64,
+
+    pub signed_by_user_id: Uuid,
+    pub signed_by_name: String,
+    pub signed_at: DateTime<Utc>,
+
+    /// Non-null once a superadmin has reopened (unfrozen) this close; the day is
+    /// editable again until re-frozen.
+    pub reopened_at: Option<DateTime<Utc>>,
+    pub reopened_by_user_id: Option<Uuid>,
+    pub reopen_reason: Option<String>,
+
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub version: i64,
+    pub origin_device_id: Option<String>,
+    pub entity_id: String,
+}
+
+/// Inputs to materialize a brand-new frozen close from a freshly computed
+/// `DailyClose` snapshot.
+pub struct FrozenCloseNewInput {
+    pub target_date: NaiveDate,
+    pub tz_offset: String,
+    pub input_hash: String,
+    pub total_revenue_iqd: i64,
+    pub total_doctor_cuts_iqd: i64,
+    pub total_operator_cuts_iqd: i64,
+    pub total_inventory_consumption_value_iqd: i64,
+    pub net_iqd: i64,
+    pub locked_count: i64,
+    pub voided_count: i64,
+    pub voided_value_iqd: i64,
+    pub signed_by_user_id: Uuid,
+    pub signed_by_name: String,
+    pub entity_id: String,
+    pub origin_device_id: Option<String>,
+}
+
+impl FrozenClose {
+    /// Build a new (in-force) frozen close, validating invariants. Returns a
+    /// validation error if the hash or signer name is blank.
+    pub fn try_new(input: FrozenCloseNewInput, now: DateTime<Utc>) -> AppResult<Self> {
+        if input.input_hash.trim().is_empty() {
+            return Err(AppError::Validation("input_hash must not be empty".into()));
+        }
+        if input.signed_by_name.trim().is_empty() {
+            return Err(AppError::Validation(
+                "signed_by_name must not be empty".into(),
+            ));
+        }
+        if input.entity_id.trim().is_empty() {
+            return Err(AppError::Validation("entity_id must not be empty".into()));
+        }
+        Ok(Self {
+            id: Uuid::now_v7(),
+            target_date: input.target_date,
+            tz_offset: input.tz_offset,
+            input_hash: input.input_hash,
+            total_revenue_iqd: input.total_revenue_iqd,
+            total_doctor_cuts_iqd: input.total_doctor_cuts_iqd,
+            total_operator_cuts_iqd: input.total_operator_cuts_iqd,
+            total_inventory_consumption_value_iqd: input.total_inventory_consumption_value_iqd,
+            net_iqd: input.net_iqd,
+            locked_count: input.locked_count,
+            voided_count: input.voided_count,
+            voided_value_iqd: input.voided_value_iqd,
+            signed_by_user_id: input.signed_by_user_id,
+            signed_by_name: input.signed_by_name,
+            signed_at: now,
+            reopened_at: None,
+            reopened_by_user_id: None,
+            reopen_reason: None,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+            origin_device_id: input.origin_device_id,
+            entity_id: input.entity_id,
+        })
+    }
+
+    /// True while this close is still in force (not reopened).
+    pub fn is_in_force(&self) -> bool {
+        self.reopened_at.is_none()
+    }
+
+    /// Reopen (unfreeze) this close. A superadmin action: records who reopened
+    /// it, when, and why, and bumps the version so the tombstone syncs. Rejects
+    /// an already-reopened close and a too-short reason.
+    pub fn reopen(&mut self, by_user_id: Uuid, reason: String, at: DateTime<Utc>) -> AppResult<()> {
+        if self.reopened_at.is_some() {
+            return Err(AppError::Validation(
+                "daily close is already reopened".into(),
+            ));
+        }
+        if reason.trim().chars().count() < 5 {
+            return Err(AppError::Validation(
+                "reopen reason must be at least 5 characters".into(),
+            ));
+        }
+        self.reopened_at = Some(at);
+        self.reopened_by_user_id = Some(by_user_id);
+        self.reopen_reason = Some(reason.trim().to_string());
+        self.updated_at = at;
+        self.version += 1;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod frozen_close_tests {
+    use super::*;
+
+    fn sample_input() -> FrozenCloseNewInput {
+        FrozenCloseNewInput {
+            target_date: NaiveDate::from_ymd_opt(2026, 6, 19).unwrap(),
+            tz_offset: "+03:00".into(),
+            input_hash: "abc123".into(),
+            total_revenue_iqd: 50_000,
+            total_doctor_cuts_iqd: 1_500,
+            total_operator_cuts_iqd: 4_000,
+            total_inventory_consumption_value_iqd: 0,
+            net_iqd: 44_500,
+            locked_count: 2,
+            voided_count: 0,
+            voided_value_iqd: 0,
+            signed_by_user_id: Uuid::now_v7(),
+            signed_by_name: "Karrar".into(),
+            entity_id: "tenant-1".into(),
+            origin_device_id: Some("device-1".into()),
+        }
+    }
+
+    #[test]
+    fn try_new_builds_an_in_force_close_at_version_1() {
+        let now = Utc::now();
+        let c = FrozenClose::try_new(sample_input(), now).unwrap();
+        assert!(c.is_in_force());
+        assert_eq!(c.version, 1);
+        assert_eq!(c.signed_at, now);
+        assert!(c.reopened_at.is_none());
+        assert_eq!(c.net_iqd, 44_500);
+    }
+
+    #[test]
+    fn try_new_rejects_blank_hash_name_and_tenant() {
+        let now = Utc::now();
+        let mut bad = sample_input();
+        bad.input_hash = "  ".into();
+        assert!(FrozenClose::try_new(bad, now).is_err());
+
+        let mut bad = sample_input();
+        bad.signed_by_name = "".into();
+        assert!(FrozenClose::try_new(bad, now).is_err());
+
+        let mut bad = sample_input();
+        bad.entity_id = "".into();
+        assert!(FrozenClose::try_new(bad, now).is_err());
+    }
+
+    #[test]
+    fn reopen_tombstones_bumps_version_and_records_actor() {
+        let now = Utc::now();
+        let mut c = FrozenClose::try_new(sample_input(), now).unwrap();
+        let admin = Uuid::now_v7();
+        let later = now + chrono::Duration::minutes(5);
+        c.reopen(admin, "wrong day frozen".into(), later).unwrap();
+        assert!(!c.is_in_force());
+        assert_eq!(c.version, 2);
+        assert_eq!(c.reopened_by_user_id, Some(admin));
+        assert_eq!(c.reopened_at, Some(later));
+        assert_eq!(c.reopen_reason.as_deref(), Some("wrong day frozen"));
+    }
+
+    #[test]
+    fn reopen_rejects_short_reason_and_double_reopen() {
+        let now = Utc::now();
+        let mut c = FrozenClose::try_new(sample_input(), now).unwrap();
+        let admin = Uuid::now_v7();
+        assert!(c.reopen(admin, "no".into(), now).is_err());
+        // first valid reopen succeeds
+        c.reopen(admin, "valid reason".into(), now).unwrap();
+        // second reopen is rejected
+        assert!(c.reopen(admin, "another reason".into(), now).is_err());
+    }
 }

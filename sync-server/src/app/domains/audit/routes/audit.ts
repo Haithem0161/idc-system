@@ -11,8 +11,9 @@ import { AuditQueryService } from '../service/audit-service'
  * Superadmin-only. Returns the tenant's audit rows filtered by the supplied
  * query string. Sorts `(at DESC, id DESC)` for stability (§7.5); paginates
  * with a base64url cursor encoded as `{ at, id }`. Default page size 50,
- * hard cap 100. The 14-action union mirrors phase-01 §7.36 + phase-07 §7.18
- * `daily_close_run`.
+ * hard cap 100. The action union mirrors phase-01 §7.36 + phase-07 §7.18
+ * `daily_close_run` + the signed-close actions `daily_close_sign` /
+ * `daily_close_reopen`.
  */
 
 // Phase-09 §3.1 contract slice: exported so the Ajv-equivalent
@@ -21,6 +22,7 @@ export const ACTION_VALUES = [
   'create', 'update', 'soft_delete', 'lock', 'void', 'discard',
   'clock_in', 'clock_out', 'password_change', 'login', 'logout',
   'conflict_resolve', 'vacuum', 'daily_close_run',
+  'daily_close_sign', 'daily_close_reopen',
 ] as const
 
 export const ENTITY_VALUES = [
@@ -28,6 +30,7 @@ export const ENTITY_VALUES = [
   'doctor_check_pricing', 'operators', 'operator_specialties',
   'operator_shifts', 'patients', 'visits', 'inventory_items',
   'inventory_consumption_map', 'inventory_adjustments', 'audit_log',
+  'daily_close',
 ] as const
 
 export const AuditQuerySchema = Type.Object({

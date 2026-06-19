@@ -227,6 +227,7 @@ fn is_syncable_table(table: &str) -> bool {
             | "patients"
             | "visits"
             | "inventory_adjustments"
+            | "daily_close"
     )
 }
 

@@ -74,11 +74,12 @@ use crate::domains::patients::PatientService;
 use crate::domains::reports::commands::{
     reports_daily_close, reports_dashboard_kpis, reports_dashboard_tops, reports_doctor_drilldown,
     reports_doctor_earnings, reports_export_daily_close_pdf, reports_export_doctors_csv,
-    reports_export_operators_csv, reports_export_visits_csv, reports_operator_drilldown,
-    reports_operator_earnings, reports_visits,
+    reports_export_operators_csv, reports_export_visits_csv, reports_frozen_close_for_date,
+    reports_list_daily_closes, reports_operator_drilldown, reports_operator_earnings,
+    reports_reopen_daily_close, reports_sign_daily_close, reports_visits,
 };
-use crate::domains::reports::domain::repositories::ReportsReadModel;
-use crate::domains::reports::infrastructure::SqliteReportsReadModel;
+use crate::domains::reports::domain::repositories::{FrozenCloseRepo, ReportsReadModel};
+use crate::domains::reports::infrastructure::{SqliteFrozenCloseRepo, SqliteReportsReadModel};
 use crate::domains::reports::service::ReportsServiceConfig;
 use crate::domains::reports::ReportsService;
 use crate::domains::settings::commands::{
@@ -294,6 +295,10 @@ pub fn run() {
             reports_operator_earnings,
             reports_operator_drilldown,
             reports_daily_close,
+            reports_sign_daily_close,
+            reports_reopen_daily_close,
+            reports_frozen_close_for_date,
+            reports_list_daily_closes,
             reports_export_visits_csv,
             reports_export_doctors_csv,
             reports_export_operators_csv,
@@ -482,9 +487,12 @@ async fn bootstrap(
 
     let reports_read_model: Arc<dyn ReportsReadModel> =
         Arc::new(SqliteReportsReadModel::new(pool.clone()));
+    let frozen_close_repo: Arc<dyn FrozenCloseRepo> =
+        Arc::new(SqliteFrozenCloseRepo::new(pool.clone()));
     let reports_service = Arc::new(ReportsService::new(ReportsServiceConfig {
         pool: pool.clone(),
         read_model: reports_read_model,
+        frozen_close_repo: frozen_close_repo.clone(),
         audit_repo: audit_repo.clone(),
         outbox_repo: outbox_repo.clone(),
         device_id: device_id.clone(),
@@ -504,6 +512,7 @@ async fn bootstrap(
         consumption: catalog_services.consumption_repo.clone(),
         inventory_items: catalog_services.inventory_item_repo.clone(),
         shifts: shift_repo,
+        frozen_close: frozen_close_repo.clone(),
         audit_repo: audit_repo.clone(),
         outbox_repo: outbox_repo.clone(),
         receipts_dir,

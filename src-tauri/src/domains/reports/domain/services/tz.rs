@@ -12,6 +12,14 @@ pub fn baghdad_offset_seconds() -> i32 {
     BAGHDAD_OFFSET_SECS
 }
 
+/// The local calendar date a UTC instant falls on, given the local offset.
+/// Used to decide which daily-close a lock/void belongs to (immutability guard).
+pub fn utc_to_local_date(instant: DateTime<Utc>, offset_secs: i32) -> NaiveDate {
+    let tz =
+        FixedOffset::east_opt(offset_secs).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+    instant.with_timezone(&tz).date_naive()
+}
+
 /// Returns the `[start_utc, end_utc)` interval for a local-tz calendar day.
 /// `offset_secs` is the local UTC offset in seconds (positive east).
 pub fn local_day_utc_range(date: NaiveDate, offset_secs: i32) -> (DateTime<Utc>, DateTime<Utc>) {

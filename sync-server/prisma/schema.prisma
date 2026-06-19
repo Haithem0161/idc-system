@@ -518,3 +518,54 @@ enum AdjustmentReason {
   count_correction
   consume_visit
 }
+
+// ---- Phase: signed & frozen daily close -----------------------------------
+
+// Mirrors the desktop SQLite `daily_close` table (client migration 015). A
+// "signed & frozen" close materializes the reconciliation for a (entity_id,
+// target_date) day and makes it tamper-evident. Conflict policy is
+// LAST-WRITE-WINS, version-gated: the freeze is version 1; a superadmin reopen
+// is version 2 of the SAME id (sets reopened_at + reopen metadata).
+//
+// In-force uniqueness (at most one close per (entity_id, target_date) with
+// reopened_at IS NULL and deleted_at IS NULL) is NOT modeled with a plain
+// `@@unique([entityId, targetDate])` -- that would block the legitimate
+// reopen-then-refreeze flow, because the reopened row still physically exists
+// with the same (entity_id, target_date). The in-force partial-unique invariant
+// is enforced in raw SQL (init-custom-sql.sql, mirroring the desktop's partial
+// index `daily_close_active_per_day`). Here we keep a NON-unique lookup index.
+model DailyClose {
+  id                                String    @id
+  targetDate                        String    @map("target_date")
+  tzOffset                          String    @map("tz_offset")
+  inputHash                         String    @map("input_hash")
+  // All *_iqd amounts are Int to mirror every other monetary column in this
+  // schema (base_price_iqd, price_snapshot_iqd, ...). The wire sends these as
+  // JSON numbers (i64 on the desktop); JSON.parse yields a JS `number`, which
+  // maps cleanly onto Prisma `Int` without a bigint round-trip.
+  totalRevenueIqd                   Int       @default(0) @map("total_revenue_iqd")
+  totalDoctorCutsIqd                Int       @default(0) @map("total_doctor_cuts_iqd")
+  totalOperatorCutsIqd              Int       @default(0) @map("total_operator_cuts_iqd")
+  totalInventoryConsumptionValueIqd Int       @default(0) @map("total_inventory_consumption_value_iqd")
+  netIqd                            Int       @default(0) @map("net_iqd")
+  lockedCount                       Int       @default(0) @map("locked_count")
+  voidedCount                       Int       @default(0) @map("voided_count")
+  voidedValueIqd                    Int       @default(0) @map("voided_value_iqd")
+  signedByUserId                    String    @map("signed_by_user_id")
+  signedByName                      String    @map("signed_by_name")
+  signedAt                          DateTime  @map("signed_at") @db.Timestamptz
+  reopenedAt                        DateTime? @map("reopened_at") @db.Timestamptz
+  reopenedByUserId                  String?   @map("reopened_by_user_id")
+  reopenReason                      String?   @map("reopen_reason")
+  createdAt                         DateTime  @map("created_at") @db.Timestamptz
+  updatedAt                         DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt                         DateTime? @map("deleted_at") @db.Timestamptz
+  version                           Int       @default(0)
+  lastSyncedAt                      DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt                          DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId                    String?   @map("origin_device_id")
+  entityId                          String    @map("entity_id")
+
+  @@index([entityId, targetDate])
+  @@map("daily_close")
+}
