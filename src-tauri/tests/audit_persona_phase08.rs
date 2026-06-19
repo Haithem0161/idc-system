@@ -108,7 +108,7 @@ async fn p3_mariam_superadmin_day_walks_the_phase_08_surface_end_to_end() {
     let metrics_repo: Arc<dyn MetricsRepo> = Arc::new(SqliteMetricsRepo::new(pool.clone()));
     let outbox_repo: Arc<dyn OutboxRepo> = Arc::new(SqliteOutboxRepo::new(pool.clone()));
     let state_repo: Arc<dyn SyncStateRepo> = Arc::new(SqliteSyncStateRepo::new(pool.clone()));
-    let query_svc = AuditQueryService::new(audit_repo.clone());
+    let query_svc = AuditQueryService::new(audit_repo.clone(), pool.clone());
     let diagnostics_svc = DiagnosticsService::new(
         metrics_repo.clone(),
         outbox_repo.clone(),

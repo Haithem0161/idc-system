@@ -15,7 +15,7 @@ import {
 } from "@/lib/schemas/audit"
 
 describe("Phase-08 §1.2 AUDIT_ACTIONS", () => {
-  it("enumerates all 14 phase-01..07 actions", () => {
+  it("enumerates all actions incl. the signed-close actions", () => {
     expect(AUDIT_ACTIONS).toEqual([
       "create",
       "update",
@@ -31,16 +31,20 @@ describe("Phase-08 §1.2 AUDIT_ACTIONS", () => {
       "conflict_resolve",
       "vacuum",
       "daily_close_run",
+      "daily_close_sign",
+      "daily_close_reopen",
     ])
   })
 
-  it("has exactly 14 entries", () => {
-    expect(AUDIT_ACTIONS).toHaveLength(14)
+  it("has exactly 16 entries", () => {
+    expect(AUDIT_ACTIONS).toHaveLength(16)
   })
 
-  it("includes vacuum and daily_close_run", () => {
+  it("includes vacuum and the daily-close actions", () => {
     expect(AUDIT_ACTIONS).toContain("vacuum")
     expect(AUDIT_ACTIONS).toContain("daily_close_run")
+    expect(AUDIT_ACTIONS).toContain("daily_close_sign")
+    expect(AUDIT_ACTIONS).toContain("daily_close_reopen")
   })
 
   it("includes conflict_resolve for phase-08 resolver round-trip", () => {
@@ -49,7 +53,7 @@ describe("Phase-08 §1.2 AUDIT_ACTIONS", () => {
 })
 
 describe("Phase-08 §1.2 AUDIT_ENTITIES", () => {
-  it("enumerates all 15 entity tables per §7.8", () => {
+  it("enumerates all entity tables incl. daily_close", () => {
     expect(AUDIT_ENTITIES).toEqual([
       "users",
       "settings",
@@ -66,11 +70,12 @@ describe("Phase-08 §1.2 AUDIT_ENTITIES", () => {
       "inventory_consumption_map",
       "inventory_adjustments",
       "audit_log",
+      "daily_close",
     ])
   })
 
-  it("has exactly 15 entries", () => {
-    expect(AUDIT_ENTITIES).toHaveLength(15)
+  it("has exactly 16 entries", () => {
+    expect(AUDIT_ENTITIES).toHaveLength(16)
   })
 
   it("includes audit_log so the vacuum self-row can drill down", () => {

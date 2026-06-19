@@ -74,6 +74,32 @@ impl AuditAction {
             Self::DailyCloseReopen => "daily_close_reopen",
         }
     }
+
+    /// Inverse of `as_str`: parse the canonical DB/wire string back to the
+    /// enum. Returns `None` for an unknown action. Kept adjacent to `as_str`
+    /// so the two cannot drift (the audit-read path depends on this).
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        let action = match s {
+            "create" => Self::Create,
+            "update" => Self::Update,
+            "soft_delete" => Self::SoftDelete,
+            "lock" => Self::Lock,
+            "void" => Self::Void,
+            "discard" => Self::Discard,
+            "clock_in" => Self::ClockIn,
+            "clock_out" => Self::ClockOut,
+            "password_change" => Self::PasswordChange,
+            "login" => Self::Login,
+            "logout" => Self::Logout,
+            "conflict_resolve" => Self::ConflictResolve,
+            "vacuum" => Self::Vacuum,
+            "daily_close_run" => Self::DailyCloseRun,
+            "daily_close_sign" => Self::DailyCloseSign,
+            "daily_close_reopen" => Self::DailyCloseReopen,
+            _ => return None,
+        };
+        Some(action)
+    }
 }
 
 impl std::fmt::Display for AuditAction {
@@ -273,6 +299,38 @@ mod tests {
     fn audit_action_rejects_unknown_string() {
         let err = serde_json::from_value::<AuditAction>(json!("renamed_variant"));
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn audit_action_from_db_str_is_the_inverse_of_as_str() {
+        // The audit-read path (`sqlite_audit_repo`) depends on this being the
+        // exact inverse of `as_str` for EVERY variant. Adding a variant without
+        // updating `from_db_str` fails here on purpose.
+        for action in [
+            AuditAction::Create,
+            AuditAction::Update,
+            AuditAction::SoftDelete,
+            AuditAction::Lock,
+            AuditAction::Void,
+            AuditAction::Discard,
+            AuditAction::ClockIn,
+            AuditAction::ClockOut,
+            AuditAction::PasswordChange,
+            AuditAction::Login,
+            AuditAction::Logout,
+            AuditAction::ConflictResolve,
+            AuditAction::Vacuum,
+            AuditAction::DailyCloseRun,
+            AuditAction::DailyCloseSign,
+            AuditAction::DailyCloseReopen,
+        ] {
+            assert_eq!(
+                AuditAction::from_db_str(action.as_str()),
+                Some(action),
+                "from_db_str is not the inverse of as_str for {action}"
+            );
+        }
+        assert_eq!(AuditAction::from_db_str("renamed_variant"), None);
     }
 
     // SyncStatus ----------------------------------------------------------

@@ -204,27 +204,11 @@ impl AuditRow {
                 .map_err(|e| crate::error::AppError::Validation(format!("datetime: {e}")))
         };
 
-        let action = match self.action.as_str() {
-            "create" => AuditAction::Create,
-            "update" => AuditAction::Update,
-            "soft_delete" => AuditAction::SoftDelete,
-            "lock" => AuditAction::Lock,
-            "void" => AuditAction::Void,
-            "discard" => AuditAction::Discard,
-            "clock_in" => AuditAction::ClockIn,
-            "clock_out" => AuditAction::ClockOut,
-            "password_change" => AuditAction::PasswordChange,
-            "login" => AuditAction::Login,
-            "logout" => AuditAction::Logout,
-            "conflict_resolve" => AuditAction::ConflictResolve,
-            "vacuum" => AuditAction::Vacuum,
-            "daily_close_run" => AuditAction::DailyCloseRun,
-            other => {
-                return Err(crate::error::AppError::Validation(format!(
-                    "unknown audit action: {other}"
-                )))
-            }
-        };
+        // Parse via the enum's single source of truth so this never drifts
+        // from `AuditAction::as_str` when a new action is added.
+        let action = AuditAction::from_db_str(&self.action).ok_or_else(|| {
+            crate::error::AppError::Validation(format!("unknown audit action: {}", self.action))
+        })?;
 
         Ok(AuditEntry {
             id: uuid::Uuid::parse_str(&self.id)?,

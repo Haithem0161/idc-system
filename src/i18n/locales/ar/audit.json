@@ -5,11 +5,13 @@
   "empty": "لا توجد سجلات تدقيق تطابق هذه المرشحات.",
   "error": "فشل تحميل سجلات التدقيق: {{msg}}",
   "load_more": "تحميل الصفحة التالية",
+  "this_device": "هذا الجهاز",
   "filters": {
     "aria": "مرشحات التدقيق",
     "title": "المرشحات",
-    "actor": "الفاعل (UUID)",
+    "actor": "الفاعل",
     "actor_placeholder": "معرف المستخدم",
+    "inactive": "غير نشط",
     "action": "الإجراء",
     "entity": "الكيان",
     "entity_id_prefix": "بادئة معرف الكيان",
@@ -44,7 +46,9 @@
     "logout": "خروج",
     "conflict_resolve": "حل تعارض",
     "vacuum": "تنظيف",
-    "daily_close_run": "إغلاق اليوم"
+    "daily_close_run": "إغلاق اليوم",
+    "daily_close_sign": "توقيع إغلاق اليوم",
+    "daily_close_reopen": "إعادة فتح إغلاق اليوم"
   },
   "entities": {
     "users": "المستخدمون",
@@ -61,7 +65,8 @@
     "inventory_items": "أصناف المخزون",
     "inventory_consumption_map": "خريطة الاستهلاك",
     "inventory_adjustments": "تعديلات المخزون",
-    "audit_log": "سجل التدقيق"
+    "audit_log": "سجل التدقيق",
+    "daily_close": "إغلاق اليوم"
   },
   "delta": {
     "field": "الحقل",

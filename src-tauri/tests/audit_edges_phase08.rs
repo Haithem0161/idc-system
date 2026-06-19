@@ -133,7 +133,7 @@ async fn time_audit_query_filter_treats_at_as_iso8601_utc() {
     insert_audit_row(&pool, &make_audit_entry(t2, false, "doctors")).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -164,7 +164,7 @@ async fn i18n_audit_row_round_trips_arabic_delta_payload_unchanged() {
     insert_audit_row(&pool, &e).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -323,7 +323,7 @@ async fn scale_audit_query_against_5k_rows_under_500ms() {
     }
     tx.commit().await.unwrap();
 
-    let svc = AuditQueryService::new(Arc::new(repo));
+    let svc = AuditQueryService::new(Arc::new(repo), pool.clone());
     let start = std::time::Instant::now();
     let page = svc
         .query(AuditFilter {
@@ -362,7 +362,7 @@ async fn security_audit_query_tenant_isolation_blocks_cross_tenant_read() {
     insert_audit_row(&pool, &foreign).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     // Query with the attacker's tenant returns ONLY their row.
     let page = svc
         .query(AuditFilter {
@@ -383,7 +383,7 @@ async fn security_audit_query_does_not_leak_soft_deleted_rows() {
     tombstone.deleted_at = Some(now);
     insert_audit_row(&pool, &tombstone).await;
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),

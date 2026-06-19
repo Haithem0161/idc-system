@@ -5,6 +5,7 @@ import {
   AUDIT_ENTITIES,
   type AuditFilter,
 } from "@/lib/schemas/audit"
+import { useUsersList } from "@/features/auth/queries"
 
 interface Props {
   value: AuditFilter
@@ -20,6 +21,9 @@ interface Props {
  */
 export function AuditFilters({ value, onChange }: Props) {
   const { t } = useTranslation()
+  // Actors come from the users list so the filter is a name dropdown, not a
+  // raw-UUID text box. Include inactive users so historical actors still match.
+  const users = useUsersList(true)
   const set = <K extends keyof AuditFilter>(key: K, v: AuditFilter[K]) => {
     onChange({ ...value, [key]: v })
   }
@@ -46,18 +50,26 @@ export function AuditFilters({ value, onChange }: Props) {
       <div className="panel-body grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6">
         <div>
           <label className="field-label" htmlFor={actorId}>
-            {t("audit.filters.actor", { defaultValue: "Actor (UUID)" })}
+            {t("audit.filters.actor", { defaultValue: "Actor" })}
           </label>
-          <input
+          <select
             id={actorId}
-            type="text"
             className="input"
             value={value.actor_user_id ?? ""}
-            placeholder={t("audit.filters.actor_placeholder", {
-              defaultValue: "user uuid",
-            })}
             onChange={(e) => set("actor_user_id", e.target.value || undefined)}
-          />
+          >
+            <option value="">
+              {t("audit.filters.any", { defaultValue: "Any" })}
+            </option>
+            {(users.data ?? []).map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+                {u.is_active
+                  ? ""
+                  : ` (${t("audit.filters.inactive", { defaultValue: "inactive" })})`}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="field-label" htmlFor={actionId}>

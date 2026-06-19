@@ -12,9 +12,17 @@ pub struct AuditRowDto {
     pub id: String,
     pub at: DateTime<Utc>,
     pub actor_user_id: String,
+    /// Human-readable actor: the user's name, "System" for the daemon
+    /// (zero-UUID) actor, or `None` when the user row is gone (deleted/unsynced)
+    /// so the frontend can fall back to the short id.
+    pub actor_name: Option<String>,
     pub action: String,
     pub entity: String,
     pub entity_id: String,
+    /// Human-readable label for `entity_id`: the referenced row's display name
+    /// (user/doctor/operator/patient/check-type), "System" for the zero-UUID
+    /// sentinel, or `None` when no name could be resolved.
+    pub entity_label: Option<String>,
     pub delta: serde_json::Value,
     pub device_id: String,
     pub version: i64,
@@ -146,9 +154,11 @@ mod tests {
             id: "id-1".into(),
             at: Utc::now(),
             actor_user_id: "actor-1".into(),
+            actor_name: Some("Asma".into()),
             action: "create".into(),
             entity: "doctors".into(),
             entity_id: "ent-1".into(),
+            entity_label: Some("Dr Apple".into()),
             delta: json!({"k": "v"}),
             device_id: "dev-1".into(),
             version: 1,

@@ -5,11 +5,13 @@
   "empty": "No audit rows match these filters.",
   "error": "Failed to load audit rows: {{msg}}",
   "load_more": "Load next page",
+  "this_device": "This device",
   "filters": {
     "aria": "Audit filters",
     "title": "Filters",
-    "actor": "Actor (UUID)",
+    "actor": "Actor",
     "actor_placeholder": "user uuid",
+    "inactive": "inactive",
     "action": "Action",
     "entity": "Entity",
     "entity_id_prefix": "Entity ID prefix",
@@ -44,7 +46,9 @@
     "logout": "Logout",
     "conflict_resolve": "Conflict resolve",
     "vacuum": "Vacuum",
-    "daily_close_run": "Daily close"
+    "daily_close_run": "Daily close",
+    "daily_close_sign": "Daily close signed",
+    "daily_close_reopen": "Daily close reopened"
   },
   "entities": {
     "users": "Users",
@@ -61,7 +65,8 @@
     "inventory_items": "Inventory items",
     "inventory_consumption_map": "Consumption map",
     "inventory_adjustments": "Inventory adjustments",
-    "audit_log": "Audit log"
+    "audit_log": "Audit log",
+    "daily_close": "Daily close"
   },
   "delta": {
     "field": "Field",

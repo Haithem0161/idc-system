@@ -113,7 +113,7 @@ async fn perf_audit_query_local_90d_p99_under_500ms() {
     let pool = fresh_pool().await;
     bulk_seed_audit(&pool, 10_000).await;
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     // Sample 5 iterations and take the worst.
     let mut worst = std::time::Duration::ZERO;
     for _ in 0..5 {
@@ -234,7 +234,7 @@ async fn perf_audit_query_with_full_filter_predicate_at_10k_rows() {
     let pool = fresh_pool().await;
     bulk_seed_audit(&pool, 10_000).await;
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let start = Instant::now();
     let page = svc
         .query(AuditFilter {
@@ -313,7 +313,7 @@ async fn perf_audit_query_pagination_remains_under_300ms_across_first_5_pages() 
     let pool = fresh_pool().await;
     bulk_seed_audit(&pool, 10_000).await;
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let mut offset = 0i64;
     for _ in 0..5 {
         let start = Instant::now();

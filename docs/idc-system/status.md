@@ -147,6 +147,22 @@ Pass 3 (final) completed 2026-05-11 via six parallel sub-agents on non-overlappi
 
 ## Blockers & Notes
 
+### Audit log readability + filter QoL (2026-06-19)
+
+The audit log showed raw UUID fragments (`actor_user_id.slice(0,8)`, `entity_id.slice(0,8)`, `device_id.slice(0,8)`) instead of names. Fixed end to end so the table reads "Asma · Dr Apple · This device".
+
+**Backend (Tauri):** new `NameResolver` (`domains/audit/infrastructure/name_resolver.rs`) batch-resolves a page of audit rows -- distinct actor ids -> `users.name`, and `(entity, entity_id)` pairs -> the referenced row's display name via a per-table lookup (`users`/`doctors`/`operators`/`patients`/`inventory_items` by `name`; `check_types`/`check_subtypes` by `COALESCE(name_en, name_ar)`). One `SELECT ... WHERE id IN (...)` per referenced table (≤ ~6 reads for a 50-row page), table/name-expr are fixed literals (never user input), soft-deleted rows still resolve. The zero-UUID daemon actor/entity resolves to "System". `AuditRowDto` gained `actor_name: Option<String>` + `entity_label: Option<String>` (null -> frontend falls back to short id). `AuditQueryService::new` now takes the pool.
+
+**Frontend:** `audit-table.tsx` renders `actor_name`/`entity_label` with the **full UUID on hover** (`title`), "System" for the daemon, and a **"This device"** marker (via `useDeviceStore`) for the current device. `audit-filters.tsx` replaced the raw-UUID Actor textbox with a **name dropdown** (`useUsersList(true)`, inactive users annotated). Audit Zod schema + `AuditActionLiteral`/`AuditEntityLiteral` gained the `daily_close_sign`/`daily_close_reopen` actions + `daily_close` entity (these had drifted -- the desktop already emitted them but the audit filter lists didn't list them, so you couldn't filter for freeze/reopen events). `actor_name`/`entity_label` added to `AuditRow`.
+
+**i18n:** EN+AR `audit.this_device`, `audit.filters.inactive`, the 2 new action labels + `daily_close` entity label; Actor filter label de-UUID'd.
+
+**Follow-up fixes (same day):**
+- **Audit-read drift bug:** the audit log failed to load entirely (`VALIDATION_ERROR: unknown audit action: daily_close_sign`) because the audit-read path's hand-written string->enum parser (`sqlite_audit_repo::AuditRow::into_domain`) omitted the two new actions -- a single signed-close row poisoned the whole page. Fixed by adding a canonical `AuditAction::from_db_str` (the exact inverse of `as_str`, kept adjacent) and pointing the repo at it, plus an inverse-mapping test over every variant so adding an action without updating both halves now fails the build. Regression test added (`audit_query_reads_back_daily_close_sign_and_reopen`).
+- **Human-readable timestamps:** the `AT (UTC)` column rendered raw ISO (`2026-06-19T18:57:55.4230741192`). Now formatted via `Intl.DateTimeFormat` (UTC-pinned to match the column label, locale-aware, `19 Jun 2026, 18:57:55`), with the raw ISO on hover.
+
+**Validation:** Rust fmt + clippy(all-targets) clean (caught + fixed an MSRV slip: `std::iter::repeat_n` is 1.82+, project MSRV is 1.77.2 -> reverted to `vec!["?"; n]`); full Rust suite green incl. 2 new resolver tests (resolves actor+entity+System; unresolved -> None). Frontend lint + i18n + rtl clean, build clean, 1034 tests pass (audit-filters tests updated for the dropdown + QueryClient wrapper; schema count tests updated to 16 actions / 16 entities). No sync/schema change -- pure read-side enrichment.
+
 ### Signed & frozen daily close (2026-06-19)
 
 Implemented the deferred Horizon-1 / v0.2 "Sign and freeze" entity (PRD §7.2.5 + §11.1; phase-07 §7.12 reserved the `input_hash` as the freeze key). v1 derived the close on demand; this materializes it so a reconciled day becomes a permanent, tamper-evident, immutable record. Full multi-surface round-trip (local SQLite -> sync server -> peer devices).

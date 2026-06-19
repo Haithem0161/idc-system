@@ -15,6 +15,8 @@ export const AUDIT_ACTIONS = [
   "conflict_resolve",
   "vacuum",
   "daily_close_run",
+  "daily_close_sign",
+  "daily_close_reopen",
 ] as const
 
 export const AUDIT_ENTITIES = [
@@ -33,6 +35,7 @@ export const AUDIT_ENTITIES = [
   "inventory_consumption_map",
   "inventory_adjustments",
   "audit_log",
+  "daily_close",
 ] as const
 
 export const AuditFilterSchema = z.object({
@@ -55,9 +58,13 @@ export const AuditRowSchema = z.object({
   id: z.string(),
   at: z.string(),
   actor_user_id: z.string(),
+  /** Resolved actor name ("System" for the daemon); null -> fall back to id. */
+  actor_name: z.string().nullable().optional(),
   action: z.string(),
   entity: z.string(),
   entity_id: z.string(),
+  /** Resolved label for entity_id; null -> fall back to short id. */
+  entity_label: z.string().nullable().optional(),
   delta: z.unknown(),
   device_id: z.string(),
   version: z.number().int(),

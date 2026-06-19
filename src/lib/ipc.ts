@@ -1358,6 +1358,8 @@ export type AuditActionLiteral =
   | "conflict_resolve"
   | "vacuum"
   | "daily_close_run"
+  | "daily_close_sign"
+  | "daily_close_reopen"
 
 export type AuditEntityLiteral =
   | "users"
@@ -1375,6 +1377,7 @@ export type AuditEntityLiteral =
   | "inventory_consumption_map"
   | "inventory_adjustments"
   | "audit_log"
+  | "daily_close"
 
 export interface AuditQueryArgs {
   actor_user_id?: string

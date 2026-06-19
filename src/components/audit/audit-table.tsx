@@ -6,10 +6,36 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { DirtyDot } from "@/components/ui/dirty-dot"
 import { entityDetailRoute } from "@/lib/audit/entity-routes"
 import type { AuditPage, AuditRow } from "@/lib/schemas/audit"
+import { useDeviceStore } from "@/stores/device-store"
 import { cn } from "@/lib/utils"
 
 import { DeltaViewer } from "./delta-viewer"
 import { ServerBackedBadge } from "./server-backed-badge"
+
+/** Short, human-glanceable form of a UUID (first 8 chars) for fallbacks. */
+function shortId (id: string): string {
+  return id.slice(0, 8)
+}
+
+/**
+ * Format an audit timestamp as a readable UTC date+time in DD/MM/YYYY form (the
+ * column is labelled "(UTC)", so we keep UTC rather than local to stay
+ * forensically honest). Falls back to the raw string if it cannot be parsed.
+ */
+function formatAuditTime (iso: string, locale: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(d)
+}
 
 /**
  * Audit table with inline expandable delta. Phase-08 §3 Frontend.
@@ -104,8 +130,17 @@ function RowGroup({
   onToggle: () => void
   icon: React.ReactNode
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = i18n.language === "ar" ? "ar-IQ" : "en-GB"
   const target = entityDetailRoute(row.entity, row.entity_id)
+  const currentDeviceId = useDeviceStore((s) => s.device?.deviceId)
+
+  // Actor: resolved name (incl. "System"), else the short id. Full UUID on hover.
+  const actorDisplay = row.actor_name ?? shortId(row.actor_user_id)
+  // Entity: resolved label, else short id. Full UUID on hover.
+  const entityDisplay = row.entity_label ?? shortId(row.entity_id)
+  // Device: mark the current device; else short id. Full UUID on hover.
+  const isThisDevice = currentDeviceId === row.device_id
   return (
     <>
       <tr
@@ -129,28 +164,49 @@ function RowGroup({
             {icon}
           </button>
         </td>
-        <td className="font-mono text-[11px]">{row.at}</td>
-        <td>{row.actor_user_id.slice(0, 8)}</td>
+        <td className="font-mono text-[11px]" title={row.at}>
+          {formatAuditTime(row.at, locale)}
+        </td>
+        <td title={row.actor_user_id}>
+          <span className={cn(!row.actor_name && "font-mono text-[11px] text-ink-3")}>
+            {actorDisplay}
+          </span>
+        </td>
         <td>
           <span className="status-pill">
             {t(`audit.actions.${row.action}`, { defaultValue: row.action })}
           </span>
         </td>
         <td>{t(`audit.entities.${row.entity}`, { defaultValue: row.entity })}</td>
-        <td className="font-mono text-[11px]">
+        <td title={row.entity_id}>
           {target ? (
             <Link
               onClick={(e) => e.stopPropagation()}
               to={target}
-              className="text-info hover:underline"
+              className={cn(
+                "text-info hover:underline",
+                !row.entity_label && "font-mono text-[11px]"
+              )}
             >
-              {row.entity_id.slice(0, 8)}
+              {entityDisplay}
             </Link>
           ) : (
-            row.entity_id.slice(0, 8)
+            <span className={cn(!row.entity_label && "font-mono text-[11px] text-ink-3")}>
+              {entityDisplay}
+            </span>
           )}
         </td>
-        <td className="font-mono text-[11px]">{row.device_id.slice(0, 8)}</td>
+        <td title={row.device_id} className="text-[12px]">
+          {isThisDevice ? (
+            <span className="text-ink-2">
+              {t("audit.this_device", { defaultValue: "This device" })}
+            </span>
+          ) : (
+            <span className="font-mono text-[11px] text-ink-3">
+              {shortId(row.device_id)}
+            </span>
+          )}
+        </td>
         <td>
           <DirtyDot dirty={row.dirty} />
         </td>

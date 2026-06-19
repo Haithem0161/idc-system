@@ -24,6 +24,7 @@ use uuid::Uuid;
 use crate::domains::audit::domain::{
     AuditPage, AuditQueryMode, AuditRowDto, AuditSource, DiagnosticsSummaryDto, MetricsRepo,
 };
+use crate::domains::audit::infrastructure::name_resolver::{NameResolver, ResolvedNames};
 use crate::domains::auth::domain::value_objects::UserRole;
 use crate::domains::sync::domain::entities::audit_entry::AuditCreateInput;
 use crate::domains::sync::domain::entities::{AuditEntry, OutboxOp};
@@ -50,11 +51,15 @@ pub const SYSTEM_ACTOR_ID: &str = "00000000-0000-0000-0000-000000000000";
 
 pub struct AuditQueryService {
     audit_repo: Arc<dyn AuditRepo>,
+    name_resolver: NameResolver,
 }
 
 impl AuditQueryService {
-    pub fn new(audit_repo: Arc<dyn AuditRepo>) -> Self {
-        Self { audit_repo }
+    pub fn new(audit_repo: Arc<dyn AuditRepo>, pool: SqlitePool) -> Self {
+        Self {
+            audit_repo,
+            name_resolver: NameResolver::new(pool),
+        }
     }
 
     /// Phase-08 §7.23: audit query is superadmin-only.
@@ -90,7 +95,12 @@ impl AuditQueryService {
         } else {
             None
         };
-        let dto_rows: Vec<AuditRowDto> = rows.into_iter().map(audit_entry_to_local_dto).collect();
+        // Batch-resolve the opaque ids to names so the table is human-readable.
+        let names = self.name_resolver.resolve(&rows).await?;
+        let dto_rows: Vec<AuditRowDto> = rows
+            .into_iter()
+            .map(|e| audit_entry_to_local_dto(e, &names))
+            .collect();
         Ok(AuditPage {
             rows: dto_rows,
             mode,
@@ -115,14 +125,19 @@ impl AuditQueryService {
     }
 }
 
-fn audit_entry_to_local_dto(e: AuditEntry) -> AuditRowDto {
+fn audit_entry_to_local_dto(e: AuditEntry, names: &ResolvedNames) -> AuditRowDto {
+    let actor_user_id = e.actor_user_id.to_string();
+    let actor_name = names.actor_name(&actor_user_id);
+    let entity_label = names.entity_label(&e.entity, &e.entity_id);
     AuditRowDto {
         id: e.id.to_string(),
         at: e.at,
-        actor_user_id: e.actor_user_id.to_string(),
+        actor_user_id,
+        actor_name,
         action: e.action.as_str().to_string(),
         entity: e.entity,
         entity_id: e.entity_id,
+        entity_label,
         delta: e.delta,
         device_id: e.device_id,
         version: e.version,

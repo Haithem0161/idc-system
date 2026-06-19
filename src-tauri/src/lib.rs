@@ -460,7 +460,7 @@ async fn bootstrap(
         },
     ));
 
-    let audit_query_service = Arc::new(AuditQuerySvc::new(audit_repo.clone()));
+    let audit_query_service = Arc::new(AuditQuerySvc::new(audit_repo.clone(), pool.clone()));
     let audit_vacuum_job = Arc::new(AuditVacuumSvc::new(
         pool.clone(),
         audit_repo.clone(),

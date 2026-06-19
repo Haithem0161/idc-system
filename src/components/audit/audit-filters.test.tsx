@@ -25,20 +25,43 @@
 //   (f) The form swallows Enter (no submit) -- the audit page applies
 //       filters live, not on submit.
 
+import { createElement, type ReactNode } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 import "@/i18n"
 
 import { AuditFilters } from "@/components/audit/audit-filters"
 import { AUDIT_ACTIONS, AUDIT_ENTITIES, type AuditFilter } from "@/lib/schemas/audit"
+import { invoke } from "@/lib/ipc"
 
 import i18n from "i18next"
+
+vi.mock("@/lib/ipc", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/ipc")>("@/lib/ipc")
+  return { ...actual, invoke: vi.fn(), isTauri: () => true }
+})
+
+const USERS = [
+  { id: "u-1", name: "Asma", is_active: true },
+  { id: "u-2", name: "Karrar", is_active: false },
+]
 
 const directions = [["ltr"], ["rtl"]] as const
 
 function emptyValue(): AuditFilter {
   return {}
+}
+
+/** Wrap renders in a QueryClientProvider so `useUsersList` can resolve. */
+function makeWrapper() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client }, children)
+  return { wrapper }
 }
 
 describe.each(directions)(
@@ -49,6 +72,12 @@ describe.each(directions)(
       document.documentElement.setAttribute("dir", dir)
     })
 
+    beforeEach(() => {
+      vi.mocked(invoke).mockResolvedValue(
+        USERS as unknown as Awaited<ReturnType<typeof invoke<"users_list">>>,
+      )
+    })
+
     afterAll(async () => {
       await i18n.changeLanguage("en")
       document.documentElement.removeAttribute("dir")
@@ -57,6 +86,7 @@ describe.each(directions)(
     it("renders all 7 filter inputs with stable ids", () => {
       const { container } = render(
         <AuditFilters value={emptyValue()} onChange={() => {}} />,
+        { wrapper: makeWrapper().wrapper },
       )
       // Stable IDs let the audit page label inputs via htmlFor without
       // depending on label text (which varies by locale).
@@ -78,6 +108,7 @@ describe.each(directions)(
     it("action <select> enumerates exactly AUDIT_ACTIONS plus 'Any' (no extras, no drops)", () => {
       const { container } = render(
         <AuditFilters value={emptyValue()} onChange={() => {}} />,
+        { wrapper: makeWrapper().wrapper },
       )
       const select = container.querySelector("#audit-filter-action") as HTMLSelectElement
       const options = Array.from(select.querySelectorAll("option"))
@@ -91,6 +122,7 @@ describe.each(directions)(
     it("entity <select> enumerates exactly AUDIT_ENTITIES plus 'Any' (no extras, no drops)", () => {
       const { container } = render(
         <AuditFilters value={emptyValue()} onChange={() => {}} />,
+        { wrapper: makeWrapper().wrapper },
       )
       const select = container.querySelector("#audit-filter-entity") as HTMLSelectElement
       const options = Array.from(select.querySelectorAll("option"))
@@ -99,44 +131,56 @@ describe.each(directions)(
       expect(optionValues).toEqual([...AUDIT_ENTITIES])
     })
 
-    it("editing the actor input merges actor_user_id into the next value", () => {
+    it("selecting an actor from the dropdown merges its user id into the next value", async () => {
       const onChange = vi.fn()
-      const { container } = render(
+      const { findByRole, container } = render(
         <AuditFilters value={{ text: "carry-over" }} onChange={onChange} />,
+        { wrapper: makeWrapper().wrapper },
       )
-      const actor = container.querySelector("#audit-filter-actor") as HTMLInputElement
-      fireEvent.change(actor, { target: { value: "abc-123" } })
-      // Spread-of-prior-value is the load-bearing pattern at
-      // audit-filters.tsx:24 -- a regression that replaced `...value`
-      // with `{ key: v }` would drop `text` and surface here.
+      // Wait for the users query to populate the dropdown options.
+      await findByRole("option", { name: "Asma" })
+      const actor = container.querySelector("#audit-filter-actor") as HTMLSelectElement
+      fireEvent.change(actor, { target: { value: "u-1" } })
+      // Spread-of-prior-value is the load-bearing pattern -- a regression that
+      // replaced `...value` with `{ key: v }` would drop `text` and surface here.
       expect(onChange).toHaveBeenCalledTimes(1)
       expect(onChange.mock.calls[0][0]).toEqual({
         text: "carry-over",
-        actor_user_id: "abc-123",
+        actor_user_id: "u-1",
       })
     })
 
-    it("clearing the actor input passes actor_user_id=undefined (filter dropped, not empty-string)", () => {
+    it("clearing the actor select passes actor_user_id=undefined (filter dropped, not empty-string)", async () => {
       const onChange = vi.fn()
-      const { container } = render(
-        <AuditFilters
-          value={{ actor_user_id: "abc-123" }}
-          onChange={onChange}
-        />,
+      const { findByRole, container } = render(
+        <AuditFilters value={{ actor_user_id: "u-1" }} onChange={onChange} />,
+        { wrapper: makeWrapper().wrapper },
       )
-      const actor = container.querySelector("#audit-filter-actor") as HTMLInputElement
+      await findByRole("option", { name: "Asma" })
+      const actor = container.querySelector("#audit-filter-actor") as HTMLSelectElement
       fireEvent.change(actor, { target: { value: "" } })
       const next = onChange.mock.calls[0][0]
       expect(next).toHaveProperty("actor_user_id", undefined)
-      // The Zod schema rejects empty strings against `z.string().uuid()`
-      // -- passing `""` instead of `undefined` would surface as a
-      // validation error in the request layer.
+      // The Zod schema rejects empty strings against `z.string().uuid()` --
+      // passing `""` instead of `undefined` would surface as a validation error.
+    })
+
+    it("the actor dropdown lists users, marking inactive ones", async () => {
+      const { findByRole } = render(
+        <AuditFilters value={emptyValue()} onChange={() => {}} />,
+        { wrapper: makeWrapper().wrapper },
+      )
+      // Active user shows the bare name; inactive user is annotated.
+      await findByRole("option", { name: "Asma" })
+      const karrar = await findByRole("option", { name: /Karrar/ })
+      expect(karrar.textContent).toMatch(/Karrar/)
     })
 
     it("selecting an action invokes onChange with the chosen literal", () => {
       const onChange = vi.fn()
       const { container } = render(
         <AuditFilters value={emptyValue()} onChange={onChange} />,
+        { wrapper: makeWrapper().wrapper },
       )
       const action = container.querySelector("#audit-filter-action") as HTMLSelectElement
       fireEvent.change(action, { target: { value: "lock" } })
@@ -148,6 +192,7 @@ describe.each(directions)(
       const onChange = vi.fn()
       const { container } = render(
         <AuditFilters value={{ action: "lock" }} onChange={onChange} />,
+        { wrapper: makeWrapper().wrapper },
       )
       const action = container.querySelector("#audit-filter-action") as HTMLSelectElement
       fireEvent.change(action, { target: { value: "" } })
@@ -159,6 +204,7 @@ describe.each(directions)(
       const onChange = vi.fn()
       const { container } = render(
         <AuditFilters value={emptyValue()} onChange={onChange} />,
+        { wrapper: makeWrapper().wrapper },
       )
       const text = container.querySelector("#audit-filter-text") as HTMLInputElement
       fireEvent.change(text, { target: { value: "panadol" } })
@@ -170,6 +216,7 @@ describe.each(directions)(
       const onChange = vi.fn()
       const { container } = render(
         <AuditFilters value={{ text: "panadol" }} onChange={onChange} />,
+        { wrapper: makeWrapper().wrapper },
       )
       const text = container.querySelector("#audit-filter-text") as HTMLInputElement
       // Controlled input rendered with value="panadol"; clearing to ""
@@ -180,7 +227,9 @@ describe.each(directions)(
     })
 
     it("the form's aria-label resolves to the locale-specific copy (audit.filters.aria)", () => {
-      render(<AuditFilters value={emptyValue()} onChange={() => {}} />)
+      render(<AuditFilters value={emptyValue()} onChange={() => {}} />, {
+        wrapper: makeWrapper().wrapper,
+      })
       const form = screen.getByRole("form")
       const aria = form.getAttribute("aria-label") ?? ""
       // en: "Audit filters"; ar: contains an Arabic-block character.
@@ -191,7 +240,9 @@ describe.each(directions)(
 
     it("submit-on-Enter is suppressed -- filters apply live, never on form submit", () => {
       const onChange = vi.fn()
-      render(<AuditFilters value={emptyValue()} onChange={onChange} />)
+      render(<AuditFilters value={emptyValue()} onChange={onChange} />, {
+        wrapper: makeWrapper().wrapper,
+      })
       const form = screen.getByRole("form")
       // Default submit would trigger a navigation; preventDefault is
       // wired at audit-filters.tsx:35. We verify that the synthetic

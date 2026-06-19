@@ -151,7 +151,7 @@ async fn audit_query_filter_by_action_and_entity() {
     insert_audit_row(&pool, &c).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -178,7 +178,7 @@ async fn audit_query_filter_by_actor_user_id() {
     insert_audit_row(&pool, &a).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -189,6 +189,150 @@ async fn audit_query_filter_by_actor_user_id() {
         .unwrap();
     assert_eq!(page.rows.len(), 1);
     assert_eq!(page.rows[0].actor_user_id, ACTOR);
+}
+
+/// Insert a minimal user row so the name resolver can resolve the actor.
+async fn seed_user(pool: &SqlitePool, id: &str, name: &str) {
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO users (id, email, name, password_hash, role, is_active, \
+            created_at, updated_at, version, dirty, entity_id) \
+         VALUES (?, ?, ?, 'x', 'superadmin', 1, ?, ?, 0, 0, ?)",
+    )
+    .bind(id)
+    .bind(format!("{name}@example.com"))
+    .bind(name)
+    .bind(&now)
+    .bind(&now)
+    .bind(TENANT)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Insert a minimal doctor row so the name resolver can resolve entity_id.
+async fn seed_doctor(pool: &SqlitePool, id: &str, name: &str) {
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO doctors (id, name, is_active, created_at, updated_at, \
+            version, dirty, entity_id) \
+         VALUES (?, ?, 1, ?, ?, 0, 0, ?)",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(&now)
+    .bind(&now)
+    .bind(TENANT)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// The name resolver turns the opaque ids into human-readable names: actor ->
+/// user name, entity_id -> the referenced row's name, and the zero-UUID daemon
+/// actor -> "System".
+#[tokio::test]
+async fn audit_query_resolves_actor_and_entity_names() {
+    let pool = fresh_pool().await;
+    let now = Utc::now();
+    let user_id = Uuid::parse_str(ACTOR).unwrap();
+    let doctor_id = Uuid::now_v7().to_string();
+    seed_user(&pool, &user_id.to_string(), "Asma").await;
+    seed_doctor(&pool, &doctor_id, "Dr Apple").await;
+
+    // A human action on the doctor row.
+    let mut a = make_audit_entry(now, false, "doctors");
+    a.entity_id = doctor_id.clone();
+    insert_audit_row(&pool, &a).await;
+
+    // A system (daemon) row: zero-UUID actor + zero-UUID entity_id.
+    let mut sys = make_audit_entry(now - Duration::seconds(1), false, "audit_log");
+    sys.actor_user_id = Uuid::nil();
+    sys.entity_id = "00000000-0000-0000-0000-000000000000".into();
+    insert_audit_row(&pool, &sys).await;
+
+    let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
+    let svc = AuditQueryService::new(repo, pool.clone());
+    let page = svc
+        .query(AuditFilter {
+            entity_id_tenant: TENANT.into(),
+            ..AuditFilter::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.rows.len(), 2);
+
+    let doctor_row = page
+        .rows
+        .iter()
+        .find(|r| r.entity == "doctors")
+        .expect("doctor row present");
+    assert_eq!(doctor_row.actor_name.as_deref(), Some("Asma"));
+    assert_eq!(doctor_row.entity_label.as_deref(), Some("Dr Apple"));
+
+    let sys_row = page
+        .rows
+        .iter()
+        .find(|r| r.actor_user_id == Uuid::nil().to_string())
+        .expect("system row present");
+    assert_eq!(sys_row.actor_name.as_deref(), Some("System"));
+    assert_eq!(sys_row.entity_label.as_deref(), Some("System"));
+}
+
+/// An actor/entity that no longer exists (deleted, unsynced) resolves to None
+/// so the frontend falls back to the short id -- never an error.
+#[tokio::test]
+async fn audit_query_unresolved_names_are_none() {
+    let pool = fresh_pool().await;
+    let now = Utc::now();
+    // No seeded user/doctor: the ids cannot resolve.
+    let a = make_audit_entry(now, false, "doctors");
+    insert_audit_row(&pool, &a).await;
+
+    let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
+    let svc = AuditQueryService::new(repo, pool.clone());
+    let page = svc
+        .query(AuditFilter {
+            entity_id_tenant: TENANT.into(),
+            ..AuditFilter::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(page.rows[0].actor_name, None);
+    assert_eq!(page.rows[0].entity_label, None);
+}
+
+/// Regression: a stored `daily_close_sign` / `daily_close_reopen` row must read
+/// back through the query. The audit-read path string->enum parser used to omit
+/// these, so a single signed-close row made the WHOLE audit log fail to load
+/// with "unknown audit action: daily_close_sign".
+#[tokio::test]
+async fn audit_query_reads_back_daily_close_sign_and_reopen() {
+    let pool = fresh_pool().await;
+    let now = Utc::now();
+
+    let mut sign = make_audit_entry(now, false, "daily_close");
+    sign.action = AuditAction::DailyCloseSign;
+    insert_audit_row(&pool, &sign).await;
+
+    let mut reopen = make_audit_entry(now - Duration::seconds(1), false, "daily_close");
+    reopen.action = AuditAction::DailyCloseReopen;
+    insert_audit_row(&pool, &reopen).await;
+
+    let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
+    let svc = AuditQueryService::new(repo, pool.clone());
+    let page = svc
+        .query(AuditFilter {
+            entity_id_tenant: TENANT.into(),
+            ..AuditFilter::default()
+        })
+        .await
+        .expect("audit query must not fail on signed-close rows");
+    assert_eq!(page.rows.len(), 2);
+    let actions: Vec<&str> = page.rows.iter().map(|r| r.action.as_str()).collect();
+    assert!(actions.contains(&"daily_close_sign"));
+    assert!(actions.contains(&"daily_close_reopen"));
 }
 
 #[tokio::test]
@@ -203,7 +347,7 @@ async fn audit_query_entity_id_prefix_filter() {
     insert_audit_row(&pool, &b).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -227,7 +371,7 @@ async fn audit_query_free_text_searches_delta_and_entity_id() {
     insert_audit_row(&pool, &b).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -255,7 +399,7 @@ async fn audit_query_free_text_matches_entity_id_substring() {
     insert_audit_row(&pool, &b).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -277,7 +421,7 @@ async fn audit_query_orders_at_desc_id_desc() {
         insert_audit_row(&pool, &e).await;
     }
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -335,7 +479,7 @@ async fn audit_query_combines_all_six_filters() {
     insert_audit_row(&pool, &miss_text).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -368,7 +512,7 @@ async fn audit_query_date_range_includes_endpoints() {
     insert_audit_row(&pool, &too_low).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -392,7 +536,7 @@ async fn audit_query_filter_clamp_caps_limit_at_100_and_defaults_50() {
         insert_audit_row(&pool, &e).await;
     }
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo.clone());
+    let svc = AuditQueryService::new(repo.clone(), pool.clone());
 
     // Default 50 when limit is 0/unset.
     let page = svc
@@ -427,7 +571,7 @@ async fn audit_query_offset_paginates_through_dataset() {
         insert_audit_row(&pool, &e).await;
     }
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
 
     let page1 = svc
         .query(AuditFilter {
@@ -482,7 +626,7 @@ async fn audit_query_tenant_isolation_filters_cross_tenant_rows() {
     insert_audit_row(&pool, &foreign).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -505,7 +649,7 @@ async fn audit_query_response_includes_dirty_boolean_per_7_15() {
     insert_audit_row(&pool, &dirty).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -531,7 +675,7 @@ async fn audit_query_skips_soft_deleted_rows() {
     insert_audit_row(&pool, &dead).await;
 
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -551,7 +695,7 @@ async fn audit_query_returns_next_offset_only_when_page_is_full() {
         insert_audit_row(&pool, &e).await;
     }
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
 
     // limit > available -> no next cursor.
     let page = svc
@@ -597,7 +741,7 @@ async fn audit_role_gate_denies_non_superadmin() {
 async fn audit_query_classifies_recent_range_as_local_mode() {
     let pool = fresh_pool().await;
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -618,7 +762,7 @@ async fn audit_query_classifies_recent_range_as_local_mode() {
 async fn audit_query_classifies_pre_window_range_as_server_mode() {
     let pool = fresh_pool().await;
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -639,7 +783,7 @@ async fn audit_query_classifies_pre_window_range_as_server_mode() {
 async fn audit_query_classifies_cross_boundary_range_as_merged_mode() {
     let pool = fresh_pool().await;
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     let page = svc
         .query(AuditFilter {
             entity_id_tenant: TENANT.into(),
@@ -660,7 +804,7 @@ async fn audit_query_classifies_cross_boundary_range_as_merged_mode() {
 async fn audit_query_classifies_unbounded_range_as_local_mode() {
     let pool = fresh_pool().await;
     let repo: Arc<dyn AuditRepo> = Arc::new(SqliteAuditRepo::new(pool.clone()));
-    let svc = AuditQueryService::new(repo);
+    let svc = AuditQueryService::new(repo, pool.clone());
     // No date filter -- treat as Local because the UI defaults to the
     // recent window unless the operator explicitly opts into the archive.
     let page = svc
