@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Accounting -- Combined (Dashboard + Explorer)</title>
+<style>
+  :root {
+    --paper:#FDFDFA; --paper-2:#F7F5EE; --surface:#FFFFFF;
+    --line:#ECE8DB; --line-2:#DDD8C7;
+    --ink:#0A1230; --ink-2:#1C2851; --ink-3:#5E5A4E; --ink-4:#94907F;
+    --crimson:#C0263A; --crimson-dark:#9A1F30; --crimson-soft:#FBE9EC;
+    --gold:#B45309; --gold-soft:#FEF3E2;
+    --success:#047857; --success-soft:#ECFDF5;
+    --info:#1D4ED8; --info-soft:#EFF4FD;
+    --radius:6px; --radius-lg:12px; --ease:cubic-bezier(.2,.7,.2,1);
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
+  body { font-family:'Inter',system-ui,sans-serif; background:var(--paper); color:var(--ink); letter-spacing:-0.011em; font-size:13px; -webkit-font-smoothing:antialiased; }
+  .num,.mono { font-family:'Geist Mono','SF Mono',ui-monospace,monospace; font-feature-settings:'tnum'; }
+  button { font-family:inherit; }
+
+  .shell { display:grid; grid-template-columns:256px 1fr; height:100vh; }
+
+  /* sidebar */
+  .sidebar { background:var(--paper); border-inline-end:1px solid var(--line); padding:18px 14px; display:flex; flex-direction:column; }
+  .brand { display:flex; align-items:center; gap:10px; padding:6px 8px 14px; }
+  .brand-mark { width:26px; height:26px; border-radius:7px; background:var(--ink); color:var(--paper); display:grid; place-items:center; font-weight:700; }
+  .brand-name { font-weight:700; letter-spacing:-0.02em; }
+  .role-pill { margin:4px 8px 16px; display:inline-flex; align-items:center; gap:7px; background:var(--paper-2); border:1px solid var(--line); border-radius:999px; padding:4px 10px; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-3); width:fit-content; }
+  .role-pill .dot { width:6px; height:6px; border-radius:999px; background:var(--gold); }
+  .nav-group { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.12em; color:var(--ink-4); padding:14px 10px 6px; }
+  .nav-item { display:flex; align-items:center; gap:11px; padding:8px 10px; border-radius:8px; color:var(--ink-2); font-weight:500; cursor:pointer; transition:all .14s var(--ease); position:relative; }
+  .nav-item:hover { background:var(--paper-2); }
+  .nav-item.active { background:var(--ink); color:var(--paper); }
+  .nav-item.active::before { content:""; position:absolute; inset-inline-start:-14px; top:8px; bottom:8px; width:3px; border-radius:0 3px 3px 0; background:var(--crimson); }
+  .nav-ico { width:16px; height:16px; opacity:.85; }
+  .count-badge { margin-inline-start:auto; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--paper-2); color:var(--ink-3); }
+  .nav-item.active .count-badge { background:rgba(255,255,255,.18); color:var(--paper); }
+  .nav-sub { padding-inline-start:34px; font-size:12.5px; }
+  .sidebar-foot { margin-top:auto; padding:12px 10px 4px; border-top:1px solid var(--line); display:flex; align-items:center; gap:10px; font-size:12px; color:var(--ink-3); }
+
+  /* main */
+  .main { display:flex; flex-direction:column; min-width:0; height:100vh; }
+  .header { height:56px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; padding:0 24px; flex:none; }
+  .crumbs { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-3); }
+  .crumbs button { border:0; background:transparent; color:var(--ink-3); cursor:pointer; padding:0; font-size:12px; }
+  .crumbs button:hover { color:var(--ink); }
+  .crumbs .sep { color:var(--ink-4); }
+  .crumbs .cur { color:var(--ink); font-weight:600; }
+  .header-right { display:flex; align-items:center; gap:10px; }
+  .seg { display:inline-flex; background:var(--paper-2); border:1px solid var(--line); border-radius:var(--radius); padding:2px; }
+  .seg button { border:0; background:transparent; padding:5px 12px; font-size:12px; font-weight:600; color:var(--ink-3); border-radius:4px; cursor:pointer; }
+  .seg button.active { background:var(--surface); color:var(--ink); box-shadow:0 1px 2px rgba(10,18,48,.06); }
+  .toggle { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--ink-2); cursor:pointer; user-select:none; }
+  .icon-btn { width:32px; height:32px; border-radius:8px; border:1px solid var(--line-2); background:var(--surface); display:grid; place-items:center; color:var(--ink-3); cursor:pointer; }
+  .lang-pill { border:1px solid var(--line-2); border-radius:999px; padding:5px 11px; font-size:11px; font-weight:600; color:var(--ink-2); background:var(--surface); cursor:pointer; }
+  .avatar { width:32px; height:32px; border-radius:999px; background:var(--gold-soft); color:var(--gold); display:grid; place-items:center; font-weight:700; font-size:12px; }
+  .btn { border:1px solid var(--line-2); background:var(--surface); color:var(--ink-2); border-radius:var(--radius); padding:7px 13px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; gap:7px; align-items:center; }
+  .btn:hover { background:var(--paper-2); }
+
+  .viewport { flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; }
+
+  /* ===================== DASHBOARD (B) ===================== */
+  .dash { overflow-y:auto; padding:28px 32px 60px; }
+  .page-eyebrow { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.11em; color:var(--ink-3); display:flex; align-items:center; gap:8px; }
+  .page-eyebrow::before { content:""; width:18px; height:2px; background:var(--crimson); }
+  .page-title { font-size:30px; font-weight:700; letter-spacing:-0.026em; margin:6px 0 4px; }
+  .page-sub { font-size:13px; color:var(--ink-3); margin-bottom:20px; }
+
+  .hero { display:grid; grid-template-columns:1.3fr 1fr 1fr 1fr 1fr; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; margin-bottom:18px; }
+  .htile { background:var(--surface); padding:18px 20px; cursor:pointer; transition:all .2s var(--ease); position:relative; }
+  .htile:hover { background:var(--paper); }
+  .htile.net { background:var(--ink); }
+  .htile .lbl { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:var(--ink-3); }
+  .htile.net .lbl { color:rgba(253,252,248,.6); }
+  .htile .val { font-size:30px; font-weight:700; letter-spacing:-0.022em; margin-top:8px; }
+  .htile.net .val { color:var(--paper); }
+  .htile .unit { font-size:13px; color:var(--ink-3); font-weight:500; }
+  .htile.net .unit { color:rgba(253,252,248,.5); }
+  .htile .trend { font-size:11px; font-weight:600; margin-top:7px; }
+  .up { color:var(--success); } .down { color:var(--crimson); }
+  .htile.net .up { color:#34D399; } .htile.net .down { color:#FCA5A5; }
+  .htile .drill-ico { position:absolute; top:16px; inset-inline-end:16px; opacity:0; transition:opacity .2s var(--ease); color:var(--ink-4); }
+  .htile:hover .drill-ico { opacity:1; }
+  .htile.net:hover .drill-ico { color:rgba(253,252,248,.6); }
+
+  .hub { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:18px; }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; display:flex; flex-direction:column; }
+  .card-head { padding:14px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; }
+  .card-head .t { display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; }
+  .card-head .t svg { width:16px; height:16px; color:var(--ink-3); }
+  .card-head .all { font-size:11px; font-weight:600; color:var(--crimson); cursor:pointer; display:flex; align-items:center; gap:3px; background:none; border:0; }
+  .lead-row { display:flex; align-items:center; gap:12px; padding:11px 18px; border-top:1px solid var(--line); cursor:pointer; transition:background .14s var(--ease); }
+  .lead-row:first-of-type { border-top:0; }
+  .lead-row:hover { background:var(--paper); }
+  .rank { width:20px; height:20px; border-radius:999px; background:var(--paper-2); color:var(--ink-3); display:grid; place-items:center; font-size:10px; font-weight:700; flex:none; }
+  .rank.r1 { background:var(--gold-soft); color:var(--gold); }
+  .lead-row .meta { flex:1; min-width:0; }
+  .lead-row .nm { font-weight:500; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lead-row:hover .nm { color:var(--crimson); }
+  .lead-row .su { font-size:11px; color:var(--ink-3); }
+  .lead-row .v { text-align:end; flex:none; }
+  .lead-row .v .big { font-weight:600; }
+  .lead-row .v .sm { font-size:11px; color:var(--ink-3); }
+  .house-nm { color:var(--ink-4) !important; }
+
+  .trends { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  .tm-head { padding:13px 18px; border-bottom:1px solid var(--line); font-size:12px; font-weight:600; }
+  .tm-row { display:flex; align-items:center; justify-content:space-between; padding:8px 18px; font-size:12px; }
+  .tm-row .k { color:var(--ink-3); }
+  .tm-row .vv { display:flex; align-items:center; gap:12px; }
+  .tm-row .cur { font-weight:600; }
+  .tm-row .d { font-size:11px; font-weight:600; width:48px; text-align:end; }
+
+  /* ===================== EXPLORER (C) ===================== */
+  .explorer { display:grid; grid-template-columns:400px 1fr; flex:1; min-height:0; }
+  .explorer.full { grid-template-columns:1fr; }
+  .master { border-inline-end:1px solid var(--line); display:flex; flex-direction:column; min-height:0; background:var(--paper); }
+  .master-tabs { display:flex; gap:2px; padding:10px 14px 0; border-bottom:1px solid var(--line); flex:none; }
+  .mtab { padding:8px 12px; font-size:12px; font-weight:600; color:var(--ink-3); border-bottom:2px solid transparent; cursor:pointer; background:none; border-top:0; border-inline:0; display:flex; align-items:center; gap:6px; }
+  .mtab svg { width:14px; height:14px; }
+  .mtab:hover { color:var(--ink-2); }
+  .mtab.active { color:var(--ink); border-bottom-color:var(--crimson); }
+  .master-tools { padding:11px 14px; border-bottom:1px solid var(--line); display:flex; gap:10px; align-items:center; flex:none; }
+  .search { flex:1; background:var(--surface); border:1px solid var(--line-2); border-radius:var(--radius); padding:7px 11px 7px 32px; font-size:12px; color:var(--ink); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%235E5A4E' stroke-width='2' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M21 21l-4.3-4.3'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:11px center; outline:none; }
+  .search:focus { border-color:var(--ink); box-shadow:0 0 0 3px rgba(10,18,48,.08); }
+  .sort-pill { font-size:11px; font-weight:600; color:var(--ink-3); border:1px solid var(--line-2); border-radius:var(--radius); padding:6px 10px; background:var(--surface); cursor:pointer; white-space:nowrap; }
+  .master-list { overflow-y:auto; flex:1; }
+  .mrow { display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line); cursor:pointer; transition:background .12s var(--ease); }
+  .mrow:hover { background:var(--paper-2); }
+  .mrow.sel { background:var(--surface); box-shadow:inset 3px 0 0 var(--crimson); }
+  .mrow .rank { width:20px; }
+  .mrow.sel .rank { background:var(--crimson-soft); color:var(--crimson); }
+  .mrow .info { flex:1; min-width:0; }
+  .mrow .nm { font-weight:500; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mrow .su { font-size:11px; color:var(--ink-3); margin-top:1px; }
+  .mrow .amt { text-align:end; flex:none; }
+  .mrow .amt .b { font-weight:600; }
+  .mrow .amt .s { font-size:11px; color:var(--ink-3); }
+  .master-foot { padding:10px 14px; border-top:1px solid var(--line); background:var(--paper-2); font-size:11px; color:var(--ink-3); display:flex; justify-content:space-between; flex:none; }
+
+  .detail { overflow-y:auto; min-height:0; background:var(--paper); }
+  .detail-inner { padding:22px 26px 60px; }
+  .d-eyebrow { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.11em; color:var(--ink-3); display:flex; align-items:center; gap:8px; }
+  .d-eyebrow::before { content:""; width:18px; height:2px; background:var(--crimson); }
+  .d-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin:6px 0 18px; }
+  .d-title { font-size:24px; font-weight:700; letter-spacing:-0.022em; }
+  .d-actions { display:flex; gap:8px; }
+
+  .stat-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; margin-bottom:18px; }
+  .stat { background:var(--surface); padding:14px 16px; }
+  .stat.ink { background:var(--ink); }
+  .stat .l { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:var(--ink-3); }
+  .stat.ink .l { color:rgba(253,252,248,.6); }
+  .stat .v { font-size:23px; font-weight:700; letter-spacing:-0.02em; margin-top:5px; }
+  .stat.ink .v { color:var(--paper); }
+  .stat .u { font-size:12px; color:var(--ink-3); font-weight:500; }
+  .stat.ink .u { color:rgba(253,252,248,.5); }
+
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; margin-bottom:16px; }
+  .panel-head { padding:13px 18px; border-bottom:1px solid var(--line); font-size:12px; font-weight:600; display:flex; justify-content:space-between; align-items:center; }
+  .panel-link { font-size:11px; font-weight:600; color:var(--crimson); cursor:pointer; background:none; border:0; }
+
+  table { width:100%; border-collapse:collapse; }
+  thead th { background:var(--paper-2); font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:var(--ink-3); padding:10px 18px; text-align:start; }
+  thead th.num { text-align:end; }
+  tbody td { padding:11px 18px; border-top:1px solid var(--line); font-size:12.5px; }
+  tbody td.num { text-align:end; }
+  tbody tr { cursor:pointer; transition:background .12s var(--ease); }
+  tbody tr:hover { background:var(--paper); }
+  tbody tr:hover .ln { color:var(--crimson); }
+  tfoot td { background:var(--paper-2); font-weight:600; padding:11px 18px; border-top:1px solid var(--line-2); }
+  tfoot td.num { text-align:end; }
+  .ln { color:var(--ink); font-weight:500; }
+  .status-pill { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; padding:3px 9px; border-radius:999px; }
+  .status-pill::before { content:""; width:6px; height:6px; border-radius:999px; }
+  .pill-locked { background:var(--success-soft); color:var(--success); } .pill-locked::before { background:var(--success); }
+  .pill-voided { background:var(--crimson-soft); color:var(--crimson); } .pill-voided::before { background:var(--crimson); }
+  .chip-dye { font-size:10px; font-weight:600; padding:2px 7px; border-radius:4px; background:var(--info-soft); color:var(--info); }
+  .empty { padding:40px; text-align:center; color:var(--ink-3); font-size:12px; }
+
+  .hidden { display:none !important; }
+  .hint { position:fixed; bottom:14px; inset-inline-end:14px; background:var(--ink); color:var(--paper); font-size:11px; font-weight:500; padding:8px 14px; border-radius:999px; z-index:50; box-shadow:0 6px 16px rgba(10,18,48,.2); max-width:340px; line-height:1.4; }
+  .hint b { font-weight:700; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">I</div><div class="brand-name">IDC</div></div>
+    <div class="role-pill"><span class="dot"></span> Accounting</div>
+    <div class="nav-group">Finance</div>
+    <div class="nav-item" id="nav-dash" onclick="goDash()"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Dashboard</div>
+    <div class="nav-item nav-sub" onclick="goExplorer('visits')"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg> Visits <span class="count-badge">1,284</span></div>
+    <div class="nav-item nav-sub" onclick="goExplorer('doctors')"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0112 0v1"/></svg> Doctors <span class="count-badge">38</span></div>
+    <div class="nav-item nav-sub" onclick="goExplorer('operators')"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0112 0v1"/></svg> Operators <span class="count-badge">9</span></div>
+    <div class="nav-item nav-sub" onclick="goExplorer('checks')"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg> Check types</div>
+    <div class="nav-item nav-sub" onclick="goClose()"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg> Daily close <span class="count-badge" style="background:var(--gold);color:#fff">1</span></div>
+    <div class="sidebar-foot"><div class="avatar" style="width:28px;height:28px;font-size:11px;">AK</div> Asma K. &middot; Accountant</div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main">
+    <header class="header">
+      <nav class="crumbs" id="crumbs"></nav>
+      <div class="header-right">
+        <div class="seg" id="range-seg">
+          <button data-r="today">Today</button>
+          <button data-r="week" class="active">Week</button>
+          <button data-r="month">Month</button>
+        </div>
+        <label class="toggle"><input type="checkbox" id="voided-toggle" /> Voided</label>
+        <button class="btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg> Export</button>
+        <div class="lang-pill">EN</div>
+        <div class="avatar">AK</div>
+      </div>
+    </header>
+
+    <div class="viewport">
+      <!-- DASHBOARD VIEW -->
+      <div class="dash" id="view-dash"></div>
+      <!-- EXPLORER VIEW -->
+      <div class="explorer hidden" id="view-explorer">
+        <div class="master">
+          <div class="master-tabs" id="master-tabs"></div>
+          <div class="master-tools">
+            <input class="search" id="master-search" placeholder="Search..." oninput="renderMaster()" />
+            <button class="sort-pill" id="sort-pill" onclick="cycleSort()"></button>
+          </div>
+          <div class="master-list" id="master-list"></div>
+          <div class="master-foot" id="master-foot"></div>
+        </div>
+        <div class="detail" id="detail"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="hint" id="hint"></div>
+
+<script>
+/* ------------------------------------------------------------------ */
+/* mock data -- field names mirror the real reports IPC records        */
+/* ------------------------------------------------------------------ */
+const fmt = n => n.toLocaleString('en-US');
+const M = n => (n/1e6).toFixed(1);
+const K = n => Math.round(n/1e3);
+
+const KPIS = {
+  revenue_iqd: 86200000, doctor_cuts_iqd: 29871000, operator_cuts_iqd: 6420000,
+  inventory_consumption_value_iqd: 4100000, net_iqd: 49889000,
+  trend: { revenue:14, doctor_cuts:9, operator_cuts:-3, inventory:6, net:17 }
+};
+
+const DOCTORS = [
+  { doctor_id:'d1', name:'Dr. Sarah Hanna', specialty:'Radiology', visits:142, revenue_iqd:18400000, doctor_cut_total_iqd:5520000, avg_cut_per_visit_iqd:130000 },
+  { doctor_id:'d2', name:'Dr. Omar Faris', specialty:'Cardiology', visits:98, revenue_iqd:11700000, doctor_cut_total_iqd:3510000, avg_cut_per_visit_iqd:119000 },
+  { doctor_id:null, name:'Internal · داخلي', specialty:'House', visits:312, revenue_iqd:15600000, doctor_cut_total_iqd:9360000, avg_cut_per_visit_iqd:30000, house:true },
+  { doctor_id:'d3', name:'Dr. Layla Hashim', specialty:'General', visits:76, revenue_iqd:9100000, doctor_cut_total_iqd:2280000, avg_cut_per_visit_iqd:95000 },
+  { doctor_id:'d4', name:'Dr. Yusuf Ali', specialty:'Orthopedics', visits:61, revenue_iqd:7300000, doctor_cut_total_iqd:1825000, avg_cut_per_visit_iqd:95000 },
+  { doctor_id:'d5', name:'Dr. Maryam Saleh', specialty:'Neurology', visits:44, revenue_iqd:5300000, doctor_cut_total_iqd:1320000, avg_cut_per_visit_iqd:91000 },
+  { doctor_id:'d6', name:'Dr. Hassan Noori', specialty:'Internal Med', visits:38, revenue_iqd:4200000, doctor_cut_total_iqd:1064000, avg_cut_per_visit_iqd:84000 },
+  { doctor_id:'d7', name:'Dr. Nour Adel', specialty:'Pediatrics', visits:29, revenue_iqd:3100000, doctor_cut_total_iqd:870000, avg_cut_per_visit_iqd:86000 },
+];
+
+const OPERATORS = [
+  { operator_id:'o1', name:'Op One', visits:428, visits_with_dye:86, operator_cut_total_iqd:2140000, hours:41, avg_cut_per_hour_iqd:52000 },
+  { operator_id:'o2', name:'Op Two', visits:331, visits_with_dye:44, operator_cut_total_iqd:1655000, hours:35, avg_cut_per_hour_iqd:47000 },
+  { operator_id:'o3', name:'Op Three', visits:205, visits_with_dye:12, operator_cut_total_iqd:1025000, hours:25, avg_cut_per_hour_iqd:41000 },
+  { operator_id:'o4', name:'Op Four', visits:188, visits_with_dye:9, operator_cut_total_iqd:940000, hours:25, avg_cut_per_hour_iqd:38000 },
+  { operator_id:'o5', name:'Op Five', visits:132, visits_with_dye:5, operator_cut_total_iqd:660000, hours:18, avg_cut_per_hour_iqd:37000 },
+];
+
+const CHECKS = [
+  { check_type_id:'c1', name_en:'CT scan', name_ar:'أشعة مقطعية', visits:288, revenue_iqd:28800000, doctor_cut_iqd:11520000, operator_cut_iqd:1440000 },
+  { check_type_id:'c2', name_en:'MRI', name_ar:'رنين', visits:142, revenue_iqd:21300000, doctor_cut_iqd:8520000, operator_cut_iqd:710000 },
+  { check_type_id:'c3', name_en:'Ultrasound', name_ar:'سونار', visits:412, revenue_iqd:20600000, doctor_cut_iqd:6180000, operator_cut_iqd:2060000 },
+  { check_type_id:'c4', name_en:'X-Ray', name_ar:'أشعة', visits:331, revenue_iqd:9930000, doctor_cut_iqd:1986000, operator_cut_iqd:1655000 },
+  { check_type_id:'c5', name_en:'Echo', name_ar:'إيكو', visits:111, revenue_iqd:5550000, doctor_cut_iqd:1665000, operator_cut_iqd:555000 },
+];
+
+// a sample of visit rows used for any "source visits" table
+const VISITS = [
+  { visit_id:'01923af0a1', date:'05-12', patient_name:'Asma Karim', check:'Ultrasound', subtype:'Abdominal', doctor_name:'Dr. Sarah Hanna', operator_name:'Op One', dye:true, price_iqd:50000, doctor_cut_iqd:15000, operator_cut_iqd:5000, net_iqd:30000, status:'locked' },
+  { visit_id:'01923af0a2', date:'05-12', patient_name:'Omar Faris', check:'CT scan', subtype:null, doctor_name:'Internal · داخلي', operator_name:'Op Two', dye:false, price_iqd:100000, doctor_cut_iqd:30000, operator_cut_iqd:5000, net_iqd:65000, status:'locked', house:true },
+  { visit_id:'01923af0a3', date:'05-11', patient_name:'Layla Hashim', check:'MRI', subtype:'Brain', doctor_name:'Dr. Sarah Hanna', operator_name:'Op One', dye:false, price_iqd:150000, doctor_cut_iqd:60000, operator_cut_iqd:5000, net_iqd:85000, status:'locked' },
+  { visit_id:'01923af0a4', date:'05-11', patient_name:'Kareem Saad', check:'Ultrasound', subtype:'Pelvic', doctor_name:'Dr. Omar Faris', operator_name:'Op Three', dye:false, price_iqd:50000, doctor_cut_iqd:15000, operator_cut_iqd:5000, net_iqd:30000, status:'voided' },
+  { visit_id:'01923af0a5', date:'05-10', patient_name:'Sara Mahmoud', check:'X-Ray', subtype:null, doctor_name:'Dr. Layla Hashim', operator_name:'Op Two', dye:false, price_iqd:30000, doctor_cut_iqd:6000, operator_cut_iqd:5000, net_iqd:19000, status:'locked' },
+];
+
+/* ------------------------------------------------------------------ */
+/* router state                                                        */
+/* ------------------------------------------------------------------ */
+const state = { view:'dash', entity:'doctors', selId:null, range:'week', voided:false, search:'', sort:'amount', visit:null };
+
+const ENTITIES = {
+  visits:  { label:'Visits',  ico:'<path d="M3 12h4l3 8 4-16 3 8h4"/>' },
+  doctors: { label:'Doctors', ico:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0112 0v1"/>' },
+  operators:{label:'Operators',ico:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0112 0v1"/>' },
+  checks:  { label:'Checks',  ico:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/>' },
+};
+
+/* ---- navigation ---- */
+function goDash(){ state.view='dash'; state.visit=null; render(); }
+function goExplorer(entity, selId){
+  state.view='explorer'; state.entity=entity; state.visit=null; state.search='';
+  state.sort = entity==='operators' ? 'amount' : 'amount';
+  const list = listFor(entity);
+  state.selId = selId || (list[0] && idOf(entity,list[0]));
+  render();
+}
+function goClose(){ state.view='close'; render(); }
+
+function idOf(entity,row){
+  if(entity==='doctors') return row.doctor_id||'house';
+  if(entity==='operators') return row.operator_id;
+  if(entity==='checks') return row.check_type_id;
+  if(entity==='visits') return row.visit_id;
+}
+function listFor(entity){
+  if(entity==='doctors') return DOCTORS;
+  if(entity==='operators') return OPERATORS;
+  if(entity==='checks') return CHECKS;
+  if(entity==='visits') return VISITS;
+  return [];
+}
+
+/* ------------------------------------------------------------------ */
+/* render                                                              */
+/* ------------------------------------------------------------------ */
+function render(){
+  // toggle views
+  document.getElementById('view-dash').classList.toggle('hidden', state.view!=='dash');
+  document.getElementById('view-explorer').classList.toggle('hidden', state.view!=='explorer');
+  document.getElementById('nav-dash').classList.toggle('active', state.view==='dash');
+  renderCrumbs();
+  if(state.view==='dash') renderDash();
+  if(state.view==='explorer'){ renderMasterTabs(); renderMaster(); renderDetail(); }
+  if(state.view==='close') renderClose();
+  setHint();
+}
+
+function renderCrumbs(){
+  const c = document.getElementById('crumbs');
+  if(state.view==='dash'){ c.innerHTML = `<span class="cur">Accounting</span><span class="sep">/</span><span class="cur">Dashboard</span>`; return; }
+  if(state.view==='close'){ c.innerHTML = `<button onclick="goDash()">Accounting</button><span class="sep">/</span><span class="cur">Daily close</span>`; return; }
+  const ent = ENTITIES[state.entity].label;
+  let html = `<button onclick="goDash()">Accounting</button><span class="sep">/</span><button onclick="goExplorer('${state.entity}')">${ent}</button>`;
+  if(state.visit){ html += `<span class="sep">/</span><span class="cur">Visit ${state.visit.visit_id.slice(-6)}</span>`; }
+  else { const sel = selected(); if(sel) html += `<span class="sep">/</span><span class="cur">${nameOf(state.entity,sel)}</span>`; }
+  c.innerHTML = html;
+}
+
+/* ---------- DASHBOARD ---------- */
+function trendStr(v){ const cls = v>=0?'up':'down'; const ar = v>=0?'▲':'▼'; return `<span class="${cls}">${ar} ${Math.abs(v)}%</span>`; }
+
+function renderDash(){
+  const topDocs = [...DOCTORS].sort((a,b)=>b.doctor_cut_total_iqd-a.doctor_cut_total_iqd).slice(0,4);
+  const topOps = [...OPERATORS].sort((a,b)=>b.operator_cut_total_iqd-a.operator_cut_total_iqd).slice(0,4);
+  const topChecks = [...CHECKS].sort((a,b)=>b.revenue_iqd-a.revenue_iqd).slice(0,4);
+  const el = document.getElementById('view-dash');
+  el.innerHTML = `
+    <div class="page-eyebrow">Wednesday · 12 May 2026 · This week</div>
+    <h1 class="page-title">Dashboard</h1>
+    <div class="page-sub">Every tile and row drills in. Click a KPI or a leaderboard row to open the explorer.</div>
+
+    <div class="hero">
+      <div class="htile" onclick="goExplorer('visits')">${drillIco()}<div class="lbl">Revenue</div><div class="val">${M(KPIS.revenue_iqd)}<span class="unit">M د.ع</span></div><div class="trend">${trendStr(KPIS.trend.revenue)} vs last week</div></div>
+      <div class="htile" onclick="goExplorer('doctors')">${drillIco()}<div class="lbl">Doctor cuts</div><div class="val">${M(KPIS.doctor_cuts_iqd)}<span class="unit">M</span></div><div class="trend">${trendStr(KPIS.trend.doctor_cuts)}</div></div>
+      <div class="htile" onclick="goExplorer('operators')">${drillIco()}<div class="lbl">Operator cuts</div><div class="val">${M(KPIS.operator_cuts_iqd)}<span class="unit">M</span></div><div class="trend">${trendStr(KPIS.trend.operator_cuts)}</div></div>
+      <div class="htile" onclick="goExplorer('checks')">${drillIco()}<div class="lbl">Inventory used</div><div class="val">${M(KPIS.inventory_consumption_value_iqd)}<span class="unit">M</span></div><div class="trend">${trendStr(KPIS.trend.inventory)}</div></div>
+      <div class="htile net" onclick="goClose()">${drillIco()}<div class="lbl">Net</div><div class="val">${M(KPIS.net_iqd)}<span class="unit">M</span></div><div class="trend">${trendStr(KPIS.trend.net)}</div></div>
+    </div>
+
+    <div class="hub">
+      ${leaderCard('Top doctors','doctors', topDocs.map((d,i)=>leadRow(i, d.house?'house':d.doctor_id, d.name, `${d.specialty} · ${d.visits} visits`, M(d.doctor_cut_total_iqd)+'M', K(d.avg_cut_per_visit_iqd)+'k / visit', 'doctors', d.house)))}
+      ${leaderCard('Top operators','operators', topOps.map((o,i)=>leadRow(i, o.operator_id, o.name, `${o.visits} visits · ${o.visits_with_dye} dye`, M(o.operator_cut_total_iqd)+'M', K(o.avg_cut_per_hour_iqd)+'k / hr', 'operators')))}
+      ${leaderCard('Top check types','checks', topChecks.map((c,i)=>leadRow(i, c.check_type_id, c.name_en, `${c.visits} visits`, M(c.revenue_iqd)+'M', K(c.doctor_cut_iqd/c.visits)+'k doc/v', 'checks')))}
+    </div>
+
+    <div class="trends">
+      ${trendCard('Today vs Yesterday',[['Revenue','12.1M',8],['Doctor cuts','4.2M',5],['Operator cuts','0.9M',-2],['Inventory','0.6M',3],['Net','6.4M',11]])}
+      ${trendCard('This Week vs Last',[['Revenue','86.2M',14],['Doctor cuts','29.9M',9],['Operator cuts','6.4M',-3],['Inventory','4.1M',6],['Net','49.9M',17]])}
+      ${trendCard('This Month vs Last',[['Revenue','341M',6],['Doctor cuts','118M',4],['Operator cuts','25M',1],['Inventory','16M',2],['Net','198M',8]])}
+    </div>`;
+}
+function drillIco(){ return `<svg class="drill-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>`; }
+function leaderCard(title, entity, rows){
+  const ico = ENTITIES[entity].ico;
+  return `<div class="card">
+    <div class="card-head"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">${ico}</svg> ${title}</div>
+      <button class="all" onclick="goExplorer('${entity}')">All <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></button></div>
+    ${rows.join('')}</div>`;
+}
+function leadRow(i, id, nm, su, big, sm, entity, house){
+  return `<div class="lead-row" onclick="goExplorer('${entity}','${id}')">
+    <div class="rank ${i===0?'r1':''}">${i+1}</div>
+    <div class="meta"><div class="nm ${house?'house-nm':''}">${nm}</div><div class="su">${su}</div></div>
+    <div class="v"><div class="big num">${big}</div><div class="sm num">${sm}</div></div></div>`;
+}
+function trendCard(title, rows){
+  return `<div class="card"><div class="tm-head">${title}</div>
+    ${rows.map(([k,v,d])=>`<div class="tm-row"><span class="k">${k}</span><span class="vv"><span class="cur num">${v}</span><span class="d ${d>=0?'up':'down'}">${d>=0?'+':''}${d}%</span></span></div>`).join('')}</div>`;
+}
+
+/* ---------- EXPLORER: MASTER ---------- */
+function renderMasterTabs(){
+  const wrap = document.getElementById('master-tabs');
+  wrap.innerHTML = Object.entries(ENTITIES).map(([k,v])=>
+    `<button class="mtab ${state.entity===k?'active':''}" onclick="switchEntity('${k}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">${v.ico}</svg> ${v.label}</button>`
+  ).join('');
+  document.getElementById('master-search').placeholder = 'Search '+ENTITIES[state.entity].label.toLowerCase()+'...';
+  document.getElementById('master-search').value = state.search;
+}
+function switchEntity(entity){ goExplorer(entity); }
+
+const SORTS = { doctors:'Cut total', operators:'Cut/hour', checks:'Revenue', visits:'Date' };
+function cycleSort(){ /* single-sort demo */ render(); }
+
+function nameOf(entity,row){
+  if(entity==='doctors'||entity==='operators') return row.name;
+  if(entity==='checks') return row.name_en;
+  if(entity==='visits') return row.patient_name;
+}
+function amountOf(entity,row){
+  if(entity==='doctors') return row.doctor_cut_total_iqd;
+  if(entity==='operators') return row.operator_cut_total_iqd;
+  if(entity==='checks') return row.revenue_iqd;
+  if(entity==='visits') return row.price_iqd;
+}
+
+function renderMaster(){
+  const entity = state.entity;
+  const q = (document.getElementById('master-search')?.value||'').toLowerCase();
+  state.search = q;
+  document.getElementById('sort-pill').textContent = SORTS[entity];
+  let rows = listFor(entity).filter(r => nameOf(entity,r).toLowerCase().includes(q));
+  rows = rows.sort((a,b)=>amountOf(entity,b)-amountOf(entity,a));
+  const list = document.getElementById('master-list');
+  list.innerHTML = rows.map((r,i)=>{
+    const id = idOf(entity,r);
+    const sel = id===state.selId ? 'sel':'';
+    let su='', amt='', sub='';
+    if(entity==='doctors'){ su=`${r.specialty} · ${r.visits} visits`; amt=M(r.doctor_cut_total_iqd)+'M'; sub=K(r.avg_cut_per_visit_iqd)+'k/v'; }
+    if(entity==='operators'){ su=`${r.visits} visits · ${r.visits_with_dye} dye`; amt=M(r.operator_cut_total_iqd)+'M'; sub=K(r.avg_cut_per_hour_iqd)+'k/hr'; }
+    if(entity==='checks'){ su=`${r.visits} visits`; amt=M(r.revenue_iqd)+'M'; sub=K(r.doctor_cut_iqd/r.visits)+'k/v'; }
+    if(entity==='visits'){ su=`${r.check} · ${r.date}`; amt=fmt(r.price_iqd); sub=r.status; }
+    return `<div class="mrow ${sel}" onclick="selectRow('${id}')">
+      <div class="rank ${i===0?'r1':''}">${i+1}</div>
+      <div class="info"><div class="nm ${r.house?'house-nm':''}">${nameOf(entity,r)}</div><div class="su">${su}</div></div>
+      <div class="amt"><div class="b num">${amt}</div><div class="s num">${sub}</div></div></div>`;
+  }).join('') || `<div class="empty">No matches.</div>`;
+  // foot
+  const total = rows.reduce((s,r)=>s+amountOf(entity,r),0);
+  document.getElementById('master-foot').innerHTML = `<span>${rows.length} ${ENTITIES[entity].label.toLowerCase()}</span><span class="num">${M(total)}M د.ع</span>`;
+}
+function selectRow(id){ state.selId=id; state.visit=null; renderMaster(); renderDetail(); renderCrumbs(); }
+
+/* ---------- EXPLORER: DETAIL ---------- */
+function selected(){
+  const e=state.entity;
+  return listFor(e).find(r=>idOf(e,r)===state.selId);
+}
+function renderDetail(){
+  const el = document.getElementById('detail');
+  if(state.visit){ el.innerHTML = visitDetailHtml(state.visit); return; }
+  const sel = selected();
+  if(!sel){ el.innerHTML = `<div class="empty">Select a row.</div>`; return; }
+  if(state.entity==='doctors') el.innerHTML = doctorDetail(sel);
+  else if(state.entity==='operators') el.innerHTML = operatorDetail(sel);
+  else if(state.entity==='checks') el.innerHTML = checkDetail(sel);
+  else if(state.entity==='visits') el.innerHTML = visitDetailHtml(sel);
+}
+
+function detailHead(eyebrow, title, fullLabel){
+  return `<div class="d-eyebrow">${eyebrow}</div>
+    <div class="d-head"><div class="d-title">${title}</div>
+      <div class="d-actions"><button class="btn">${fullLabel||'Open full page'}</button>
+        <button class="btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg> CSV</button></div></div>`;
+}
+function statStrip(items){
+  return `<div class="stat-strip">${items.map((it,i)=>`<div class="stat ${i===items.length-1?'ink':''}"><div class="l">${it[0]}</div><div class="v num">${it[1]}<span class="u">${it[2]||''}</span></div></div>`).join('')}</div>`;
+}
+function visitRowsTable(rows, title, allLabel){
+  return `<div class="panel"><div class="panel-head"><span>${title}</span><button class="panel-link">${allLabel}</button></div>
+    <table><thead><tr><th>Date</th><th>Patient</th><th>Check</th><th>Doctor</th><th>Operator</th><th></th><th class="num">Price</th><th class="num">Doc cut</th><th class="num">Net</th><th>Status</th></tr></thead>
+    <tbody>${rows.map(v=>`<tr onclick="openVisit('${v.visit_id}')">
+      <td class="mono">${v.date}</td><td class="ln">${v.patient_name}</td><td>${v.check}</td>
+      <td class="${v.house?'house-nm':''}">${v.doctor_name}</td><td>${v.operator_name}</td>
+      <td>${v.dye?'<span class="chip-dye">Dye</span>':''}</td>
+      <td class="num">${fmt(v.price_iqd)}</td><td class="num">${fmt(v.doctor_cut_iqd)}</td><td class="num">${fmt(v.net_iqd)}</td>
+      <td><span class="status-pill pill-${v.status}">${v.status}</span></td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function doctorDetail(d){
+  const perCheck = [
+    ['Ultrasound','Abdominal',58,2900000,870000,15000],
+    ['CT scan','—',41,4100000,1640000,40000],
+    ['MRI','Brain',28,4200000,1680000,60000],
+    ['Echo','—',15,750000,225000,15000],
+  ];
+  return detailHead(`Doctor · ${d.specialty} · This week`, d.name) +
+    statStrip([['Visits',d.visits,''],['Revenue',M(d.revenue_iqd),'M'],['Cut total',M(d.doctor_cut_total_iqd),'M'],['Avg cut / visit',K(d.avg_cut_per_visit_iqd),'k']]) +
+    `<div class="panel"><div class="panel-head"><span>Per-check breakdown</span><span class="panel-link">${perCheck.length} check types</span></div>
+      <table><thead><tr><th>Check</th><th>Subtype</th><th class="num">Visits</th><th class="num">Revenue</th><th class="num">Cut</th><th class="num">Avg cut</th></tr></thead>
+      <tbody>${perCheck.map(r=>`<tr><td><span class="ln">${r[0]}</span></td><td style="color:var(--ink-3)">${r[1]}</td><td class="num">${r[2]}</td><td class="num">${fmt(r[3])}</td><td class="num">${fmt(r[4])}</td><td class="num">${fmt(r[5])}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="2">Totals</td><td class="num">${d.visits}</td><td class="num">${fmt(d.revenue_iqd)}</td><td class="num">${fmt(d.doctor_cut_total_iqd)}</td><td class="num">${fmt(d.avg_cut_per_visit_iqd)}</td></tr></tfoot></table></div>` +
+    visitRowsTable(VISITS.slice(0,4), 'Source visits', `View all ${d.visits} →`);
+}
+function operatorDetail(o){
+  const shifts = [
+    ['05-12','08:00','14:30','6h 30m',42,420000],
+    ['05-11','08:00','16:00','8h 00m',55,550000],
+    ['05-10','09:00','13:00','4h 00m',28,280000],
+  ];
+  return detailHead(`Operator · This week`, o.name) +
+    statStrip([['Visits',o.visits,''],['Dye visits',o.visits_with_dye,''],['Cut total',M(o.operator_cut_total_iqd),'M'],['Avg cut / hour',K(o.avg_cut_per_hour_iqd),'k']]) +
+    `<div class="panel"><div class="panel-head"><span>Shifts</span><span class="panel-link">${o.hours}h on shift</span></div>
+      <table><thead><tr><th>Date</th><th>In</th><th>Out</th><th>Duration</th><th class="num">Lines run</th><th class="num">Cut earned</th></tr></thead>
+      <tbody>${shifts.map(s=>`<tr><td class="mono">${s[0]}</td><td class="mono">${s[1]}</td><td class="mono">${s[2]}</td><td>${s[3]}</td><td class="num">${s[4]}</td><td class="num">${fmt(s[5])}</td></tr>`).join('')}</tbody></table></div>` +
+    visitRowsTable(VISITS.slice(0,3), 'Attributed visits', `View all ${o.visits} →`);
+}
+function checkDetail(c){
+  const byDoctor = [
+    ['Dr. Sarah Hanna',41,4100000,1640000],
+    ['Dr. Omar Faris',33,3300000,1320000],
+    ['Internal · داخلي',122,12200000,3660000,true],
+    ['Dr. Layla Hashim',28,2800000,840000],
+  ];
+  return detailHead(`Check type · This week`, c.name_en+' · '+c.name_ar) +
+    statStrip([['Visits',c.visits,''],['Revenue',M(c.revenue_iqd),'M'],['Doctor cut',M(c.doctor_cut_iqd),'M'],['Operator cut',M(c.operator_cut_iqd),'M']]) +
+    `<div class="panel"><div class="panel-head"><span>By doctor</span><span class="panel-link">${byDoctor.length} doctors</span></div>
+      <table><thead><tr><th>Doctor</th><th class="num">Visits</th><th class="num">Revenue</th><th class="num">Doctor cut</th></tr></thead>
+      <tbody>${byDoctor.map(r=>`<tr onclick="goExplorer('doctors')"><td><span class="ln ${r[4]?'house-nm':''}">${r[0]}</span></td><td class="num">${r[1]}</td><td class="num">${fmt(r[2])}</td><td class="num">${fmt(r[3])}</td></tr>`).join('')}</tbody></table></div>` +
+    visitRowsTable(VISITS.filter(v=>v.check===c.name_en).length?VISITS.filter(v=>v.check===c.name_en):VISITS.slice(0,3), 'Recent visits', `View all ${c.visits} →`);
+}
+
+function openVisit(id){ state.visit = VISITS.find(v=>v.visit_id===id); renderDetail(); renderCrumbs(); }
+function visitDetailHtml(v){
+  return detailHead(`Visit · ${v.date} · ${v.status}`, `${v.patient_name}`, '← Back to list') +
+    statStrip([['Price',fmt(v.price_iqd),''],['Doctor cut',fmt(v.doctor_cut_iqd),''],['Operator cut',fmt(v.operator_cut_iqd),''],['Net',fmt(v.net_iqd),'']]) +
+    `<div class="panel"><div class="panel-head"><span>Visit detail</span><span class="status-pill pill-${v.status}">${v.status}</span></div>
+      <table><tbody>
+        <tr><td style="color:var(--ink-3)">Patient</td><td class="ln">${v.patient_name}</td></tr>
+        <tr><td style="color:var(--ink-3)">Check</td><td>${v.check}${v.subtype?' · '+v.subtype:''} ${v.dye?'<span class="chip-dye">Dye</span>':''}</td></tr>
+        <tr onclick="goExplorer('doctors')"><td style="color:var(--ink-3)">Doctor</td><td class="ln ${v.house?'house-nm':''}">${v.doctor_name}</td></tr>
+        <tr onclick="goExplorer('operators')"><td style="color:var(--ink-3)">Operator</td><td class="ln">${v.operator_name}</td></tr>
+        <tr><td style="color:var(--ink-3)">Visit ID</td><td class="mono">${v.visit_id}</td></tr>
+      </tbody></table></div>`;
+}
+
+/* ---------- DAILY CLOSE (simple) ---------- */
+function renderClose(){
+  document.getElementById('view-explorer').classList.add('hidden');
+  const el = document.getElementById('view-dash');
+  el.classList.remove('hidden');
+  el.innerHTML = `
+    <div class="page-eyebrow">12 May 2026 · Daily close</div>
+    <h1 class="page-title">Daily Close</h1>
+    <div class="page-sub">Provisional — 1 visit pending sync.</div>
+    ${statStrip([['Revenue','12.1','M'],['Doctor cuts','4.2','M'],['Operator cuts','0.9','M'],['Net','6.4','M']])}
+    <div class="panel"><div class="panel-head"><span>Per check type</span><span class="panel-link">5 types</span></div>
+      <table><thead><tr><th>Check</th><th class="num">Visits</th><th class="num">Revenue</th><th class="num">Doc cut</th><th class="num">Op cut</th></tr></thead>
+      <tbody>${CHECKS.map(c=>`<tr onclick="goExplorer('checks','${c.check_type_id}')"><td class="ln">${c.name_en}</td><td class="num">${Math.round(c.visits/7)}</td><td class="num">${fmt(Math.round(c.revenue_iqd/7))}</td><td class="num">${fmt(Math.round(c.doctor_cut_iqd/7))}</td><td class="num">${fmt(Math.round(c.operator_cut_iqd/7))}</td></tr>`).join('')}</tbody></table></div>`;
+  document.getElementById('crumbs').innerHTML = `<button onclick="goDash()">Accounting</button><span class="sep">/</span><span class="cur">Daily close</span>`;
+}
+
+/* ---------- header controls ---------- */
+document.getElementById('range-seg').addEventListener('click', e=>{
+  if(e.target.tagName!=='BUTTON') return;
+  [...e.currentTarget.children].forEach(b=>b.classList.remove('active'));
+  e.target.classList.add('active'); state.range=e.target.dataset.r;
+});
+document.getElementById('voided-toggle').addEventListener('change', e=>{ state.voided=e.target.checked; });
+
+function setHint(){
+  const h = document.getElementById('hint');
+  if(state.view==='dash') h.innerHTML = `<b>Combined B + C.</b> Click any KPI tile or leaderboard row to drill into the explorer.`;
+  else if(state.view==='explorer') h.innerHTML = `<b>Explorer.</b> Switch entity via the tabs; pick a row to update the detail in place; click a visit row to open it.`;
+  else h.innerHTML = `<b>Daily close.</b> Rows drill into the explorer.`;
+}
+
+/* boot */
+render();
+</script>
+</body>
+</html>

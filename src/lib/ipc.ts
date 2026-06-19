@@ -43,6 +43,7 @@ export type CommandMap = {
     result: AuthLoginResult
   }
   auth_logout: { args: void; result: null }
+  auth_clear_session: { args: void; result: null }
   auth_current_user: { args: void; result: AuthUserContext | null }
   auth_lock: { args: void; result: null }
   auth_unlock: { args: { args: { password: string } }; result: null }

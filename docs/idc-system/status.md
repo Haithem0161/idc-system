@@ -147,6 +147,38 @@ Pass 3 (final) completed 2026-05-11 via six parallel sub-agents on non-overlappi
 
 ## Blockers & Notes
 
+### Persistent sessions across app restarts (2026-06-19)
+
+Closed a real gap: the session lived only in in-memory `AppState`, so every app restart (dev or packaged) forced a fresh login even though the 30-day refresh token was still valid. `auth.md` specifies "stay logged in across restarts" but the disk round-trip was never implemented.
+
+**Landed and green (Rust 451 unit + all integration suites; frontend 1032; lint/build/clippy/fmt clean):**
+- **Storage:** new `session_store` module persists the session to `<app_data_dir>/session.json` -- the same Rust-only command boundary the pinned JWT public key uses (the webview can never read it; `auth.md`-blessed). Atomic write (temp + rename), versioned blob, corrupt/unknown-version files self-heal to "no session". No new dependency (stronghold remains an acceptable later swap-in behind the same API).
+- **Persist points:** `auth_login` (after pinned-key verify), `auth_refresh`, the sync 401 refresh hook, and `auth_lock`/`auth_unlock` all (re)write the file; `auth_logout` + forged-token paths clear it. A purely-offline login with no refresh token is intentionally NOT persisted.
+- **Boot restore (`restore_session_impl`, called from `bootstrap()`):** pure, never blocks on network. Valid access JWT -> restore online; expired-but-genuine signature -> restore offline + spawn a one-shot background `/auth/refresh` that upgrades to online on reconnect; forged signature -> hostile file, wiped, anonymous. The refresh token is always loaded so rotation can happen later. New `verify_signature_ignoring_exp` on the verifier keeps all alg-confusion/foreign-signature defenses while tolerating expiry (offline restore only).
+- **Race handling:** Rust `bootstrap()` runs concurrently with the webview. `AuthBootstrap` now bounded-re-probes `auth_current_user` (8x250ms) instead of going anonymous on the first null, AND the restore emits `auth:changed` so the frontend re-probes -- whichever resolves first wins.
+- **QoL fixes found on the way:** (1) **Lock survives restart** -- the `locked` flag is persisted and restored, so restarting the app can no longer bypass an idle-locked session (a regression that persistence would otherwise have introduced). (2) New `auth_clear_session` IPC -- on `auth:session_expired` the frontend wipes the persisted file WITHOUT writing a logout audit row, so a dead-refresh session no longer flashes an authenticated state and re-fails the refresh on every subsequent launch.
+- **IPC (+1):** `auth_clear_session` (registered in `lib.rs` both places).
+
+### Accounting redesign: Dashboard + Explorer (2026-06-19)
+
+Frontend-only redesign of the accounting surface (no schema / IPC / sync changes -- pure presentation over the existing `reports_*` commands). Replaces the old flat list+detail pages (visits, doctors, operators and their detail pages -- 5 files removed) with two composed surfaces, per the user-approved "B + C" combined mockup in `docs/idc-system/accounting-mockups/proposal-combined-bc.html`.
+
+**Routes (net 0 new IPC; route shape changed):**
+- `/accounting` -> Dashboard (drillable). `/accounting/explore/:entity/:id?` -> Explorer (entity in visits|doctors|operators|checks). `/accounting/visits/:id` (legacy read-only visit detail) and `/accounting/daily-close` kept as-is. Breadcrumbs now driven by route `handle.crumb`.
+- The explorer is URL-driven: selection lives in the path, so it is deep-linkable, back-button friendly, and shareable. House doctor encodes as the `house` URL segment (`doctor_id: null`); the `by_doctor` report group key `__house__` maps to it via `entity-link` helpers.
+
+**Dashboard (B):** drillable KPI hero (5 tiles -> explorer/daily-close, week-over-week permille delta), 3 leaderboard cards (top doctors/operators/checks, each row drills in), 3 trend matrices (reused `TrendMatrix`).
+
+**Explorer (C):** two-pane master/detail terminal. Left = entity tabs + live search + ranked list (per-entity sort; search resets on tab change). Right = in-place detail: doctor (`reports_doctor_drilldown`), operator (`reports_operator_drilldown`), check type (composed from `reports_visits` `by_doctor` + ungrouped, capped 50; no dedicated check drilldown command exists), and **visit** (slim accounting breakdown read from the shared `reports_visits` rows cache by `visit_id` -- no new IPC). Each detail = stat strip + breakdown; doctor/operator/check panes also show a clickable source-visits table. The full read-only `/accounting/visits/:id` page (print + reception tabs) is reachable from the visit pane's "Open full page" action.
+
+**Sidebar restructure (2026-06-19, follow-up):** the "RECORDS" nav group is gone. Accounting is now its own sidebar group with six items: **Dashboard** (`/accounting`, exact-match), **Visits / Doctors / Operators / Checks** (each opens the Explorer with that entity tab pre-selected via `/accounting/explore/<entity>`), and **Daily close** (`/accounting/daily-close`). **Audit log** moved from RECORDS into the ADMINISTRATION group. Distinct i18n nav keys (`nav.acc_visits/acc_doctors/acc_operators/acc_checks/dashboard/daily_close`, `nav.group.accounting`) avoid colliding with the admin `doctors`/`operators` labels.
+
+**Visit drill-in (2026-06-19, follow-up):** clicking a visit row in the Explorer now stays in the master/detail layout via a new `visit-detail-pane.tsx`, instead of bouncing out to the standalone page (the prior `<Navigate>` redirect was removed). The pane shows patient, status, check/subtype, doctor (Internal fallback), operator, dye, report, and a 4-up stat strip (price / doc cut / op cut / net). Out-of-range visits show a graceful "not in range" state with an open-full-page link.
+
+**New components** under `src/components/accounting/`: `accounting-toolbar`, `dashboard-hero`, `leaderboard-card`, `format-abbrev`, `stat-strip`, `source-visits-table`, `detail-chrome`, `explorer-types`, `explorer-master`, `use-master-rows`, `entity-link`, `doctor-/operator-/check-/visit-detail-pane`. Pages: `dashboard.tsx` (rewritten), `explorer.tsx` (new). Reuses existing `KpiCard`/`TrendMatrix`/`DateRangePicker`/`IncludeVoidedToggle`, `formatIqd`/`formatPermille`/`formatHours`, `resolveLocaleName`, and `useAccountingFiltersStore`.
+
+**i18n:** +47 keys (initial) plus the sidebar/visit-pane follow-up keys in `en`+`ar` (accounting.json flat dotted style; `common.yes/no` + nav keys in common.json). **Validation:** lint + i18n + rtl clean; `pnpm build` clean; 1032 frontend tests pass; 0 console errors on cold load; RTL audited (all logical props, no physical left/right). Verified statically + via Vite load; full in-app render requires `pnpm tauri dev` (data hooks are `isTauri()`-gated).
+
 ### Doctor combobox + default cut (2026-06-17)
 
 Feature increment (not a numbered phase): the new-visit doctor `<select>` became a searchable combobox with inline doctor creation, mirroring the patient combobox. Done across BOTH surfaces in one pass (no deferred sync-server work).

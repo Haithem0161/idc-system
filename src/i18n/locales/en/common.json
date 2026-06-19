@@ -15,13 +15,21 @@
     "submit": "Submit",
     "refresh": "Refresh",
     "pending_sync": "Pending sync",
-    "synced": "Synced"
+    "synced": "Synced",
+    "yes": "Yes",
+    "no": "No"
   },
   "nav": {
     "aria_label": "Primary",
     "reception": "Reception",
     "shifts": "Shifts",
     "patients": "Patients",
+    "dashboard": "Dashboard",
+    "acc_visits": "Visits",
+    "acc_doctors": "Doctors",
+    "acc_operators": "Operators",
+    "acc_checks": "Checks",
+    "daily_close": "Daily close",
     "doctors": "Doctors",
     "operators": "Operators",
     "check_types": "Check types",
@@ -32,7 +40,7 @@
     "settings": "Settings",
     "group": {
       "operations": "Operations",
-      "records": "Records",
+      "accounting": "Accounting",
       "admin": "Administration"
     }
   },

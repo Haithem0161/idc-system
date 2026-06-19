@@ -1,13 +1,18 @@
 import { useMemo } from "react"
 import { useTranslation } from "react-i18next"
-import { NavLink } from "react-router"
+import { Stethoscope, Users, Boxes } from "lucide-react"
 
-import { DateRangePicker } from "@/components/accounting/date-range-picker"
-import { IncludeVoidedToggle } from "@/components/accounting/include-voided-toggle"
-import { KpiCard } from "@/components/accounting/kpi-card"
+import { AccountingToolbar } from "@/components/accounting/accounting-toolbar"
+import { DashboardHero } from "@/components/accounting/dashboard-hero"
+import {
+  LeaderboardCard,
+  type LeaderboardRow,
+} from "@/components/accounting/leaderboard-card"
+import { abbreviateIqd, thousandsK } from "@/components/accounting/format-abbrev"
 import { TrendMatrix } from "@/components/accounting/trend-matrix"
 import { useDashboardKpis, useDashboardTops } from "@/features/reports/queries"
-import { formatIqd } from "@/lib/format/money"
+import { resolveLocaleName } from "@/lib/format/locale-name"
+import { doctorIdToSegment } from "@/components/accounting/entity-link"
 import {
   rangeAsUtc,
   useAccountingFiltersStore,
@@ -15,6 +20,7 @@ import {
 
 export default function AccountingDashboardPage () {
   const { t, i18n } = useTranslation()
+  const locale = i18n.language === "ar" ? "ar" : "en"
   const fromDate = useAccountingFiltersStore((s) => s.fromDate)
   const toDate = useAccountingFiltersStore((s) => s.toDate)
   const includeVoided = useAccountingFiltersStore((s) => s.includeVoided)
@@ -31,6 +37,51 @@ export default function AccountingDashboardPage () {
     { weekday: "long", day: "numeric", month: "long", year: "numeric" }
   )
 
+  const doctorRows: LeaderboardRow[] = (tops.data?.top_doctors ?? []).map((d) => ({
+    id: doctorIdToSegment(d.doctor_id),
+    name: d.doctor_id
+      ? d.name
+      : t("accounting.house.label", { defaultValue: "Internal" }),
+    sub: [
+      d.specialty ?? t("accounting.doctors.no_specialty", { defaultValue: "No specialty" }),
+      t("accounting.tops.visits_count", { defaultValue: "{{count}} visits", count: d.visits }),
+    ].join(" · "),
+    primary: abbreviateIqd(d.doctor_cut_total_iqd),
+    secondary: t("accounting.tops.per_visit", {
+      defaultValue: "{{value}} / visit",
+      value: thousandsK(d.avg_cut_per_visit_iqd),
+    }),
+    href: `/accounting/explore/doctors/${doctorIdToSegment(d.doctor_id)}`,
+    house: !d.doctor_id,
+  }))
+
+  const operatorRows: LeaderboardRow[] = (tops.data?.top_operators ?? []).map((o) => ({
+    id: o.operator_id,
+    name: o.name || o.operator_id,
+    sub: [
+      t("accounting.tops.visits_count", { defaultValue: "{{count}} visits", count: o.visits }),
+      t("accounting.tops.dye_count", { defaultValue: "{{count}} dye", count: o.visits_with_dye }),
+    ].join(" · "),
+    primary: abbreviateIqd(o.operator_cut_total_iqd),
+    secondary: t("accounting.tops.per_hour", {
+      defaultValue: "{{value}} / hr",
+      value: thousandsK(o.avg_cut_per_hour_iqd),
+    }),
+    href: `/accounting/explore/operators/${o.operator_id}`,
+  }))
+
+  const checkRows: LeaderboardRow[] = (tops.data?.top_check_types ?? []).map((c) => ({
+    id: c.check_type_id,
+    name: resolveLocaleName(c, locale),
+    sub: t("accounting.tops.visits_count", { defaultValue: "{{count}} visits", count: c.visits }),
+    primary: abbreviateIqd(c.revenue_iqd),
+    secondary: t("accounting.tops.doc_cut_per_visit", {
+      defaultValue: "{{value}} doc/v",
+      value: thousandsK(c.visits > 0 ? c.doctor_cut_iqd / c.visits : 0),
+    }),
+    href: `/accounting/explore/checks/${c.check_type_id}`,
+  }))
+
   return (
     <div className="space-y-6">
       <header>
@@ -38,153 +89,79 @@ export default function AccountingDashboardPage () {
           {localeDate.toUpperCase()} ·{" "}
           {t("accounting.dashboard.eyebrow", { defaultValue: "Accounting" })}
         </div>
-        <h1 className="mt-1 text-[28px] font-bold tracking-tight text-ink">
+        <h1 className="mt-1 text-[30px] font-bold tracking-tight text-ink">
           {t("accounting.dashboard.title", { defaultValue: "Dashboard" })}
         </h1>
+        <p className="mt-1 text-[13px] text-ink-3">
+          {t("accounting.dashboard.subtitle", {
+            defaultValue: "Every tile and row drills in. Click a KPI or a leaderboard row to open the explorer.",
+          })}
+        </p>
       </header>
 
-      <div className="flex flex-wrap items-center gap-4">
-        <DateRangePicker />
-        <IncludeVoidedToggle />
-      </div>
+      <AccountingToolbar />
 
       {kpis.error ? (
         <div className="rounded-md border border-crimson/30 bg-crimson-soft px-4 py-3 text-[12px] text-crimson">
-          {t("accounting.errors.kpis_failed", {
-            defaultValue: "Could not load accounting KPIs.",
-          })}
+          {t("accounting.errors.kpis_failed", { defaultValue: "Could not load accounting KPIs." })}
         </div>
       ) : null}
 
       {kpis.data ? (
-        <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <KpiCard
-              label={t("accounting.kpi.revenue", { defaultValue: "Revenue" })}
-              amount={kpis.data.revenue_iqd}
-              deltaPermille={kpis.data.trend_today_vs_yesterday.revenue.delta_permille}
-            />
-            <KpiCard
-              label={t("accounting.kpi.doctor_cuts", { defaultValue: "Doctor cuts" })}
-              amount={kpis.data.doctor_cuts_iqd}
-              deltaPermille={kpis.data.trend_today_vs_yesterday.doctor_cuts.delta_permille}
-            />
-            <KpiCard
-              label={t("accounting.kpi.operator_cuts", { defaultValue: "Operator cuts" })}
-              amount={kpis.data.operator_cuts_iqd}
-              deltaPermille={kpis.data.trend_today_vs_yesterday.operator_cuts.delta_permille}
-            />
-            <KpiCard
-              label={t("accounting.kpi.inventory_value", { defaultValue: "Inventory value" })}
-              amount={kpis.data.inventory_consumption_value_iqd}
-              deltaPermille={kpis.data.trend_today_vs_yesterday.inventory_value.delta_permille}
-            />
-            <KpiCard
-              label={t("accounting.kpi.net", { defaultValue: "Net" })}
-              amount={kpis.data.net_iqd}
-              deltaPermille={kpis.data.trend_today_vs_yesterday.net.delta_permille}
-              tone="ink"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <TrendMatrix
-              title={t("accounting.trends.today_vs_yesterday", {
-                defaultValue: "Today vs Yesterday",
-              })}
-              matrix={kpis.data.trend_today_vs_yesterday}
-            />
-            <TrendMatrix
-              title={t("accounting.trends.this_week_vs_last", {
-                defaultValue: "This Week vs Last",
-              })}
-              matrix={kpis.data.trend_week_vs_last_week}
-            />
-            <TrendMatrix
-              title={t("accounting.trends.this_month_vs_last", {
-                defaultValue: "This Month vs Last",
-              })}
-              matrix={kpis.data.trend_month_vs_last_month}
-            />
-          </div>
-        </>
+        <DashboardHero kpis={kpis.data} />
       ) : (
-        <SkeletonGrid />
+        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2 lg:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="h-[112px] animate-pulse bg-paper-2" />
+          ))}
+        </div>
       )}
 
       {tops.data ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <TopList
-            title={t("accounting.tops.doctors", { defaultValue: "Top Doctors" })}
-            rows={tops.data.top_doctors.map((d) => ({
-              label: d.name,
-              value: formatIqd(d.revenue_iqd, { withSuffix: true }),
-              href: `/accounting/doctors/${d.doctor_id ?? "house"}`,
-            }))}
+          <LeaderboardCard
+            title={t("accounting.tops.doctors", { defaultValue: "Top doctors" })}
+            icon={<Stethoscope className="h-4 w-4" strokeWidth={1.8} />}
+            allHref="/accounting/explore/doctors"
+            allLabel={t("accounting.tops.all", { defaultValue: "All" })}
+            rows={doctorRows}
+            emptyLabel={t("accounting.doctors.empty", { defaultValue: "No earnings in range." })}
           />
-          <TopList
-            title={t("accounting.tops.operators", { defaultValue: "Top Operators" })}
-            rows={tops.data.top_operators.map((o) => ({
-              label: o.name || o.operator_id,
-              value: `${o.visits} visits`,
-              href: `/accounting/operators/${o.operator_id}`,
-            }))}
+          <LeaderboardCard
+            title={t("accounting.tops.operators", { defaultValue: "Top operators" })}
+            icon={<Users className="h-4 w-4" strokeWidth={1.8} />}
+            allHref="/accounting/explore/operators"
+            allLabel={t("accounting.tops.all", { defaultValue: "All" })}
+            rows={operatorRows}
+            emptyLabel={t("accounting.operators.empty", { defaultValue: "No earnings in range." })}
           />
-          <TopList
-            title={t("accounting.tops.check_types", { defaultValue: "Top Check Types" })}
-            rows={tops.data.top_check_types.map((c) => ({
-              label: c.name_en ?? c.name_ar,
-              value: formatIqd(c.revenue_iqd, { withSuffix: true }),
-              href: `/accounting/visits?check_type_id=${c.check_type_id}`,
-            }))}
+          <LeaderboardCard
+            title={t("accounting.tops.check_types", { defaultValue: "Top check types" })}
+            icon={<Boxes className="h-4 w-4" strokeWidth={1.8} />}
+            allHref="/accounting/explore/checks"
+            allLabel={t("accounting.tops.all", { defaultValue: "All" })}
+            rows={checkRows}
+            emptyLabel={t("accounting.checks.empty", { defaultValue: "No checks in range." })}
           />
         </div>
       ) : null}
-    </div>
-  )
-}
 
-function SkeletonGrid () {
-  return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="h-[110px] animate-pulse rounded-lg bg-paper-2" />
-      ))}
-    </div>
-  )
-}
-
-function TopList ({
-  title,
-  rows,
-}: {
-  title: string
-  rows: Array<{ label: string; value: string; href: string }>
-}) {
-  return (
-    <div className="rounded-lg border border-line bg-surface p-5">
-      <div className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-ink-3">
-        {title}
-      </div>
-      {rows.length === 0 ? (
-        <div className="mt-3 text-[12px] text-ink-3">
-          <span>—</span>
+      {kpis.data ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <TrendMatrix
+            title={t("accounting.trends.today_vs_yesterday", { defaultValue: "Today vs Yesterday" })}
+            matrix={kpis.data.trend_today_vs_yesterday}
+          />
+          <TrendMatrix
+            title={t("accounting.trends.this_week_vs_last", { defaultValue: "This Week vs Last" })}
+            matrix={kpis.data.trend_week_vs_last_week}
+          />
+          <TrendMatrix
+            title={t("accounting.trends.this_month_vs_last", { defaultValue: "This Month vs Last" })}
+            matrix={kpis.data.trend_month_vs_last_month}
+          />
         </div>
-      ) : (
-        <ul className="mt-3 space-y-1.5">
-          {rows.map((r, i) => (
-            <li key={i}>
-              <NavLink
-                to={r.href}
-                className="flex items-center justify-between rounded p-1.5 text-[13px] text-ink-2 hover:bg-paper"
-              >
-                <span className="truncate">{r.label}</span>
-                <span className="ms-2 font-mono tabular-nums text-ink-3">{r.value}</span>
-              </NavLink>
-            </li>
-          ))}
-        </ul>
-      )}
+      ) : null}
     </div>
   )
 }

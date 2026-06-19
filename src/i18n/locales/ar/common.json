@@ -15,13 +15,21 @@
     "submit": "إرسال",
     "refresh": "تحديث",
     "pending_sync": "بانتظار المزامنة",
-    "synced": "متزامن"
+    "synced": "متزامن",
+    "yes": "نعم",
+    "no": "لا"
   },
   "nav": {
     "aria_label": "أساسي",
     "reception": "الاستقبال",
     "shifts": "الورديات",
     "patients": "المرضى",
+    "dashboard": "لوحة المعلومات",
+    "acc_visits": "الزيارات",
+    "acc_doctors": "الأطباء",
+    "acc_operators": "الفنيون",
+    "acc_checks": "الفحوصات",
+    "daily_close": "إغلاق اليوم",
     "doctors": "الأطباء",
     "operators": "الفنيون",
     "check_types": "أنواع الفحوصات",
@@ -32,7 +40,7 @@
     "settings": "الإعدادات",
     "group": {
       "operations": "العمليات",
-      "records": "السجلات",
+      "accounting": "المحاسبة",
       "admin": "الإدارة"
     }
   },

@@ -25,10 +25,10 @@ use crate::domains::audit::service::{
     DiagnosticsService as DiagnosticsSvc,
 };
 use crate::domains::auth::commands::{
-    auth_bootstrap_jwt_key, auth_bootstrap_status, auth_change_password, auth_current_user,
-    auth_has_any_user, auth_is_locked, auth_jwt_pinned_sha256, auth_lock, auth_login, auth_logout,
-    auth_refresh, auth_unlock, users_create, users_create_first_admin, users_get, users_list,
-    users_reset_password, users_soft_delete, users_update,
+    auth_bootstrap_jwt_key, auth_bootstrap_status, auth_change_password, auth_clear_session,
+    auth_current_user, auth_has_any_user, auth_is_locked, auth_jwt_pinned_sha256, auth_lock,
+    auth_login, auth_logout, auth_refresh, auth_unlock, users_create, users_create_first_admin,
+    users_get, users_list, users_reset_password, users_soft_delete, users_update,
 };
 use crate::domains::auth::domain::repositories::UserRepo;
 use crate::domains::auth::infrastructure::SqliteUserRepo;
@@ -171,6 +171,7 @@ pub fn run() {
             // auth
             auth_login,
             auth_logout,
+            auth_clear_session,
             auth_refresh,
             auth_change_password,
             auth_bootstrap_jwt_key,
@@ -564,11 +565,21 @@ async fn bootstrap(
                             _ => true,
                         };
                         if verified {
+                            // Re-persist the rotated tokens so the on-disk
+                            // session never holds an already-rotated (now
+                            // invalid) refresh token after a restart.
+                            crate::domains::auth::commands::persist_session_public(
+                                &hook_app, &state,
+                            )
+                            .await;
                             let _ = hook_app.emit("auth:refreshed", ());
                             token
                         } else {
                             warn!("sync 401 refresh returned a token that failed pinned-key verification; session expired");
                             state.clear_auth().await;
+                            crate::domains::auth::commands::clear_persisted_session_public(
+                                &hook_app,
+                            );
                             None
                         }
                     }
@@ -583,6 +594,65 @@ async fn bootstrap(
             .sync_engine()
             .set_refresh_hook(hook)
             .await;
+    }
+
+    // Restore a persisted session (if any) so the user is not forced to log in
+    // on every app restart. Pure restore -- never blocks on the network. When
+    // the restore is offline (expired/absent access token but a valid refresh
+    // token), spawn a one-shot background refresh so the session upgrades to
+    // online the moment the server is reachable, without delaying launch.
+    match crate::domains::auth::commands::restore_session_impl(app, &app.state::<AppState>()).await
+    {
+        Ok(outcome) => {
+            use crate::domains::auth::commands::RestoreOutcome;
+            use tauri::Emitter;
+            info!(?outcome, "session restore");
+            // Tell the webview a session is live, so its AuthBootstrap re-probes
+            // `auth_current_user` even if its initial probe raced ahead of this
+            // restore and saw no user. `online` while a stale-token offline
+            // restore is still pending an upgrade is fine: the frontend treats
+            // either mode as authenticated, and the background refresh below
+            // re-emits the precise mode once it resolves.
+            if matches!(
+                outcome,
+                RestoreOutcome::RestoredOnline | RestoreOutcome::RestoredOffline
+            ) {
+                let mode = if matches!(outcome, RestoreOutcome::RestoredOnline) {
+                    "online"
+                } else {
+                    "offline"
+                };
+                let _ = app.emit("auth:changed", mode);
+            }
+            if matches!(outcome, RestoreOutcome::RestoredOffline) {
+                let refresh_app = app.clone();
+                tokio::spawn(async move {
+                    use tauri::{Emitter, Manager};
+                    let state = refresh_app.state::<AppState>();
+                    match crate::domains::auth::commands::auth_refresh_impl(&state).await {
+                        Ok(_) => {
+                            // Re-persist the rotated tokens and let the UI know
+                            // the session is now fully online.
+                            crate::domains::auth::commands::persist_session_public(
+                                &refresh_app,
+                                &state,
+                            )
+                            .await;
+                            let _ = refresh_app.emit("auth:changed", "online");
+                        }
+                        Err(e) => {
+                            // Offline or refresh-rejected: stay on the restored
+                            // identity. A genuinely expired refresh token surfaces
+                            // when the user next acts; we do not force logout here.
+                            warn!(error = %e, "background session refresh failed; staying offline");
+                        }
+                    }
+                });
+            }
+        }
+        Err(e) => {
+            warn!(error = %e, "session restore failed; starting anonymous");
+        }
     }
 
     // Warm the in-memory settings cache from SQLite. Without this, every

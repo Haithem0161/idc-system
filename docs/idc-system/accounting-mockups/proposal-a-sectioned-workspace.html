@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Accounting -- Proposal A: Sectioned Workspace</title>
+<style>
+  :root {
+    --paper:#FDFDFA; --paper-2:#F7F5EE; --surface:#FFFFFF;
+    --line:#ECE8DB; --line-2:#DDD8C7;
+    --ink:#0A1230; --ink-2:#1C2851; --ink-3:#5E5A4E; --ink-4:#94907F;
+    --crimson:#C0263A; --crimson-dark:#9A1F30; --crimson-soft:#FBE9EC;
+    --gold:#B45309; --gold-soft:#FEF3E2;
+    --success:#047857; --success-soft:#ECFDF5;
+    --info:#1D4ED8; --info-soft:#EFF4FD;
+    --radius:6px; --radius-lg:12px;
+    --ease:cubic-bezier(.2,.7,.2,1);
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; }
+  body {
+    font-family:'Inter',system-ui,-apple-system,sans-serif;
+    background:var(--paper); color:var(--ink);
+    letter-spacing:-0.011em; font-size:13px; -webkit-font-smoothing:antialiased;
+  }
+  .mono { font-family:'Geist Mono','SF Mono',ui-monospace,monospace; font-feature-settings:'tnum'; }
+  .num { font-family:'Geist Mono','SF Mono',ui-monospace,monospace; font-feature-settings:'tnum'; }
+
+  /* ---- shell ---- */
+  .shell { display:grid; grid-template-columns:256px 1fr; min-height:100vh; }
+  .sidebar { background:var(--paper); border-inline-end:1px solid var(--line); padding:18px 14px; }
+  .brand { display:flex; align-items:center; gap:10px; padding:6px 8px 14px; }
+  .brand-mark { width:26px; height:26px; border-radius:7px; background:var(--ink); color:var(--paper); display:grid; place-items:center; font-weight:700; font-size:13px; }
+  .brand-name { font-weight:700; letter-spacing:-0.02em; }
+  .role-pill { margin:4px 8px 16px; display:inline-flex; align-items:center; gap:7px; background:var(--paper-2); border:1px solid var(--line); border-radius:999px; padding:4px 10px; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-3); }
+  .role-pill .dot { width:6px; height:6px; border-radius:999px; background:var(--gold); }
+  .nav-group { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.12em; color:var(--ink-4); padding:14px 10px 6px; }
+  .nav-item { display:flex; align-items:center; gap:11px; padding:8px 10px; border-radius:8px; color:var(--ink-2); font-weight:500; cursor:pointer; transition:all .14s var(--ease); position:relative; }
+  .nav-item:hover { background:var(--paper-2); }
+  .nav-item.active { background:var(--ink); color:var(--paper); }
+  .nav-item.active::before { content:""; position:absolute; inset-inline-start:-14px; top:8px; bottom:8px; width:3px; border-radius:0 3px 3px 0; background:var(--crimson); }
+  .nav-ico { width:16px; height:16px; opacity:.85; }
+  .count-badge { margin-inline-start:auto; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--paper-2); color:var(--ink-3); }
+  .nav-item.active .count-badge { background:rgba(255,255,255,.18); color:var(--paper); }
+
+  /* ---- main ---- */
+  .main { display:flex; flex-direction:column; min-width:0; }
+  .header { height:64px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; padding:0 36px; }
+  .crumbs { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-3); }
+  .crumbs a { color:var(--ink-3); text-decoration:none; }
+  .crumbs a:hover { color:var(--ink); }
+  .crumbs .sep { color:var(--ink-4); }
+  .crumbs .cur { color:var(--ink); font-weight:600; }
+  .header-right { display:flex; align-items:center; gap:10px; }
+  .icon-btn { width:34px; height:34px; border-radius:8px; border:1px solid var(--line-2); background:var(--surface); display:grid; place-items:center; color:var(--ink-3); cursor:pointer; }
+  .lang-pill { border:1px solid var(--line-2); border-radius:999px; padding:5px 12px; font-size:11px; font-weight:600; color:var(--ink-2); background:var(--surface); cursor:pointer; }
+  .avatar { width:34px; height:34px; border-radius:999px; background:var(--gold-soft); color:var(--gold); display:grid; place-items:center; font-weight:700; font-size:12px; }
+
+  .content { padding:0 0 60px; flex:1; }
+
+  /* ---- the key idea: a sticky section bar + sticky filter row ---- */
+  .section-bar { position:sticky; top:0; z-index:20; background:var(--paper); border-bottom:1px solid var(--line); padding:18px 36px 0; }
+  .page-eyebrow { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.11em; color:var(--ink-3); display:flex; align-items:center; gap:8px; }
+  .page-eyebrow::before { content:""; width:18px; height:2px; background:var(--crimson); display:inline-block; }
+  .page-title { font-size:26px; font-weight:700; letter-spacing:-0.024em; margin:6px 0 14px; }
+  .tabs { display:flex; gap:2px; }
+  .tab { padding:10px 16px; font-size:13px; font-weight:600; color:var(--ink-3); border-bottom:2px solid transparent; cursor:pointer; transition:all .16s var(--ease); display:flex; align-items:center; gap:8px; }
+  .tab:hover { color:var(--ink-2); }
+  .tab.active { color:var(--ink); border-bottom-color:var(--crimson); }
+  .tab .count-badge { background:var(--paper-2); }
+
+  .filter-row { position:sticky; top:139px; z-index:19; background:var(--paper-2); border-bottom:1px solid var(--line); padding:10px 36px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .seg { display:inline-flex; background:var(--paper); border:1px solid var(--line); border-radius:var(--radius); padding:2px; }
+  .seg button { border:0; background:transparent; padding:6px 13px; font-size:12px; font-weight:600; color:var(--ink-3); border-radius:4px; cursor:pointer; font-family:inherit; }
+  .seg button.active { background:var(--surface); color:var(--ink); box-shadow:0 1px 2px rgba(10,18,48,.06); }
+  .filter-input { background:var(--surface); border:1px solid var(--line-2); border-radius:var(--radius); padding:7px 11px; font-size:12px; font-family:inherit; color:var(--ink); }
+  .filter-label { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--ink-3); }
+  .toggle { display:inline-flex; align-items:center; gap:8px; font-size:12px; font-weight:500; color:var(--ink-2); cursor:pointer; }
+  .filter-spacer { margin-inline-start:auto; }
+  .btn { border:1px solid var(--line-2); background:var(--surface); color:var(--ink-2); border-radius:var(--radius); padding:7px 13px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:7px; font-family:inherit; transition:all .16s var(--ease); }
+  .btn:hover { background:var(--paper-2); }
+  .btn-primary { background:var(--crimson); border-color:var(--crimson); color:#fff; }
+  .btn-primary:hover { background:var(--crimson-dark); }
+
+  .pad { padding:24px 36px; }
+
+  /* ---- kpi strip ---- */
+  .kpi-strip { display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; }
+  .kpi { background:var(--surface); padding:16px 18px; transition:background .2s var(--ease); cursor:pointer; }
+  .kpi:hover { background:var(--paper); }
+  .kpi.ink { background:var(--ink); }
+  .kpi-label { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:var(--ink-3); }
+  .kpi.ink .kpi-label { color:rgba(253,252,248,.6); }
+  .kpi-value { font-size:28px; font-weight:700; letter-spacing:-0.02em; margin-top:6px; }
+  .kpi.ink .kpi-value { color:var(--paper); }
+  .kpi-unit { font-size:13px; color:var(--ink-3); font-weight:500; }
+  .kpi.ink .kpi-unit { color:rgba(253,252,248,.5); }
+  .kpi-trend { font-size:11px; font-weight:600; margin-top:6px; display:flex; align-items:center; gap:4px; }
+  .up { color:var(--success); } .down { color:var(--crimson); }
+  .kpi.ink .up { color:#34D399; } .kpi.ink .down { color:#FCA5A5; }
+
+  /* ---- panels ---- */
+  .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; }
+  .panel-head { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; }
+  .panel-title { font-size:13px; font-weight:600; letter-spacing:-0.01em; }
+  .panel-link { font-size:11px; font-weight:600; color:var(--crimson); cursor:pointer; }
+
+  table { width:100%; border-collapse:collapse; }
+  thead th { background:var(--paper-2); font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:var(--ink-3); padding:11px 20px; text-align:start; }
+  thead th.num { text-align:end; }
+  tbody td { padding:12px 20px; border-top:1px solid var(--line); font-size:13px; }
+  tbody td.num { text-align:end; }
+  tbody tr { cursor:pointer; transition:background .14s var(--ease); }
+  tbody tr:hover { background:var(--paper); }
+  tfoot td { background:var(--paper-2); font-weight:600; padding:12px 20px; border-top:1px solid var(--line-2); }
+  tfoot td.num { text-align:end; }
+  .link-name { color:var(--ink); font-weight:500; }
+  tbody tr:hover .link-name { color:var(--crimson); }
+
+  .status-pill { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; padding:3px 9px; border-radius:999px; }
+  .status-pill::before { content:""; width:6px; height:6px; border-radius:999px; }
+  .pill-locked { background:var(--success-soft); color:var(--success); } .pill-locked::before { background:var(--success); }
+  .pill-voided { background:var(--crimson-soft); color:var(--crimson); } .pill-voided::before { background:var(--crimson); }
+  .chip { font-size:10px; font-weight:600; padding:2px 7px; border-radius:4px; background:var(--paper-2); color:var(--ink-3); }
+  .chip-dye { background:var(--info-soft); color:var(--info); }
+
+  .toplist li { list-style:none; }
+  .toplist ul { margin:0; padding:0; }
+  .toprow { display:flex; align-items:center; justify-content:space-between; padding:10px 20px; border-top:1px solid var(--line); cursor:pointer; transition:background .14s var(--ease); }
+  .toprow:hover { background:var(--paper); }
+  .toprow:first-child { border-top:0; }
+  .toprow .rank { width:18px; height:18px; border-radius:999px; background:var(--paper-2); color:var(--ink-3); display:grid; place-items:center; font-size:10px; font-weight:700; margin-inline-end:10px; }
+  .toprow .nm { display:flex; align-items:center; flex:1; min-width:0; }
+  .toprow .nm span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  .note { margin:0 36px 24px; padding:12px 16px; background:var(--info-soft); border:1px solid #C7DBFB; border-radius:var(--radius); font-size:12px; color:var(--info); }
+  .mockup-tag { position:fixed; bottom:14px; inset-inline-end:14px; background:var(--ink); color:var(--paper); font-size:11px; font-weight:600; padding:7px 13px; border-radius:999px; z-index:50; box-shadow:0 6px 16px rgba(10,18,48,.2); }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">I</div><div class="brand-name">IDC</div></div>
+    <div class="role-pill"><span class="dot"></span> Accounting</div>
+    <div class="nav-group">Operations</div>
+    <div class="nav-item"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg> Reception</div>
+    <div class="nav-item"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/></svg> Patients <span class="count-badge">347</span></div>
+    <div class="nav-item"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 7h-9M14 17H5M17 17a3 3 0 100-6 3 3 0 000 6zM7 13a3 3 0 100-6 3 3 0 000 6z"/></svg> Inventory</div>
+    <div class="nav-group">Finance</div>
+    <div class="nav-item active"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg> Accounting</div>
+    <div class="nav-group">Admin</div>
+    <div class="nav-item"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg> Audit log</div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main">
+    <header class="header">
+      <nav class="crumbs">
+        <a>Accounting</a><span class="sep">/</span><span class="cur">Visits</span>
+        <span class="sep">/</span><span class="cur">CT &middot; Ultrasound</span>
+      </nav>
+      <div class="header-right">
+        <div class="icon-btn">?</div>
+        <div class="lang-pill">EN</div>
+        <div class="avatar">AK</div>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- The pattern: ONE sticky section bar with sub-tabs that owns all of accounting. -->
+      <div class="section-bar">
+        <div class="page-eyebrow">Wednesday &middot; 12 May 2026 &middot; Accounting</div>
+        <div class="page-title">Finance Workspace</div>
+        <div class="tabs">
+          <div class="tab" data-tab="dash">Dashboard</div>
+          <div class="tab active" data-tab="visits">Visits <span class="count-badge">1,284</span></div>
+          <div class="tab" data-tab="doctors">Doctors <span class="count-badge">38</span></div>
+          <div class="tab" data-tab="operators">Operators <span class="count-badge">9</span></div>
+          <div class="tab" data-tab="close">Daily Close</div>
+        </div>
+      </div>
+
+      <!-- Sticky filter row shared by every tab -->
+      <div class="filter-row">
+        <span class="filter-label">Range</span>
+        <div class="seg">
+          <button>Today</button><button class="active">Week</button><button>Month</button><button>Custom</button>
+        </div>
+        <input class="filter-input" type="date" value="2026-05-05" />
+        <span style="color:var(--ink-4)">&rarr;</span>
+        <input class="filter-input" type="date" value="2026-05-12" />
+        <label class="toggle"><input type="checkbox" /> Include voided</label>
+        <div class="filter-spacer"></div>
+        <button class="btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg> Export CSV</button>
+      </div>
+
+      <!-- ===== VISITS TAB (active) ===== -->
+      <section data-panel="visits" class="pad">
+        <!-- Group-by control row -->
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+          <span class="filter-label">Group by</span>
+          <div class="seg">
+            <button class="active">Check type</button><button>Doctor</button><button>Operator</button><button>Day</button><button>None (rows)</button>
+          </div>
+        </div>
+
+        <!-- when grouped by check type: each row drills into that check's visits -->
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-title">By check type</span>
+            <span class="panel-link">38 doctors &middot; 1,284 visits</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Check type</th><th class="num">Visits</th><th class="num">Revenue</th>
+                <th class="num">Doctor cut</th><th class="num">Operator cut</th><th class="num">Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><span class="link-name">Ultrasound</span></td><td class="num">412</td><td class="num">20,600,000</td><td class="num">6,180,000</td><td class="num">2,060,000</td><td class="num">12,360,000</td></tr>
+              <tr><td><span class="link-name">CT scan</span></td><td class="num">288</td><td class="num">28,800,000</td><td class="num">11,520,000</td><td class="num">1,440,000</td><td class="num">15,840,000</td></tr>
+              <tr><td><span class="link-name">X-Ray</span></td><td class="num">331</td><td class="num">9,930,000</td><td class="num">1,986,000</td><td class="num">1,655,000</td><td class="num">6,289,000</td></tr>
+              <tr><td><span class="link-name">MRI</span></td><td class="num">142</td><td class="num">21,300,000</td><td class="num">8,520,000</td><td class="num">710,000</td><td class="num">12,070,000</td></tr>
+              <tr><td><span class="link-name">Echo</span></td><td class="num">111</td><td class="num">5,550,000</td><td class="num">1,665,000</td><td class="num">555,000</td><td class="num">3,330,000</td></tr>
+            </tbody>
+            <tfoot>
+              <tr><td>Totals</td><td class="num">1,284</td><td class="num">86,180,000</td><td class="num">29,871,000</td><td class="num">6,420,000</td><td class="num">49,889,000</td></tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <!-- drill target preview: the selected check's individual visits -->
+        <div class="panel" style="margin-top:16px;">
+          <div class="panel-head">
+            <span class="panel-title">Ultrasound &middot; visits <span class="chip" style="margin-inline-start:6px;">drill-in</span></span>
+            <span class="panel-link">View all 412 &rarr;</span>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Date</th><th>Patient</th><th>Subtype</th><th>Doctor</th><th>Operator</th><th></th><th class="num">Price</th><th class="num">Doc cut</th><th class="num">Net</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="mono">05-12</td><td class="link-name">Asma Karim</td><td style="color:var(--ink-3)">Abdominal</td><td>Dr. Sarah Hanna</td><td>Op One</td><td><span class="chip chip-dye">Dye</span></td><td class="num">50,000</td><td class="num">15,000</td><td class="num">30,000</td><td><span class="status-pill pill-locked">Locked</span></td></tr>
+              <tr><td class="mono">05-12</td><td class="link-name">Omar Faris</td><td style="color:var(--ink-3)">Pelvic</td><td style="color:var(--ink-4)">Internal</td><td>Op Two</td><td></td><td class="num">50,000</td><td class="num">20,000</td><td class="num">25,000</td><td><span class="status-pill pill-locked">Locked</span></td></tr>
+              <tr><td class="mono">05-11</td><td class="link-name">Layla Hashim</td><td style="color:var(--ink-3)">Thyroid</td><td>Dr. Sarah Hanna</td><td>Op One</td><td></td><td class="num">50,000</td><td class="num">15,000</td><td class="num">30,000</td><td><span class="status-pill pill-voided">Voided</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ===== DASHBOARD TAB (hidden preview) ===== -->
+      <section data-panel="dash" class="pad hidden">
+        <div class="kpi-strip">
+          <div class="kpi"><div class="kpi-label">Revenue</div><div class="kpi-value">86.2<span class="kpi-unit">M د.ع</span></div><div class="kpi-trend up">&#9650; 14% vs last week</div></div>
+          <div class="kpi"><div class="kpi-label">Doctor cuts</div><div class="kpi-value">29.9<span class="kpi-unit">M</span></div><div class="kpi-trend up">&#9650; 9%</div></div>
+          <div class="kpi"><div class="kpi-label">Operator cuts</div><div class="kpi-value">6.4<span class="kpi-unit">M</span></div><div class="kpi-trend down">&#9660; 3%</div></div>
+          <div class="kpi"><div class="kpi-label">Inventory value</div><div class="kpi-value">4.1<span class="kpi-unit">M</span></div><div class="kpi-trend up">&#9650; 6%</div></div>
+          <div class="kpi ink"><div class="kpi-label">Net</div><div class="kpi-value">49.9<span class="kpi-unit">M</span></div><div class="kpi-trend up">&#9650; 17%</div></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <strong>Proposal A &mdash; Sectioned Workspace.</strong>
+  One sticky <em>section bar</em> with sub-tabs (Dashboard / Visits / Doctors / Operators / Daily Close) owns the whole accounting surface, plus a sticky shared filter row (range + voided + export) that never scrolls away. Drilling stays in-tab: a grouped table row opens its detail panel below; the breadcrumb in the header tracks where you are. Familiar, fast, low-friction &mdash; the filter context is preserved as you move between tabs.
+</div>
+
+<div class="mockup-tag">Proposal A &middot; Sectioned Workspace</div>
+
+<script>
+  // lightweight tab demo so reviewers can click between Visits and Dashboard
+  document.querySelectorAll('.tab').forEach(tab=>{
+    tab.addEventListener('click',()=>{
+      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+      tab.classList.add('active');
+      const id=tab.dataset.tab;
+      document.querySelectorAll('[data-panel]').forEach(p=>{
+        p.classList.toggle('hidden', p.dataset.panel!==id && !(id!=='visits'&&id!=='dash'&&p.dataset.panel==='visits'));
+        if(p.dataset.panel===id) p.classList.remove('hidden');
+        else p.classList.add('hidden');
+      });
+    });
+  });
+  document.querySelectorAll('.seg button').forEach(b=>{
+    b.addEventListener('click',()=>{ b.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); });
+  });
+</script>
+</body>
+</html>

@@ -28,14 +28,8 @@ export function AuthBootstrap() {
 
     const applyUser = async (user: Awaited<ReturnType<typeof invoke<"auth_current_user">>>) => {
       if (cancelled) return
-      if (!user) {
-        // A genuine null is the only signal for "no signed-in user" -> sign
-        // out. An IPC rejection is handled separately below.
-        setAnonymous()
-        return
-      }
-      const role = (user.role as UserRoleLiteral) ?? "receptionist"
-      setAuthenticated({ user, role, mode: "online" })
+      const role = (user!.role as UserRoleLiteral) ?? "receptionist"
+      setAuthenticated({ user: user!, role, mode: "online" })
       // Restore the lock state on reload, otherwise reloading the webview
       // (or a crash-restart) silently bypasses the lock screen.
       try {
@@ -46,22 +40,43 @@ export function AuthBootstrap() {
       }
     }
 
-    invoke("auth_current_user")
-      .then(applyUser)
-      .catch((err) => {
-        // A failed `auth_current_user` is NOT the same as "no user": the Rust
-        // state may not be ready yet during bootstrap. Retry once before
-        // falling back to anonymous so a transient race doesn't silently sign
-        // the user out into the login screen.
-        console.warn("auth_current_user failed; retrying once", err)
-        if (cancelled) return
-        invoke("auth_current_user")
-          .then(applyUser)
-          .catch((err2) => {
-            console.error("auth_current_user failed after retry; treating as anonymous", err2)
-            if (!cancelled) setAnonymous()
-          })
-      })
+    // The Rust `bootstrap()` runs concurrently with the webview load and
+    // restores a persisted session near its end. So a `null` from the very
+    // first probe may just mean "restore hasn't run yet", not "no user". Poll a
+    // few times over a short window before settling anonymous; the Rust
+    // `auth:changed` emit (below) is the other half -- whichever fires first
+    // wins, and `cancelled` guards against a late poll clobbering a real login.
+    const PROBE_ATTEMPTS = 8
+    const PROBE_INTERVAL_MS = 250
+    const probeOnce = (attempt: number): void => {
+      if (cancelled) return
+      invoke("auth_current_user")
+        .then((user) => {
+          if (cancelled) return
+          if (user) {
+            void applyUser(user)
+            return
+          }
+          // No user yet. Keep probing while bootstrap may still be restoring.
+          if (attempt + 1 < PROBE_ATTEMPTS) {
+            setTimeout(() => probeOnce(attempt + 1), PROBE_INTERVAL_MS)
+          } else {
+            setAnonymous()
+          }
+        })
+        .catch((err) => {
+          // An IPC rejection means the Rust state is not ready -- retry within
+          // the same bounded window rather than signing the user out.
+          if (cancelled) return
+          if (attempt + 1 < PROBE_ATTEMPTS) {
+            setTimeout(() => probeOnce(attempt + 1), PROBE_INTERVAL_MS)
+          } else {
+            console.error("auth_current_user failed after retries; treating as anonymous", err)
+            setAnonymous()
+          }
+        })
+    }
+    probeOnce(0)
 
     listenEvent<string>("auth:changed", (payload) => {
       // Rust emits the real LoginMode ("online" | "offline"); honour it
@@ -93,6 +108,13 @@ export function AuthBootstrap() {
 
     listenEvent<unknown>("auth:session_expired", () => {
       setExpired()
+      // The refresh token is dead. Wipe the persisted session so the next
+      // launch starts clean instead of re-restoring a doomed session and
+      // flashing an authenticated state before the refresh fails again. This
+      // is NOT a user-initiated logout, so it writes no logout audit row.
+      void invoke("auth_clear_session").catch((err) => {
+        console.warn("auth_clear_session after expiry failed", err)
+      })
     }).then((u) => unsubs.push(u))
 
     return () => {

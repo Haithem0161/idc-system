@@ -6,13 +6,16 @@ import {
   ClipboardList,
   Stethoscope,
   Package,
-  FileText,
   ShieldCheck,
   Lock,
   LogOut,
   Microscope,
   HardHat,
   UsersRound,
+  LayoutDashboard,
+  Activity,
+  Boxes,
+  CalendarCheck,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -81,19 +84,46 @@ export function Sidebar() {
       ],
     },
     {
-      key: "records",
+      key: "accounting",
       items: [
         {
-          key: "accounting",
+          key: "dashboard",
           to: "/accounting",
-          icon: FileText,
+          icon: LayoutDashboard,
+          enabled: role === "accountant" || role === "superadmin",
+          // Exact match: the dashboard is the index of /accounting, so it must
+          // not stay lit when an explorer child (/accounting/explore/...) is active.
+          end: true,
+        },
+        {
+          key: "acc_visits",
+          to: "/accounting/explore/visits",
+          icon: Activity,
           enabled: role === "accountant" || role === "superadmin",
         },
         {
-          key: "audit",
-          to: "/audit",
-          icon: ShieldCheck,
-          enabled: role === "superadmin",
+          key: "acc_doctors",
+          to: "/accounting/explore/doctors",
+          icon: Stethoscope,
+          enabled: role === "accountant" || role === "superadmin",
+        },
+        {
+          key: "acc_operators",
+          to: "/accounting/explore/operators",
+          icon: Users,
+          enabled: role === "accountant" || role === "superadmin",
+        },
+        {
+          key: "acc_checks",
+          to: "/accounting/explore/checks",
+          icon: Boxes,
+          enabled: role === "accountant" || role === "superadmin",
+        },
+        {
+          key: "daily_close",
+          to: "/accounting/daily-close",
+          icon: CalendarCheck,
+          enabled: role === "accountant" || role === "superadmin",
         },
       ],
     },
@@ -105,6 +135,7 @@ export function Sidebar() {
         { key: "doctors", to: "/admin/doctors", icon: Stethoscope, enabled: role === "superadmin" },
         { key: "operators", to: "/admin/operators", icon: HardHat, enabled: role === "superadmin" },
         { key: "inventory", to: "/admin/inventory", icon: Package, enabled: role === "superadmin" },
+        { key: "audit", to: "/audit", icon: ShieldCheck, enabled: role === "superadmin" },
         { key: "settings", to: "/admin/settings", icon: Settings, enabled: role === "superadmin" },
       ],
     },

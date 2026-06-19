@@ -176,9 +176,13 @@ pub async fn auth_login(
     // is rejected here: we clear the half-established session and fail closed.
     if let Err(e) = verify_login_token(&app, &state).await {
         state.clear_auth().await;
+        clear_persisted_session(&app);
         let _ = app.emit("auth:changed", "logout");
         return Err(e);
     }
+    // Persist the session so it survives an app restart (offline-first: the
+    // user should not have to log in every launch).
+    persist_session(&app, &state).await;
     let _ = app.emit("auth:changed", &result.mode);
     Ok(result)
 }
@@ -199,11 +203,186 @@ async fn verify_login_token(app: &AppHandle, state: &AppState) -> AppResult<()> 
     verify_access_token_against_pin(Some(&app_data_dir), &token)
 }
 
+/// Persist the current in-memory session to `<app_data_dir>/session.json` so it
+/// survives an app restart. Called after a successful login and after every
+/// refresh rotation. A session WITHOUT a refresh token (a purely offline login
+/// that never reached the server) is not persisted -- there is nothing to
+/// rotate later, so re-login on next launch is the only safe path. Failures are
+/// non-fatal: a session that cannot be written to disk still works for the
+/// current run; we log and continue rather than fail the login.
+async fn persist_session(app: &AppHandle, state: &AppState) {
+    use crate::domains::auth::infrastructure::{save_session, PersistedSession};
+
+    let Some(refresh_token) = state.get_refresh_token().await else {
+        return;
+    };
+    let Some(user) = state.get_current_user().await else {
+        return;
+    };
+    let app_data_dir = match app.path().app_data_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(error = %e, "session persist skipped: no app_data_dir");
+            return;
+        }
+    };
+    let session = PersistedSession::new(
+        refresh_token,
+        state.get_current_token().await,
+        state.get_token_expires_at().await,
+        state.is_locked().await,
+        user,
+    );
+    if let Err(e) = save_session(&app_data_dir, &session) {
+        tracing::warn!(error = %e, "session persist failed; session not durable across restart");
+    }
+}
+
+/// Public wrapper around [`persist_session`] for non-command callers (the boot
+/// background-refresh and the sync 401 refresh hook in `lib.rs`).
+pub async fn persist_session_public(app: &AppHandle, state: &AppState) {
+    persist_session(app, state).await;
+}
+
+/// Public wrapper around [`clear_persisted_session`] for non-command callers
+/// (the sync 401 refresh hook in `lib.rs` clears the file when a rotation
+/// returns a forged token).
+pub fn clear_persisted_session_public(app: &AppHandle) {
+    clear_persisted_session(app);
+}
+
+/// Remove the persisted session file. Called on logout and whenever auth is
+/// cleared. Failures are logged, never fatal.
+fn clear_persisted_session(app: &AppHandle) {
+    use crate::domains::auth::infrastructure::clear_session;
+    match app.path().app_data_dir() {
+        Ok(dir) => {
+            if let Err(e) = clear_session(&dir) {
+                tracing::warn!(error = %e, "clearing persisted session failed");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "clear persisted session skipped: no app_data_dir"),
+    }
+}
+
+/// Outcome of a boot-time session restore, surfaced for logging/telemetry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoreOutcome {
+    /// No session file -- a normal first login is required.
+    None,
+    /// Restored with a still-valid access token (can sync immediately).
+    RestoredOnline,
+    /// Restored identity from an expired-but-genuine token / persisted context;
+    /// a background refresh will obtain a fresh access token when reachable.
+    RestoredOffline,
+    /// A session file existed but was hostile (forged access token) -- cleared.
+    Rejected,
+}
+
+/// Restore a persisted session into `AppState` on app launch so the user is not
+/// forced to log in every restart (offline-first). Pure restore: it never
+/// blocks on the network. Trust model:
+///
+/// 1. No session file -> `None` (login required).
+/// 2. Access JWT present + verifies (signature AND not expired) -> restore with
+///    that token; sync can run at once. `RestoredOnline`.
+/// 3. Access JWT present, expired, but signature is genuinely ours -> restore
+///    identity offline and keep the (stale) token so a background refresh can
+///    present it for rotation. `RestoredOffline`.
+/// 4. Access JWT present but signature is FORGED -> the file is hostile; clear
+///    it and stay anonymous. `Rejected`.
+/// 5. No access JWT (offline-only login) but a refresh token + user context
+///    exist -> trust the Rust-only file for an offline best-effort identity.
+///    `RestoredOffline`.
+///
+/// The refresh token is always loaded into state so `auth_refresh` can rotate
+/// it on reconnect. Returns the outcome; the caller may spawn a background
+/// refresh when the result is offline.
+pub async fn restore_session_impl(app: &AppHandle, state: &AppState) -> AppResult<RestoreOutcome> {
+    use crate::domains::auth::infrastructure::jwt_verifier::read_pinned_pem;
+    use crate::domains::auth::infrastructure::{load_session, JwtVerifier};
+
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Internal(format!("app_data_dir: {e}")))?;
+
+    let Some(session) = load_session(&app_data_dir)? else {
+        return Ok(RestoreOutcome::None);
+    };
+
+    // If we have both a pinned key and an access token, the token's signature
+    // is the authority on whether to trust the file's identity.
+    let pinned = read_pinned_pem(&app_data_dir)?;
+    let mut online = false;
+    if let (Some(pem), Some(token)) = (pinned.as_ref(), session.access_token.as_ref()) {
+        let verifier = JwtVerifier::from_pem_bytes(pem)?;
+        match verifier.verify(token) {
+            // Valid + unexpired: usable for sync straight away.
+            Ok(_) => {
+                online = true;
+            }
+            Err(_) => {
+                // Expired? Genuine signature still re-establishes identity.
+                if verifier.verify_signature_ignoring_exp(token).is_err() {
+                    // Forged signature -> hostile file. Refuse and wipe.
+                    tracing::warn!(
+                        "persisted session access token failed signature check; rejecting"
+                    );
+                    let _ = clear_session_dir(&app_data_dir);
+                    return Ok(RestoreOutcome::Rejected);
+                }
+            }
+        }
+    }
+
+    // Establish the in-memory session.
+    state.set_current_user(session.user.clone()).await;
+    state
+        .set_refresh_token(Some(session.refresh_token.clone()))
+        .await;
+    if let (Some(token), Some(exp)) = (session.access_token.clone(), session.access_expires_at) {
+        // Hand the access token to the sync engine. Even a stale one lets the
+        // engine present it for the 401-refresh rotation.
+        state.set_current_token(token, exp).await;
+    }
+    // Restore the lock state: restarting the app must NOT bypass a session that
+    // was idle-locked before exit. The user re-enters their password to unlock.
+    if session.locked {
+        state.set_locked(true).await;
+    }
+
+    Ok(if online {
+        RestoreOutcome::RestoredOnline
+    } else {
+        RestoreOutcome::RestoredOffline
+    })
+}
+
+fn clear_session_dir(dir: &std::path::Path) -> AppResult<()> {
+    crate::domains::auth::infrastructure::clear_session(dir)
+}
+
 #[tauri::command]
 #[instrument(skip(state, app))]
 pub async fn auth_logout(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     auth_logout_impl(&state).await?;
+    clear_persisted_session(&app);
     let _ = app.emit("auth:changed", "logout");
+    Ok(())
+}
+
+/// Clear the session WITHOUT writing a logout audit row. Called by the frontend
+/// when the sync engine reports `auth:session_expired` (the refresh token is
+/// dead). Unlike `auth_logout`, this is not a user-initiated sign-out, so it
+/// must not emit a logout audit event -- it just wipes the in-memory session
+/// and the persisted file so the next launch starts clean instead of flashing a
+/// doomed authenticated state and re-failing the refresh every time.
+#[tauri::command]
+#[instrument(skip(state, app))]
+pub async fn auth_clear_session(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    state.clear_auth().await;
+    clear_persisted_session(&app);
     Ok(())
 }
 
@@ -217,6 +396,9 @@ pub async fn auth_current_user(state: State<'_, AppState>) -> AppResult<Option<U
 #[instrument(skip(state, app))]
 pub async fn auth_lock(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     auth_lock_impl(&state).await?;
+    // Re-persist so a restart restores the LOCKED state instead of bypassing
+    // the lock screen. No-op for sessions that were never persisted.
+    persist_session(&app, &state).await;
     let _ = app.emit("auth:lock", ());
     Ok(())
 }
@@ -229,6 +411,8 @@ pub async fn auth_unlock(
     args: UnlockArgs,
 ) -> AppResult<()> {
     auth_unlock_impl(&state, args).await?;
+    // Re-persist the now-unlocked state.
+    persist_session(&app, &state).await;
     let _ = app.emit("auth:unlock", ());
     Ok(())
 }
@@ -630,9 +814,13 @@ pub async fn auth_refresh(
     // session is cleared.
     if let Err(e) = verify_login_token(&app, &state).await {
         state.clear_auth().await;
+        clear_persisted_session(&app);
         let _ = app.emit("auth:changed", "logout");
         return Err(e);
     }
+    // Re-persist with the rotated refresh + access tokens so the on-disk
+    // session never holds a stale (already-rotated, now-invalid) refresh token.
+    persist_session(&app, &state).await;
     let _ = app.emit("auth:refreshed", &event);
     Ok(event)
 }

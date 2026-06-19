@@ -33,12 +33,8 @@ import InventoryListPage from "@/pages/inventory/list"
 import InventoryItemDetailOpsPage from "@/pages/inventory/detail"
 import InventoryAdjustPage from "@/pages/inventory/adjust"
 import AccountingDashboardPage from "@/pages/accounting/dashboard"
-import AccountingVisitsPage from "@/pages/accounting/visits"
+import AccountingExplorerPage from "@/pages/accounting/explorer"
 import AccountingVisitDrillPage from "@/pages/accounting/visit-drill"
-import AccountingDoctorsPage from "@/pages/accounting/doctors"
-import AccountingDoctorDetailPage from "@/pages/accounting/doctor-detail"
-import AccountingOperatorsPage from "@/pages/accounting/operators"
-import AccountingOperatorDetailPage from "@/pages/accounting/operator-detail"
 import AccountingDailyClosePage from "@/pages/accounting/daily-close"
 import AuditPage from "@/pages/audit"
 import SyncConflictsPage from "@/pages/sync/conflicts"
@@ -115,15 +111,24 @@ export const router = createBrowserRouter([
                 <Outlet />
               </RequireRole>
             ),
+            handle: { crumb: () => "Accounting" },
             children: [
               { index: true, Component: AccountingDashboardPage },
-              { path: "visits", Component: AccountingVisitsPage },
+              {
+                path: "explore",
+                handle: { crumb: () => "Explorer" },
+                children: [
+                  { index: true, Component: AccountingExplorerPage },
+                  { path: ":entity", Component: AccountingExplorerPage },
+                  { path: ":entity/:id", Component: AccountingExplorerPage },
+                ],
+              },
               { path: "visits/:id", Component: AccountingVisitDrillPage },
-              { path: "doctors", Component: AccountingDoctorsPage },
-              { path: "doctors/:id", Component: AccountingDoctorDetailPage },
-              { path: "operators", Component: AccountingOperatorsPage },
-              { path: "operators/:id", Component: AccountingOperatorDetailPage },
-              { path: "daily-close", Component: AccountingDailyClosePage },
+              {
+                path: "daily-close",
+                Component: AccountingDailyClosePage,
+                handle: { crumb: () => "Daily close" },
+              },
             ],
           },
           {

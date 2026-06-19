@@ -126,6 +126,23 @@ impl JwtVerifier {
             .map_err(|_| AppError::NotAuthenticated)
     }
 
+    /// Verify a JWT's signature + algorithm but TOLERATE an expired `exp`.
+    /// Returns the claims when the token was genuinely signed by the pinned
+    /// key (regardless of expiry), else `NotAuthenticated`.
+    ///
+    /// Used only by session restore: on an app restart the cached access token
+    /// is often expired, but its signature still PROVES our server issued it,
+    /// which is enough to re-establish an offline best-effort identity while a
+    /// background refresh runs. All the alg-confusion / wrong-signature
+    /// defenses of `verify` still apply; only the `exp` clock check is relaxed.
+    pub fn verify_signature_ignoring_exp(&self, token: &str) -> AppResult<IdcAuthClaims> {
+        let mut validation = self.validation.clone();
+        validation.validate_exp = false;
+        decode::<IdcAuthClaims>(token, &self.decoding_key, &validation)
+            .map(|data| data.claims)
+            .map_err(|_| AppError::NotAuthenticated)
+    }
+
     /// Record of when a JWT was issued (helper for callers that want to
     /// surface the "last verified at" timestamp to the UI without
     /// exposing the raw `iat`).
@@ -341,6 +358,63 @@ mod tests {
         .unwrap();
         let err = v.verify(&token).expect_err("expired token must reject");
         assert!(matches!(err, AppError::NotAuthenticated));
+    }
+
+    fn mint_expired_token(private_pem: &[u8]) -> String {
+        let claims = IdcAuthClaims {
+            sub: "user-1".into(),
+            email: "test@example.com".into(),
+            entity_id: "tenant-1".into(),
+            role: "accountant".into(),
+            status: "active".into(),
+            is_superadmin: false,
+            iat: chrono::Utc::now().timestamp() - 7200,
+            exp: chrono::Utc::now().timestamp() - 3600, // expired an hour ago
+        };
+        let mut header = Header::new(Algorithm::RS256);
+        header.typ = Some("JWT".into());
+        encode(
+            &header,
+            &claims,
+            &EncodingKey::from_rsa_pem(private_pem).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn verify_signature_ignoring_exp_accepts_expired_but_genuine_token() {
+        let v = JwtVerifier::from_pem_bytes(TEST_PUBLIC_PEM).unwrap();
+        let token = mint_expired_token(TEST_PRIVATE_PEM);
+        // The strict verify rejects it (expired)...
+        assert!(matches!(v.verify(&token), Err(AppError::NotAuthenticated)));
+        // ...but the exp-tolerant variant accepts it because the signature is
+        // genuine (our server issued it).
+        let claims = v
+            .verify_signature_ignoring_exp(&token)
+            .expect("expired-but-genuine token accepted for restore");
+        assert_eq!(claims.sub, "user-1");
+        assert_eq!(claims.entity_id, "tenant-1");
+    }
+
+    #[test]
+    fn verify_signature_ignoring_exp_still_rejects_foreign_signature() {
+        // Even when ignoring exp, a token signed by a DIFFERENT key is rejected.
+        let v = JwtVerifier::from_pem_bytes(TEST_PUBLIC_PEM).unwrap();
+        let token = mint_expired_token(OTHER_PRIVATE_PEM);
+        assert!(matches!(
+            v.verify_signature_ignoring_exp(&token),
+            Err(AppError::NotAuthenticated)
+        ));
+    }
+
+    #[test]
+    fn verify_signature_ignoring_exp_still_rejects_alg_none() {
+        let v = JwtVerifier::from_pem_bytes(TEST_PUBLIC_PEM).unwrap();
+        let token = craft_unsigned_alg_none_token();
+        assert!(matches!(
+            v.verify_signature_ignoring_exp(&token),
+            Err(AppError::NotAuthenticated)
+        ));
     }
 
     #[test]

@@ -59,21 +59,25 @@ export default function AccountingDailyClosePage () {
             {t("accounting.daily_close.title", { defaultValue: "Daily close" })}
           </h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="input h-9 px-2 py-1 text-[12px]"
+            className="input h-9 shrink-0 px-2 py-1 text-[12px]"
           />
-          <button type="button" onClick={() => setDate(yesterdayLocal())} className="btn btn-ghost btn-sm">
+          <button
+            type="button"
+            onClick={() => setDate(yesterdayLocal())}
+            className="btn btn-ghost btn-sm shrink-0 whitespace-nowrap"
+          >
             {t("accounting.daily_close.yesterday", { defaultValue: "Yesterday" })}
           </button>
           <button
             type="button"
             onClick={() => rerun.mutate({ date })}
             disabled={rerun.isPending}
-            className="btn btn-ink btn-sm"
+            className="btn btn-ink btn-sm shrink-0 whitespace-nowrap"
           >
             {rerun.isPending
               ? t("accounting.daily_close.running", { defaultValue: "Running…" })
@@ -85,7 +89,7 @@ export default function AccountingDailyClosePage () {
             title={t("accounting.daily_close.sign_disabled_tooltip", {
               defaultValue: "Available in v0.2",
             })}
-            className="btn btn-primary btn-sm opacity-50"
+            className="btn btn-primary btn-sm shrink-0 whitespace-nowrap opacity-50"
           >
             {t("accounting.daily_close.sign", { defaultValue: "Sign and freeze" })}
           </button>
@@ -93,7 +97,7 @@ export default function AccountingDailyClosePage () {
             type="button"
             onClick={onExport}
             disabled={!close.data || exportPdf.isPending}
-            className="btn btn-ghost btn-sm"
+            className="btn btn-ghost btn-sm shrink-0 whitespace-nowrap"
           >
             {exportPdf.isPending
               ? t("accounting.actions.exporting", { defaultValue: "Exporting…" })
