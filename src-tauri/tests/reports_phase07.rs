@@ -822,15 +822,18 @@ async fn daily_close_pdf_path_embeds_target_date_and_input_hash_prefix() {
     );
     let path = dir.join(&filename);
     f.reports_service
-        .render_daily_close_pdf(&close, &path)
+        .render_daily_close_pdf(&close, Some("IDC Imaging Center"), &path)
         .unwrap();
     assert!(path.exists());
-    let body = std::fs::read_to_string(&path).unwrap();
-    assert!(body.contains(&close.input_hash));
-    assert!(body.contains("DAILY CLOSE"));
-    if close.provisional {
-        assert!(body.contains("PROVISIONAL"));
-    }
+    // The export is a real PDF now: assert the binary magic + EOF marker rather
+    // than text content (the figures live in the PDF's content stream).
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(bytes.starts_with(b"%PDF-"), "export is not a real PDF");
+    assert!(
+        bytes.windows(5).any(|w| w == b"%%EOF"),
+        "PDF missing EOF marker"
+    );
+    assert!(bytes.len() > 800, "PDF unexpectedly small");
 }
 
 /// §7.10: voided visits do NOT subtract from `total_revenue_iqd` but DO

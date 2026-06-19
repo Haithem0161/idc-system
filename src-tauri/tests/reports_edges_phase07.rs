@@ -550,7 +550,9 @@ async fn s6_5_pdf_render_atomic_rename_leaves_no_tmp_file() {
     let dir = std::env::temp_dir().join(format!("idc-pdf-tmp-{}", Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("daily-close.pdf");
-    r.reports.render_daily_close_pdf(&close, &path).unwrap();
+    r.reports
+        .render_daily_close_pdf(&close, None, &path)
+        .unwrap();
     let entries: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().to_string())

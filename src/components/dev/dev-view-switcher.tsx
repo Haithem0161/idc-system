@@ -16,9 +16,12 @@ import { seedCatalog } from "@/features/dev/dev-seed"
 
 // Dev-only role-account switcher. Lets a developer flip between the three role
 // surfaces by performing a REAL re-login as a per-role dev account (see
-// features/dev/dev-accounts.ts). Rendered only in dev builds AND only for a
-// superadmin (who can provision the accounts). It is intentionally NOT
-// internationalized -- it never ships to a clinic.
+// features/dev/dev-accounts.ts). Rendered only in dev builds, for ANY signed-in
+// role -- a developer logged in as reception or accounting can flip back just as
+// easily as a superadmin. Account provisioning (ensureDevAccounts) is
+// superadmin-only, so we only run it while we are superadmin and otherwise rely
+// on the accounts already existing. It is intentionally NOT internationalized --
+// it never ships to a clinic.
 //
 // Role dot colors mirror the design system's role coding
 // (.claude/rules/design-system.md §1.5): receptionist=info, accountant=gold,
@@ -45,10 +48,10 @@ export function DevViewSwitcher () {
   const [seeding, setSeeding] = useState(false)
   const [seedNote, setSeedNote] = useState<string | null>(null)
 
-  // Only in dev, only for a superadmin (the one who can create the other
-  // accounts). A non-superadmin dev session simply doesn't see the switcher.
+  // Only in dev, and only once a session exists. Visible to every role so a
+  // developer can flip between surfaces from any account, not just superadmin.
   if (!import.meta.env.DEV) return null
-  if (state.kind !== "authenticated" || state.role !== "superadmin") return null
+  if (state.kind !== "authenticated") return null
 
   const currentRole = state.role
 
@@ -58,9 +61,12 @@ export function DevViewSwitcher () {
     setBusy(role)
     try {
       // Provision any missing dev accounts WHILE we are still the superadmin
-      // (users_create is superadmin-only). Switching to a non-admin role first
-      // would lose that right, so we always ensure up front.
-      await ensureDevAccounts()
+      // (users_create is superadmin-only). From a non-superadmin session we
+      // can't provision, so we rely on the accounts already existing -- a clean
+      // 401/credential error surfaces below if they don't.
+      if (currentRole === "superadmin") {
+        await ensureDevAccounts()
+      }
       const result = await switchToRole(role)
       // Reflect the new session in the auth store (mirrors useLogin's onSuccess).
       setAuthenticated({
@@ -128,17 +134,23 @@ export function DevViewSwitcher () {
           </button>
         )
       })}
-      <span className="mx-0.5 h-4 w-px bg-line-2" aria-hidden />
-      <button
-        type="button"
-        onClick={() => void handleSeed()}
-        disabled={seeding}
-        title="Dev only: seed catalog (check types, doctors, operators, inventory) via the real IPC"
-        className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold text-ink-3 transition-colors duration-150 hover:bg-surface/60 hover:text-ink disabled:opacity-60"
-      >
-        <Sprout className={cn("h-3.5 w-3.5", seeding && "animate-pulse")} strokeWidth={1.8} />
-        {seeding ? "Seeding" : "Seed"}
-      </button>
+      {/* Seeding drives superadmin-only create commands, so the control is only
+          offered while signed in as superadmin. Other roles keep the switcher. */}
+      {currentRole === "superadmin" ? (
+        <>
+          <span className="mx-0.5 h-4 w-px bg-line-2" aria-hidden />
+          <button
+            type="button"
+            onClick={() => void handleSeed()}
+            disabled={seeding}
+            title="Dev only: seed catalog (check types, doctors, operators, inventory) via the real IPC"
+            className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold text-ink-3 transition-colors duration-150 hover:bg-surface/60 hover:text-ink disabled:opacity-60"
+          >
+            <Sprout className={cn("h-3.5 w-3.5", seeding && "animate-pulse")} strokeWidth={1.8} />
+            {seeding ? "Seeding" : "Seed"}
+          </button>
+        </>
+      ) : null}
       {seedNote ? (
         <span className="ms-1 max-w-[160px] truncate text-[10px] text-ink-4" title={seedNote}>
           {seedNote}

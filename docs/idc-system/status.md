@@ -147,6 +147,42 @@ Pass 3 (final) completed 2026-05-11 via six parallel sub-agents on non-overlappi
 
 ## Blockers & Notes
 
+### Settings page redesign — de-industrialized + correctness fixes (2026-06-20)
+
+The admin Settings page (`src/pages/admin/settings.tsx`, superadmin-only via AdminGate) read like a developer config dump: every row led with the raw `snake_case` storage key + an `int/text/bool` type token, no human explanation of any setting, and N repeated ghost "Save" buttons. A multi-agent audit (45 findings, 37 survived adversarial verification) drove a full frontend-only rewrite.
+
+**Correctness fixes (real bugs):**
+- **thermal_width** was a free number input (`min:16`, no max) but the Rust `validate_value_for_key` accepts ONLY 32 or 48 — any other value gave a raw English save error. Now a segmented 32/48 radiogroup ("58mm - 32 cols" / "80mm - 48 cols"), commit-on-select; invalid widths are unrepresentable.
+- **Int parsing** previously coerced empty/decimal/out-of-range entries and round-tripped them into raw backend errors. Now the int draft holds `number | ""`, and a pre-save guard enforces each spec's bounds (mirroring the backend: `internal_doctor_pct` 0–100, costs ≥0, `idle_lock_minutes` ≥1) with inline translated errors; Save is disabled while any dirty field is invalid.
+
+**UX redesign (the "industrial" complaint):**
+- Deleted the raw key + type token from every row; the human label is the sole identity line.
+- Added one-line per-setting descriptions (`admin.settings.desc.<key>`, en+ar) stating effect + scope — notably that dye/report costs apply to future locks only, idle-lock governs session auto-lock, and arabic_numerals re-renders every number app-wide.
+- Default-vs-override is now a `status-pill` ("Default" info / "Modified" warn) instead of a trailing lowercase word.
+- Money cost fields show a live grouped preview (`formatIqd`) beside the input; group panels gained one-line descriptions; the page splits into "Clinic configuration" vs "Maintenance" eyebrow zones so the updater reads as a distinct area.
+- Per-half script direction on the clinic-name pair (`dir="rtl" lang="ar"` / `dir="ltr" lang="en"`); narrowed currency-symbol field.
+
+**QoL:**
+- Replaced per-row Save buttons with **dirty-tracking + one page-level sticky action bar** (the screen's single crimson hero) wired to the previously-unused `settings_update_batch` atomic IPC (one SQLite tx, one `settings:changed` event, all-or-nothing). Counter shows "N unsaved changes"; Discard reverts; bool toggles still commit immediately into the draft.
+- Cmd/Ctrl+Enter saves; React Router v7 `useBlocker` confirms before navigating away with unsaved edits; per-overridden-row "Reset to default" (↺).
+- Draft reconciliation with server state uses React's documented "adjust state when a prop changes" pattern (prev value in state, not a ref/effect) so it passes the repo's React-Compiler lint and never clobbers an in-progress edit even after an external pull.
+
+**a11y / i18n:** real `<label htmlFor>` ↔ `id` association on every control; the Toggle gets `aria-labelledby`; inputs get `aria-describedby` (description + error) and `aria-invalid`; validation errors are field-attached `role="alert"` with translated copy (not raw English); the save bar is `role="status" aria-live="polite"` with `aria-busy`. ~40 new en+ar keys (parity lint green). Units (IQD/min/cols) translated; the `"..."` busy literal → `t("admin.settings.saving")`.
+
+**Deferred (needs backend, flagged not dropped):** (a) backend stable error-code contract (currently the page maps the known cases to translated copy and constrains inputs so raw strings are near-unreachable); (b) an inline locale control — the header LanguageToggle currently only calls `i18n.changeLanguage` (session-only) and never persists via `settings_set_locale`, so the `locale` setting row is effectively orphaned; wiring it is a separate decision.
+
+**Validation:** ESLint + i18n-parity + RTL linters clean; `pnpm build` clean; full FE suite 1042 pass (1034 prior + 8 new settings-page interaction tests covering: no snake_case keys, 32/48 radiogroup, dirty→batch-save, pct-out-of-range blocks save — each in ltr + rtl). Visual verified via headless-Chrome render of the exact markup in both directions. No backend/schema/IPC change — pure frontend rework atop existing commands.
+
+### Real Daily Close PDF export (2026-06-19)
+
+The "Export PDF" button on Daily Close was writing a plain-text file with a `.pdf` extension (`render_daily_close_pdf` did `String::push_str` + `write_atomic_text`), so no PDF viewer could open it. Replaced with a genuine PDF.
+
+**Implementation:** added `printpdf = "0.7"` (builds on MSRV 1.77.2) and a new infrastructure renderer `domains/reports/infrastructure/daily_close_pdf.rs`. It produces an A4 portrait PDF in the editorial visual language: crimson eyebrow rule + clinic masthead (from `clinic_display_name_en`/`_ar` settings, English preferred), a SUMMARY key/value block, the dark **ink NET block** (one dark card per page, design-system §5.1) rendered as a fill-only `Polygon` with cream/white text, and three breakdown tables (by doctor / operator / check type) each with a `paper_2` zebra header + totals row. Money is grouped (`44,500`) in Courier; right-aligned numeric columns; a footer hairline with the generated-at stamp + full input hash for tamper-evidence. A `Canvas` cursor paginates (`ensure_room` breaks to a fresh page before a block would clip). Built-in Helvetica/Courier -> no font files shipped; Latin-only by design (Arabic glyphs would need an embedded font -- noted as a follow-up). Atomic temp-file + rename write preserved.
+
+**Wiring:** `ReportsService::render_daily_close_pdf` is now a thin delegate taking `clinic_name: Option<&str>`; the `reports_export_daily_close_pdf` command reads the clinic name from the typed settings snapshot (via `.as_str()`, not the JSON-quoted form). Frontend contract unchanged (`{ date, path }` in, `{ path }` out) -- no FE change.
+
+**Validation:** rendered a sample and confirmed it opens -- `pdfinfo` reads it as PDF-1.3, 1 page, title "Daily Close"; `mutool` parses the structure; visual render confirmed (masthead, filled dark NET block, zebra tables, footer hash all correct). Rust fmt + clippy(all-targets, -D warnings) clean; 3 new renderer unit tests (real `%PDF-`/`%%EOF` magic, `fmt_iqd` thousands grouping, provisional + empty-groups path) + the 3 existing integration call sites updated from text-scan assertions to PDF-magic assertions; full reports suite green (13 + 1 + 38). printpdf `Mm`/`Point`/`Rgb` take `f32`, `use_text`/`set_outline_thickness` take `f32`; `PaintMode`/`WindingOrder` live under `printpdf::path`. No sync/schema change -- pure export-path swap.
+
 ### Audit log readability + filter QoL (2026-06-19)
 
 The audit log showed raw UUID fragments (`actor_user_id.slice(0,8)`, `entity_id.slice(0,8)`, `device_id.slice(0,8)`) instead of names. Fixed end to end so the table reads "Asma · Dr Apple · This device".

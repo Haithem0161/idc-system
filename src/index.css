@@ -422,6 +422,12 @@
   }
   .data-table tbody tr:hover td { background: var(--paper); cursor: pointer; }
   .data-table tbody tr:last-child td { border-bottom: 0; }
+  .data-table tfoot td {
+    padding: 13px 20px;
+    background: var(--paper-2);
+    border-top: 1px solid var(--line);
+    color: var(--ink-2);
+  }
   .data-table .num {
     text-align: end;
     font-family: var(--font-mono);

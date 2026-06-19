@@ -142,7 +142,7 @@ export function CheckDetailPane ({ checkTypeId }: { checkTypeId: string }) {
               </tbody>
               <tfoot>
                 <tr>
-                  <td className="text-end text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-3">
+                  <td className="text-start text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-3">
                     {t("accounting.visits.totals", { defaultValue: "Totals" })}
                   </td>
                   <td className="text-end font-mono font-semibold tabular-nums">{totals.visits}</td>

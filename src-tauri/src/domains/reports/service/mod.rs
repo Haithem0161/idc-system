@@ -878,88 +878,17 @@ impl ReportsService {
     /// The contract is path-bound; a future swap to a true PDF crate is a
     /// one-line change.
     #[instrument(skip(self, close))]
-    pub fn render_daily_close_pdf(&self, close: &DailyClose, path: &Path) -> AppResult<()> {
-        let mut out = String::new();
-        out.push_str("DAILY CLOSE\n");
-        out.push_str(&format!(
-            "Target date: {} ({})\n",
-            close.target_date.format("%Y-%m-%d"),
-            close.tz_offset
-        ));
-        out.push_str(&format!(
-            "Generated at: {}\n",
-            close.generated_at.to_rfc3339()
-        ));
-        out.push_str(&format!("Input hash: {}\n", close.input_hash));
-        out.push_str(&format!(
-            "Locked visits: {}\nVoided visits: {} ({} IQD)\n",
-            close.locked_count, close.voided_count, close.voided_value_iqd
-        ));
-        out.push_str(&format!("Revenue: {} IQD\n", close.total_revenue_iqd));
-        out.push_str(&format!(
-            "Doctor cuts: {} IQD\n",
-            close.total_doctor_cuts_iqd
-        ));
-        out.push_str(&format!(
-            "Operator cuts: {} IQD\n",
-            close.total_operator_cuts_iqd
-        ));
-        out.push_str(&format!(
-            "Inventory consumption: {} IQD\n",
-            close.total_inventory_consumption_value_iqd
-        ));
-        out.push_str(&format!("Net: {} IQD\n", close.net_iqd));
-        out.push_str(&format!("Pending sync: {}\n", close.pending_sync));
-        if close.provisional {
-            out.push_str(&format!(
-                "PROVISIONAL -- {} pending ops\n",
-                close.pending_sync
-            ));
-        }
-        out.push_str("\nPer doctor:\n");
-        for d in &close.per_doctor {
-            out.push_str(&format!(
-                "  {} -- visits {} revenue {} cut {}\n",
-                d.name, d.visits, d.revenue_iqd, d.doctor_cut_iqd
-            ));
-        }
-        out.push_str("\nPer operator:\n");
-        for o in &close.per_operator {
-            let hours_disp = format!("{:.2}", (o.hours_on_shift_milli as f64) / 3_600_000.0);
-            out.push_str(&format!(
-                "  {} -- visits {} dye {} cut {} hours {}\n",
-                o.name, o.visits, o.dye_visits, o.operator_cut_iqd, hours_disp
-            ));
-        }
-        out.push_str("\nPer check type:\n");
-        for c in &close.per_check_type {
-            out.push_str(&format!(
-                "  {} -- visits {} revenue {} doc {} op {}\n",
-                c.name_en.clone().unwrap_or_else(|| c.name_ar.clone()),
-                c.visits,
-                c.revenue_iqd,
-                c.doctor_cut_iqd,
-                c.operator_cut_iqd
-            ));
-        }
-        write_atomic_text(path, &out)
+    /// Render a daily close to a real PDF at `path`. `clinic_name` is printed
+    /// as the masthead when present. Delegates to the infrastructure renderer
+    /// (which owns the `printpdf` dependency and file I/O).
+    pub fn render_daily_close_pdf(
+        &self,
+        close: &DailyClose,
+        clinic_name: Option<&str>,
+        path: &Path,
+    ) -> AppResult<()> {
+        crate::domains::reports::infrastructure::daily_close_pdf::render(close, clinic_name, path)
     }
-}
-
-fn write_atomic_text(path: &Path, text: &str) -> AppResult<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| AppError::Validation("pdf path has no parent directory".into()))?;
-    std::fs::create_dir_all(parent).map_err(AppError::from)?;
-    let tmp = parent.join(format!(
-        ".{}.tmp",
-        path.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("daily-close.pdf")
-    ));
-    std::fs::write(&tmp, text).map_err(AppError::from)?;
-    std::fs::rename(&tmp, path).map_err(AppError::from)?;
-    Ok(())
 }
 
 fn sum_visit_rows(rows: &[VisitRow]) -> VisitsReportTotals {

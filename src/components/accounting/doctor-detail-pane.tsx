@@ -112,7 +112,7 @@ export function DoctorDetailPane ({ segment }: { segment: string }) {
               </tbody>
               <tfoot>
                 <tr>
-                  <td colSpan={2} className="text-end text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-3">
+                  <td colSpan={2} className="text-start text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-3">
                     {t("accounting.visits.totals", { defaultValue: "Totals" })}
                   </td>
                   <td className="text-end font-mono font-semibold tabular-nums">{d.totals.visits}</td>

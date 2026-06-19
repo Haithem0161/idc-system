@@ -465,12 +465,21 @@ pub async fn reports_export_daily_close_pdf(
     let date = NaiveDate::parse_from_str(&args.date, "%Y-%m-%d")
         .map_err(|e| AppError::Validation(format!("date: {e}")))?;
     let settings = state.settings_snapshot().await;
+    // Clinic masthead for the PDF: prefer the English display name, fall back to
+    // the Arabic one. Read from the typed snapshot so we get the bare string,
+    // not a JSON-quoted form.
+    let clinic_name = ["clinic_display_name_en", "clinic_display_name_ar"]
+        .iter()
+        .find_map(|k| settings.get(*k).and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
     let mut snapshot: BTreeMap<String, String> = BTreeMap::new();
     for (k, v) in (*settings).iter() {
         snapshot.insert(k.clone(), v.to_string());
     }
     let close = svc.daily_close(user_id, &entity_id, date, snapshot).await?;
     let path = PathBuf::from(args.path);
-    svc.render_daily_close_pdf(&close, &path)?;
+    svc.render_daily_close_pdf(&close, clinic_name.as_deref(), &path)?;
     Ok(ExportResultDto { path })
 }

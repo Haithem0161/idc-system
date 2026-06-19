@@ -515,11 +515,13 @@ async fn p1_asma_accountant_day_full_walk() {
     // audit row is on disk for the auditor.
     // ------------------------------------------------------------------
     let pdf_path = dir.join("daily-close.pdf");
-    r.reports.render_daily_close_pdf(&close, &pdf_path).unwrap();
+    r.reports
+        .render_daily_close_pdf(&close, None, &pdf_path)
+        .unwrap();
     assert!(pdf_path.exists());
-    let body = std::fs::read_to_string(&pdf_path).unwrap();
-    assert!(body.contains(&close.input_hash));
-    assert!(body.contains("PROVISIONAL"));
+    // Real PDF: assert the binary magic rather than scanning for text.
+    let bytes = std::fs::read(&pdf_path).unwrap();
+    assert!(bytes.starts_with(b"%PDF-"), "export is not a real PDF");
     let row: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM audit_log \
          WHERE entity = 'daily_close' AND action = 'daily_close_run' AND entity_id = ?",

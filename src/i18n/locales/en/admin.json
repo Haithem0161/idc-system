@@ -54,7 +54,7 @@
       "subtitle": "Configure clinic operations.",
       "saved": "Saved",
       "save": "Save",
-      "default": "default",
+      "default": "Default",
       "group": {
         "identity": "Clinic identity",
         "pricing": "Pricing",
@@ -85,6 +85,55 @@
         "installing": "Installing version {{version}}...",
         "unsupported": "Updates are not available on this build.",
         "error": "Could not check for updates."
+      },
+      "save_changes": "Save changes",
+      "discard": "Discard",
+      "saving": "Saving...",
+      "modified": "Modified",
+      "reset": "Reset to default",
+      "unsaved_count": "{{count}} unsaved change",
+      "unsaved_count_plural": "{{count}} unsaved changes",
+      "unsaved_prompt": "You have unsaved changes. Leave without saving?",
+      "zone": {
+        "config": "Clinic configuration",
+        "maintenance": "Maintenance"
+      },
+      "group_desc": {
+        "identity": "How the clinic appears on receipts and exports.",
+        "pricing": "Cost inputs the money engine uses for new visits.",
+        "security": "Session protection on shared machines.",
+        "display": "How numbers are shown across the app.",
+        "printing": "Thermal receipt printer setup."
+      },
+      "desc": {
+        "clinic_display_name_ar": "Arabic name printed on receipts and the daily-close PDF.",
+        "clinic_display_name_en": "English name printed on receipts and the daily-close PDF.",
+        "currency_symbol": "Symbol shown next to every money amount.",
+        "dye_cost_iqd": "Added to a visit when dye is used. Applies to days locked from now on.",
+        "report_cost_iqd": "Added to a visit when a report is issued. Applies to days locked from now on.",
+        "internal_doctor_pct": "Share of the price paid to an in-house doctor when no per-check rate is set.",
+        "idle_lock_minutes": "Lock the session automatically after this many minutes of inactivity.",
+        "arabic_numerals": "Render every number app-wide in Arabic-Indic digits.",
+        "thermal_width": "Character columns your thermal printer supports per line.",
+        "thermal_printer_name": "Exact printer name as the operating system reports it."
+      },
+      "unit": {
+        "iqd": "IQD",
+        "min": "min",
+        "cols": "cols"
+      },
+      "option": {
+        "thermal_width": {
+          "32": "58mm - 32 cols",
+          "48": "80mm - 48 cols"
+        }
+      },
+      "error": {
+        "required": "Enter a whole number.",
+        "min": "Must be at least {{min}}.",
+        "max": "Must be at most {{max}}.",
+        "pct": "Enter a whole number from 0 to 100.",
+        "idle": "Enter at least 1 minute."
       }
     }
   }
