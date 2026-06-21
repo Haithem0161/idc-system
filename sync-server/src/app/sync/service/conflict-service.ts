@@ -144,7 +144,7 @@ export class ConflictResolveService {
         // Apply the chosen payload to the entity store FIRST so the resolution
         // is meaningless-free: choosing 'local'/'merged' actually overwrites
         // the server's losing version. A txn-scoped store keeps it atomic.
-        await this.applyChosen(parked, input, new PrismaEntityStore(tx as unknown as PrismaClient))
+        await this.applyChosen(parked, input, new PrismaEntityStore(tx as unknown as PrismaClient), tenantId)
         await conflictsTx.resolveTx(tx, opId, tenantId, userId)
         await auditTx.insertManyTx(tx, [auditRow])
         if (input.resolveOpId && response) {
@@ -153,7 +153,7 @@ export class ConflictResolveService {
       })
     } else {
       // Memory / test path: sequential is sufficient (single-threaded).
-      await this.applyChosen(parked, input, this.store)
+      await this.applyChosen(parked, input, this.store, tenantId)
       await this.conflicts.resolve(opId, tenantId, userId)
       await this.audit.insertMany([auditRow])
       if (input.resolveOpId && response) {
@@ -178,7 +178,8 @@ export class ConflictResolveService {
   private async applyChosen (
     parked: { entity: string, serverPayload: unknown, localPayload: unknown },
     input: ResolveInput,
-    store: SyncEntityStore
+    store: SyncEntityStore,
+    tenantId: string
   ): Promise<void> {
     if (input.choice === 'server') return
 
@@ -195,6 +196,15 @@ export class ConflictResolveService {
     const serverVersion = versionOf(parked.serverPayload)
     const localVersion = versionOf(parked.localPayload)
     winning.version = Math.max(serverVersion, localVersion) + 1
+
+    // Re-assert tenant on the chosen payload BEFORE it is upserted. A `merged`
+    // (or tampered `local`) payload is fully caller-supplied, so without this a
+    // user in tenant A could submit a resolution whose `entity_id` points at
+    // tenant B and have the row written into B's scope. Forcing the tenant here
+    // mirrors the push path's `assertTenantMatches`, closing that cross-tenant
+    // write. (settings + visits are the only parked entities; both carry
+    // `entity_id` as their tenant column.)
+    winning.entity_id = tenantId
 
     // Phase-10 T4: re-validate the chosen payload through the SAME domain
     // validators the push path uses, so a `merged` (or stale `local`) payload

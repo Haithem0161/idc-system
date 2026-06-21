@@ -13,19 +13,27 @@
 # It is driven off the .SIG file, not the bundle name. For each platform it
 # finds exactly one *.sig under the artifact dir; the file it signs is the same
 # path without ".sig" (AppImage: foo.AppImage(.sig); NSIS updater: foo-setup
-# .nsis.zip(.sig)). That artifact is what the manifest URL points at -- so the
-# url always references the exact bytes the signature covers. (The plain
-# -setup.exe used for first-time install is a separate artifact and is
-# intentionally not what the updater downloads.)
+# .nsis.zip(.sig)). That artifact is what the UPDATER manifest URL points at --
+# so the url always references the exact bytes the signature covers.
+#
+# It ALSO publishes the first-time INSTALLER a human runs on a fresh machine and
+# writes a second manifest, install.json, that the public download page reads:
+#   - Windows: the plain -setup.exe (the staged installer, distinct from the
+#     -setup.nsis.zip updater bundle the running app downloads).
+#   - Linux:   the .AppImage IS both the updater bundle and the installer, so
+#     install.json simply points at the same AppImage.
+#   - macOS:   no build leg yet -- no artifacts, nothing published (the download
+#     page degrades those cards to "not available yet").
 #
 # Per platform:
 #   1. find exactly one .sig; derive bundle = ${sig%.sig}; assert bundle exists,
 #   2. read the .sig CONTENTS verbatim (minisign sigs are TWO lines: a comment
 #      line + the base64 line -- both must be preserved) and JSON-encode via jq,
-#   3. write latest.json (schema below) with jq so every value is escaped,
-#   4. rsync the BUNDLE first, then latest.json LAST, into the platform's own
-#      remote dir -- a client polling mid-deploy never sees a manifest pointing
-#      at a binary that is not on the server yet.
+#   3. write latest.json (updater) and install.json (download page) with jq so
+#      every value is escaped,
+#   4. rsync the BUNDLE first, then the INSTALLER, then the two manifests LAST,
+#      into the platform's own remote dir -- a client polling mid-deploy never
+#      sees a manifest pointing at a file that is not on the server yet.
 #
 # Zero-downtime / rollback:
 #   * rsync runs WITHOUT --delete, so old bundles stay for in-flight downloads
@@ -165,6 +173,48 @@ for row in "${PLATFORMS[@]}"; do
       platforms: { ($platform_key): { signature: $signature, url: $url } }
     }' > "$manifest"
 
+  # First-time installer (the file a human runs on a fresh machine). On Windows
+  # it is the staged *-setup.exe; on Linux the AppImage already IS the installer,
+  # so we reuse the updater bundle. macOS would use a .dmg once a build leg
+  # exists. find_installer echoes the path or empty (no installer published).
+  installer=""
+  case "$target" in
+    windows)
+      # Exactly one -setup.exe is expected (the NSIS installer).
+      while IFS= read -r -d '' f; do installer="$f"; done < <(
+        find "$pdir" -type f -name '*-setup.exe' -print0 | sort -z
+      )
+      [ -n "$installer" ] || err "no *-setup.exe found in ${pdir} for ${platform_key} -- the first-time Windows installer was not staged (check the build job)"
+      ;;
+    linux)
+      # The AppImage is both the updater bundle and the installer.
+      installer="$bundle"
+      ;;
+    *)
+      warn "no installer convention for target '${target}'; install.json will omit ${platform_key}"
+      ;;
+  esac
+
+  install_manifest=""
+  if [ -n "$installer" ]; then
+    installer_name="$(basename "$installer")"
+    installer_url="https://${UPDATE_HOST}/idc/${target}/${ARCH}/${installer_name}"
+    # install.json: what the public download page reads to offer a runnable
+    # first-time install link (distinct from the updater's latest.json).
+    install_manifest="${STAGE}/${platform_key}.install.json"
+    jq -n \
+      --arg version "$VERSION" \
+      --arg pub_date "$PUB_DATE" \
+      --arg platform_key "$platform_key" \
+      --arg url "$installer_url" \
+      --arg name "$installer_name" \
+      '{
+        version: $version,
+        pub_date: $pub_date,
+        platforms: { ($platform_key): { url: $url, name: $name } }
+      }' > "$install_manifest"
+  fi
+
   # The VPS forces `rrsync -munge -wo $DEPLOY_DOCROOT` as the SSH command, which
   # (1) rejects any non-rsync command -- so NO `ssh ... mkdir`: rrsync would
   #     die("SSH_ORIGINAL_COMMAND does not run rsync"); rsync creates the dest
@@ -175,17 +225,34 @@ for row in "${PLATFORMS[@]}"; do
   remote_dir="idc/${target}/${ARCH}"
   log "deploying ${platform_key}: ${bundle_name} -> ${SSH_TARGET}:${DEPLOY_DOCROOT}/${remote_dir}"
 
-  # STEP 1: binary first. No --delete (keep old bundles); --chmod=F644 so nginx
-  # (www-data) can read it regardless of the deploy user's umask. rsync creates
-  # the intermediate dirs on the server because the dest path includes them.
+  # STEP 1: updater bundle first. No --delete (keep old bundles); --chmod=F644 so
+  # nginx (www-data) can read it regardless of the deploy user's umask. rsync
+  # creates the intermediate dirs on the server because the dest path includes
+  # them.
   rsync -a --chmod=F644 --mkpath -e "$SSH_RSH" \
     "$bundle" "${SSH_TARGET}:${remote_dir}/${bundle_name}"
 
-  # STEP 2: manifest last -- the flip that makes the new version live.
+  # STEP 2: first-time installer, when it is a SEPARATE file from the bundle
+  # (Windows -setup.exe). On Linux the installer IS the bundle already uploaded
+  # in STEP 1, so skip the redundant transfer.
+  if [ -n "$installer" ] && [ "$installer" != "$bundle" ]; then
+    rsync -a --chmod=F644 --mkpath -e "$SSH_RSH" \
+      "$installer" "${SSH_TARGET}:${remote_dir}/${installer_name}"
+  fi
+
+  # STEP 3: manifests last -- the flip that makes the new version live. Both the
+  # updater manifest (latest.json) and, when an installer was published, the
+  # download-page manifest (install.json). Binaries are already in place, so a
+  # poller can never resolve a manifest to a missing file.
   rsync -a --chmod=F644 --mkpath -e "$SSH_RSH" \
     "$manifest" "${SSH_TARGET}:${remote_dir}/latest.json"
+  if [ -n "$install_manifest" ]; then
+    rsync -a --chmod=F644 --mkpath -e "$SSH_RSH" \
+      "$install_manifest" "${SSH_TARGET}:${remote_dir}/install.json"
+  fi
 
   log "published ${platform_key} ${VERSION} -> https://${UPDATE_HOST}/idc/${target}/${ARCH}/latest.json"
+  [ -n "$install_manifest" ] && log "  installer -> https://${UPDATE_HOST}/idc/${target}/${ARCH}/install.json"
   deployed_count=$((deployed_count + 1))
 done
 

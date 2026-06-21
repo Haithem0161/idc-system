@@ -147,6 +147,30 @@ Pass 3 (final) completed 2026-05-11 via six parallel sub-agents on non-overlappi
 
 ## Blockers & Notes
 
+### Ship-readiness audit + security hardening + download page (2026-06-20)
+
+Ran a multi-agent ship-readiness audit across all three surfaces (Tauri/Rust, sync-server, frontend) covering mocks/placeholders/deferred work, security, data leaks, secrets, error handling, and sync/auth. 24 findings, 24 survived adversarial verification. **Verdict: SHIP WITH CAVEATS — zero confirmed ship-blockers** (the two blocker-tagged items downgraded: one needs a second tenant the single-clinic launch doesn't have; the other is hardening, not a breach).
+
+**Fixed this pass (the high-priority items):**
+- **Helmet + rate-limit (was the top finding).** The sync server set NO security headers and had NO throttle -- `/auth/login` allowed unlimited password guessing. Added `@fastify/helmet` (`plugins/helmet.ts`: nosniff, X-Frame-Options DENY, HSTS, no-referrer, X-Powered-By stripped; page CSP left to the download route) and `@fastify/rate-limit` (`plugins/rate-limit.ts`: global 300/min/IP baseline + strict per-route overrides -- login 5/min, refresh 20/min, change-password 10/min, `/sync/push` 60/min) with a `{ success:false, error:{ code:'RATE_LIMITED' } }` envelope. Also set `trustProxy: true` (exported in `app.ts` `options`, applied via `fastify start --options` in the npm scripts) so `request.ip` is derived from `X-Forwarded-For` -- the server binds 127.0.0.1 behind nginx, so without this the limiter would bucket the whole internet under nginx's loopback IP.
+- **Cross-tenant write via the conflict 'merged' path (high).** `conflict-service.ts::applyChosen` upserted a fully caller-supplied payload without re-asserting tenant, so a `merged`/`local` payload could carry a foreign `entity_id` and land a settings/visit row in another tenant's scope. Now forces `winning.entity_id = tenantId` before validate/upsert (mirrors the push path's `assertTenantMatches`). Regression test added.
+- **Swagger UI exposed in prod (medium).** `/documentation` now registers only when `!appEnv.isProduction` (swagger plugin gains `dependencies: ['env']` so `appEnv` is guaranteed present); the OpenAPI document still generates.
+- **seed_weekly dev binary footgun (low).** The dev seeder wiped the real local DB with no guard; now refuses to run without `SEED_WEEKLY_CONFIRM=1`.
+
+**Download landing page (`idc-download.madebyhaithem.com`).** New `routes/download.ts` + `common/download-page.ts` serve a self-contained, dependency-free HTML page from the sync server (no separate static host needed). It detects the visitor's OS, highlights the right build, and fetches the live manifests from the releases host at view time so the version + links never go stale (degrades gracefully per-platform when a manifest isn't published). Editorial design language; nonce-based per-response CSP (`default-src 'none'`, `script-src 'nonce-...'`, `connect-src` limited to the releases host) so the one inline script runs without `unsafe-inline`. Releases host configurable via `RELEASES_HOST`.
+
+**First-time installers in the release pipeline.** The deploy script previously published only the UPDATER artifacts (AppImage / `-setup.nsis.zip`), so the download page's Windows card had no runnable installer. Fixed end to end:
+- `.github/workflows/release.yml` build job now also stages the Windows `-setup.exe` (the NSIS first-time installer) alongside the signed updater bundle; fails loud if absent.
+- `tools/ci-deploy-release.sh` now publishes the installer next to the updater bundle and writes a second manifest, `install.json` (`{ version, platforms: { <key>: { url, name } } }`), per platform: Windows -> `-setup.exe`, Linux -> the AppImage (which is both bundle and installer, no redundant copy). Manifests are rsynced LAST (after binaries) so a poller never resolves a manifest to a missing file. macOS has no build leg yet, so its cards stay "not available yet".
+- The download page reads `install.json` first (the human-runnable installer) and falls back to `latest.json`, so it works on hosts that haven't published `install.json` yet.
+- Verified with a stubbed-rsync dry run (correct file selection + manifest URLs) and an end-to-end local render: the Windows card links the real `-setup.exe`, Linux the AppImage, both showing v0.2.0.
+
+**Deliberately NOT changed (flagged for a decision, not silently altered):**
+- `/auth/login` returns the Argon2 password hash in the response body -- this is the desktop's OFFLINE-LOGIN cache path (`auth/service.rs:225`), and the users sync-pull path deliberately omits the hash, so removing it from login breaks offline auth without a larger redesign. Mitigated (TLS, slow KDF, now rate-limited). Left as-is pending an offline-auth redesign decision.
+- Other low/info items (sync IPC role-gating defense-in-depth, JWT 15m revocation window, `_example` scaffolds, dead `PLACEHOLDER_HOST` updater guard, `fs:default` capability, CSP host wildcards, log-hygiene on the server error handler) are documented in the audit report for follow-up; none block a single-clinic launch.
+
+**Validation:** sync-server typecheck clean, 314 tests pass (309 prior + 5 new: cross-tenant re-stamp, download page + nonce-CSP, trailing-slash, helmet headers, login rate-limit ceiling); seed_weekly bin builds + clippy + fmt clean; frontend lint/i18n/rtl + build clean. No desktop schema/IPC/sync-contract change.
+
 ### Settings page redesign — de-industrialized + correctness fixes (2026-06-20)
 
 The admin Settings page (`src/pages/admin/settings.tsx`, superadmin-only via AdminGate) read like a developer config dump: every row led with the raw `snake_case` storage key + an `int/text/bool` type token, no human explanation of any setting, and N repeated ghost "Save" buttons. A multi-agent audit (45 findings, 37 survived adversarial verification) drove a full frontend-only rewrite.

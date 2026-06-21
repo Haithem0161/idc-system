@@ -150,10 +150,17 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --bundles ${{ matrix.bundles }}
 
-      # Stage the updater artifact(s) for this platform: every .sig plus the
-      # bundle it signs. Globbing the .sig avoids hardcoding the spaced
-      # productName ("IDC System") or the AppImage/-setup.nsis.zip extension.
-      - name: Stage signed updater artifacts
+      # Stage the artifacts this platform contributes to the release:
+      #  (a) the signed UPDATER artifact(s): every .sig plus the bundle it signs
+      #      (AppImage on Linux, -setup.nsis.zip on Windows) -- what the running
+      #      app downloads to self-update.
+      #  (b) the first-time INSTALLER a human runs on a fresh machine:
+      #        - Windows: the plain *-setup.exe (NSIS installer)
+      #        - Linux:   the *.AppImage (same file as the updater bundle, so it
+      #          is already covered by (a) -- no separate installer to stage)
+      # Globbing avoids hardcoding the spaced productName ("IDC System") or the
+      # version in the filenames.
+      - name: Stage signed updater artifacts and the first-time installer
         shell: bash
         run: |
           set -euo pipefail
@@ -174,7 +181,23 @@ jobs:
             echo "::error::Check createUpdaterArtifacts and the TAURI_SIGNING_PRIVATE_KEY secret."
             exit 1
           fi
-          echo "staged $count signed artifact(s):"
+
+          # First-time Windows installer: the runnable -setup.exe (NOT the
+          # -setup.nsis.zip updater bundle). The deploy script publishes it next
+          # to the bundle so the download page can offer a real installer link.
+          if [ "${{ matrix.target }}" = "windows" ]; then
+            exe_count=0
+            for exe in src-tauri/target/release/bundle/**/*-setup.exe; do
+              cp "$exe" staged/
+              exe_count=$((exe_count + 1))
+            done
+            if [ "$exe_count" -eq 0 ]; then
+              echo "::error::No *-setup.exe produced -- the NSIS installer is required for first-time Windows installs."
+              exit 1
+            fi
+          fi
+
+          echo "staged $count signed updater artifact(s) + installer(s):"
           ls -la staged/
 
       - name: Upload platform artifact

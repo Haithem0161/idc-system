@@ -38,8 +38,16 @@ export default fp(async (fastify) => {
     },
   })
 
-  await fastify.register(swaggerUi, {
-    routePrefix: '/documentation',
-    uiConfig: { docExpansion: 'list', deepLinking: true },
-  })
-})
+  // Serve the interactive Swagger UI only OUTSIDE production. In production it
+  // would publicly enumerate the entire API surface (auth, sync, reports,
+  // audit, every schema) to any unauthenticated visitor -- information
+  // disclosure that eases targeted attacks. The OpenAPI document is still
+  // generated (so `/documentation/json` machinery and types stay intact); only
+  // the public UI is withheld on a real clinic deployment.
+  if (!fastify.appEnv.isProduction) {
+    await fastify.register(swaggerUi, {
+      routePrefix: '/documentation',
+      uiConfig: { docExpansion: 'list', deepLinking: true },
+    })
+  }
+}, { name: 'swagger', dependencies: ['env'] })

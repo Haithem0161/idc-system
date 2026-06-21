@@ -124,11 +124,14 @@ const routes: FastifyPluginAsync = async (fastify) => {
   }
 
   app.post('/auth/login', {
+    // Strict throttle: blunt credential-stuffing / password-guessing. argon2 is
+    // slow, but without a per-IP cap an attacker can still grind. 5/min/IP.
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
     schema: {
       tags: ['auth'],
       summary: 'Login with email + password',
       body: LoginBody,
-      response: { 200: LoginResponse, 401: ErrorRef, 422: ErrorRef, 500: ErrorRef },
+      response: { 200: LoginResponse, 401: ErrorRef, 422: ErrorRef, 429: ErrorRef, 500: ErrorRef },
     },
     handler: async (request) => {
       const entityId = request.body.entityId ?? 'unscoped'
@@ -144,12 +147,15 @@ const routes: FastifyPluginAsync = async (fastify) => {
   })
 
   app.post('/auth/refresh', {
+    // Bounded: a legitimate device refreshes at most every ~15m, so 20/min/IP
+    // is generous headroom while still capping refresh-token brute force.
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     schema: {
       tags: ['auth'],
       summary: 'Rotate refresh + access tokens',
       description: `Rotates the presented refresh token. When an \`Authorization: Bearer\` access token is also sent, its \`sub\` is verified (ignoring expiry) and the rotation is bound to that subject -- a refresh token that does not belong to the bearer is rejected with 403 (phase-10 T5). The access token is optional so the offline-first refresh path still works when it has lapsed.`,
       body: RefreshBody,
-      response: { 200: RefreshResponse, 401: ErrorRef, 403: ErrorRef, 500: ErrorRef },
+      response: { 200: RefreshResponse, 401: ErrorRef, 403: ErrorRef, 429: ErrorRef, 500: ErrorRef },
     },
     handler: async (request) => {
       const deviceId = (request.headers['x-device-id'] as string | undefined) ?? null
@@ -197,12 +203,15 @@ const routes: FastifyPluginAsync = async (fastify) => {
 
   app.post('/auth/change-password', {
     onRequest: [fastify.authenticate],
+    // Authenticated, but throttle anyway to blunt online guessing of the
+    // CURRENT password (the change requires it). 10/min/IP.
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
     schema: {
       tags: ['auth'],
       summary: 'Change the current user password',
       body: ChangePasswordBody,
       security: [{ bearerAuth: [] }],
-      response: { 204: Type.Null(), 401: ErrorRef, 404: ErrorRef, 422: ErrorRef, 500: ErrorRef },
+      response: { 204: Type.Null(), 401: ErrorRef, 404: ErrorRef, 422: ErrorRef, 429: ErrorRef, 500: ErrorRef },
     },
     handler: async (request, reply) => {
       const userId = (request.user as { sub?: string } | undefined)?.sub

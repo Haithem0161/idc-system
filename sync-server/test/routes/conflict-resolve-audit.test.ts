@@ -304,3 +304,49 @@ test("resolve choice='merged' applies a valid settings payload", async (t) => {
   assert.strictEqual(stored.value, 'merged')
   assert.ok(stored.version > 5, 'merged setting wins LWW above the server version')
 })
+
+// SS-TENANT-003: a `merged` payload is fully caller-supplied, so its entity_id
+// must be re-stamped to the resolver's tenant before upsert. Without that, a
+// user in tenant A could resolve a conflict with a merged payload whose
+// entity_id points at tenant B and have the row written into B's scope.
+test("resolve choice='merged' re-stamps a foreign entity_id back to the caller's tenant", async (t) => {
+  const app = await build(t)
+  const a = app as unknown as FastifyAppLike & {
+    entityStore: { settings: Map<string, { value: string; version: number; entity_id: string }> }
+  }
+  const token = tokenFor(a) // entityId = TENANT
+  const FOREIGN = 'tenant-victim'
+
+  const settingId = 'setting-xtenant-001'
+  await a.conflictsRepo.park({
+    opId: 'op-xtenant-001',
+    entity: 'settings',
+    entityId: settingId,
+    serverPayload: { id: settingId, key: 'currency_symbol', value: 'srv', value_type: 'text', entity_id: TENANT, version: 5 },
+    localPayload: { id: settingId, key: 'currency_symbol', value: 'lcl', value_type: 'text', entity_id: TENANT, version: 3 },
+    reason: 'manual_policy_version_divergence',
+    tenantId: TENANT,
+  })
+
+  const res = await app.inject({
+    method: 'POST',
+    url: '/sync/conflicts/op-xtenant-001/resolve',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-device-id': 'dev-x' },
+    payload: {
+      choice: 'merged',
+      resolve_op_id: 'stable-resolve-xtenant-001',
+      // Hostile: claims to belong to a DIFFERENT tenant.
+      merged: { id: settingId, key: 'currency_symbol', value: 'evil', value_type: 'text', entity_id: FOREIGN, version: 4 },
+    },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+
+  const stored = a.entityStore.settings.get(settingId)
+  assert.ok(stored, 'the resolved setting must exist')
+  assert.strictEqual(
+    stored.entity_id,
+    TENANT,
+    "the merged payload's foreign entity_id must be overwritten with the caller's tenant"
+  )
+  assert.notStrictEqual(stored.entity_id, FOREIGN, 'must NOT be written into the foreign tenant')
+})

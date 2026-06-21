@@ -9,11 +9,11 @@
   "scripts": {
     "test": "npm run build:ts && tsc -p test/tsconfig.json && tsx --test \"test/**/*.ts\"",
     "test:coverage": "npm run build:ts && tsc -p test/tsconfig.json && c8 --reporter=text --reporter=lcov tsx --test \"test/**/*.ts\"",
-    "start": "npm run build:ts && fastify start -l info dist/app/app.js",
+    "start": "npm run build:ts && fastify start --options -l info dist/app/app.js",
     "build:ts": "tsc",
     "watch:ts": "tsc -w",
     "dev": "npm run build:ts && concurrently -k -p \"[{name}]\" -n \"TypeScript,App\" -c \"yellow.bold,cyan.bold\" \"npm:watch:ts\" \"npm:dev:start\"",
-    "dev:start": "fastify start --ignore-watch=.ts$ -w -l info -P dist/app/app.js"
+    "dev:start": "fastify start --options --ignore-watch=.ts$ -w -l info -P dist/app/app.js"
   },
   "keywords": [],
   "author": "",
@@ -22,7 +22,9 @@
     "@fastify/autoload": "^6.0.0",
     "@fastify/cors": "^11.2.0",
     "@fastify/env": "^6.0.0",
+    "@fastify/helmet": "^13.0.2",
     "@fastify/jwt": "^10.0.0",
+    "@fastify/rate-limit": "^11.0.0",
     "@fastify/sensible": "^6.0.0",
     "@fastify/swagger": "^9.7.0",
     "@fastify/swagger-ui": "^5.2.6",

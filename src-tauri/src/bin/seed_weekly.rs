@@ -1401,6 +1401,19 @@ async fn create_visit(
 
 #[tokio::main]
 async fn main() -> R<()> {
+    // This binary WIPES every user-data table in the real local app DB before
+    // reseeding fakes. That is catastrophic if run by accident against a real
+    // install, so it refuses to do anything without an explicit opt-in. A
+    // developer who actually wants to reseed runs:
+    //     SEED_WEEKLY_CONFIRM=1 cargo run --bin seed-weekly
+    if std::env::var("SEED_WEEKLY_CONFIRM").as_deref() != Ok("1") {
+        eprintln!(
+            "[seed-weekly] REFUSING TO RUN: this wipes the real local DB and reseeds fake data.\n\
+             [seed-weekly] Set SEED_WEEKLY_CONFIRM=1 to proceed (dev machines only)."
+        );
+        std::process::exit(1);
+    }
+
     let home = std::env::var("HOME")?;
     let db_path = format!("{home}/.local/share/com.idc.system/idc-local.db");
     eprintln!("[seed-weekly] connecting to {db_path}");

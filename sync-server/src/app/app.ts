@@ -6,7 +6,15 @@ import { TypeBoxValidatorCompiler } from '@fastify/type-provider-typebox'
 export interface AppOptions extends FastifyServerOptions, Partial<AutoloadPluginOptions> {
 }
 
-const options: AppOptions = {}
+// `trustProxy` makes Fastify derive `request.ip` from `X-Forwarded-For`. The
+// server binds 127.0.0.1 only (docker-compose.prod.yaml), so the sole client is
+// the local nginx reverse proxy -- without this, every request's ip would be
+// nginx's 127.0.0.1 and the per-IP rate limiter would bucket the whole internet
+// together. fastify-cli applies this only when `start` is run with `--options`
+// (see package.json), which it is.
+const options: AppOptions = {
+  trustProxy: true,
+}
 
 const app: FastifyPluginAsync<AppOptions> = async (
   fastify,

@@ -11,6 +11,10 @@ const route: FastifyPluginAsync = async (fastify) => {
 
   app.post('/sync/push', {
     onRequest: [fastify.authenticate, fastify.requireEntityContext],
+    // Pushes batch many ops per call, so a few devices need only a handful of
+    // calls per minute. 60/min/IP is generous for real sync yet caps batch
+    // abuse / DB-load attacks well below the global default.
+    config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
     schema: {
       tags: ['sync'],
       summary: 'Apply a batch of client ops',
@@ -27,6 +31,7 @@ const route: FastifyPluginAsync = async (fastify) => {
         401: ErrorRef,
         403: ErrorRef,
         422: ErrorRef,
+        429: ErrorRef,
         500: ErrorRef,
       },
     },
