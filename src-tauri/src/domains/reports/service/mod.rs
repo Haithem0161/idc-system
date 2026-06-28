@@ -90,6 +90,8 @@ pub struct FrozenClosePushPayload {
     pub tz_offset: String,
     pub input_hash: String,
     pub total_revenue_iqd: i64,
+    pub total_collected_iqd: i64,
+    pub total_discount_iqd: i64,
     pub total_doctor_cuts_iqd: i64,
     pub total_operator_cuts_iqd: i64,
     pub total_inventory_consumption_value_iqd: i64,
@@ -119,6 +121,8 @@ impl From<&FrozenClose> for FrozenClosePushPayload {
             tz_offset: c.tz_offset.clone(),
             input_hash: c.input_hash.clone(),
             total_revenue_iqd: c.total_revenue_iqd,
+            total_collected_iqd: c.total_collected_iqd,
+            total_discount_iqd: c.total_discount_iqd,
             total_doctor_cuts_iqd: c.total_doctor_cuts_iqd,
             total_operator_cuts_iqd: c.total_operator_cuts_iqd,
             total_inventory_consumption_value_iqd: c.total_inventory_consumption_value_iqd,
@@ -578,8 +582,14 @@ impl ReportsService {
             .collect::<Vec<_>>();
         let pending_sync = self.read.outbox_count().await?;
 
-        let net_iqd = agg_locked
+        // Net is against cash ACTUALLY COLLECTED, not billed revenue: a
+        // receptionist override (patient paid less) reduces the day's net. The
+        // discount given is the gap between billed and collected (>= 0).
+        let total_discount_iqd = agg_locked
             .revenue_iqd
+            .saturating_sub(agg_locked.collected_iqd);
+        let net_iqd = agg_locked
+            .collected_iqd
             .saturating_sub(agg_locked.doctor_cut_iqd)
             .saturating_sub(agg_locked.operator_cut_iqd)
             .saturating_sub(inv_value);
@@ -604,6 +614,8 @@ impl ReportsService {
             target_date,
             tz_offset: format_offset(offset_secs),
             total_revenue_iqd: agg_locked.revenue_iqd,
+            total_collected_iqd: agg_locked.collected_iqd,
+            total_discount_iqd,
             total_doctor_cuts_iqd: agg_locked.doctor_cut_iqd,
             total_operator_cuts_iqd: agg_locked.operator_cut_iqd,
             total_inventory_consumption_value_iqd: inv_value,
@@ -637,6 +649,8 @@ impl ReportsService {
             "input_hash": close.input_hash,
             "generated_at": close.generated_at.to_rfc3339(),
             "total_revenue_iqd": close.total_revenue_iqd,
+            "total_collected_iqd": close.total_collected_iqd,
+            "total_discount_iqd": close.total_discount_iqd,
             "locked_count": close.locked_count,
             "voided_count": close.voided_count,
             "pending_sync_count": close.pending_sync,
@@ -709,6 +723,8 @@ impl ReportsService {
                 tz_offset: close.tz_offset.clone(),
                 input_hash: close.input_hash.clone(),
                 total_revenue_iqd: close.total_revenue_iqd,
+                total_collected_iqd: close.total_collected_iqd,
+                total_discount_iqd: close.total_discount_iqd,
                 total_doctor_cuts_iqd: close.total_doctor_cuts_iqd,
                 total_operator_cuts_iqd: close.total_operator_cuts_iqd,
                 total_inventory_consumption_value_iqd: close.total_inventory_consumption_value_iqd,

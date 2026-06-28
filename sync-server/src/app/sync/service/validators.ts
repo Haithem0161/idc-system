@@ -110,6 +110,17 @@ export function validateVisit (row: VisitSyncRecord, opId: string): void {
         { op_id: opId }
       )
     }
+    // The collected-cash override is decoupled from the billed total above, but
+    // must still be non-negative when present (0 = waived). Mirrors the desktop
+    // `Visit::lock` guard so a malformed push cannot land a negative amount.
+    if (row.amount_paid_override_iqd != null && row.amount_paid_override_iqd < 0) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'amount_paid_override_iqd must be >= 0',
+        422,
+        { op_id: opId }
+      )
+    }
     if (row.doctor_id == null && row.internal_pct_snapshot == null) {
       throw new DomainError(
         'VALIDATION_ERROR',

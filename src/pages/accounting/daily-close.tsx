@@ -278,10 +278,19 @@ function DailyCloseBody ({ close, locale }: { close: DailyCloseRecord; locale: s
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
         <Stat
-          label={t("accounting.kpi.revenue", { defaultValue: "Revenue" })}
+          label={t("accounting.kpi.revenue_billed", { defaultValue: "Revenue (billed)" })}
           value={formatIqd(close.total_revenue_iqd, { locale, withSuffix: true })}
+        />
+        <Stat
+          label={t("accounting.kpi.collected", { defaultValue: "Collected" })}
+          value={formatIqd(close.total_collected_iqd, { locale, withSuffix: true })}
+        />
+        <Stat
+          label={t("accounting.kpi.discount", { defaultValue: "Discount" })}
+          value={formatIqd(close.total_discount_iqd, { locale, withSuffix: true })}
+          emphasis={close.total_discount_iqd > 0}
         />
         <Stat
           label={t("accounting.kpi.doctor_cuts", { defaultValue: "Doctor cuts" })}
@@ -381,11 +390,27 @@ function DailyCloseBody ({ close, locale }: { close: DailyCloseRecord; locale: s
   )
 }
 
-function Stat ({ label, value }: { label: string; value: string }) {
+function Stat ({
+  label,
+  value,
+  emphasis,
+}: {
+  label: string
+  value: string
+  /** Tint the value crimson to flag a non-trivial discount (collected < billed). */
+  emphasis?: boolean
+}) {
   return (
     <div className="rounded-lg border border-line bg-surface p-4">
       <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-3">{label}</div>
-      <div className="mt-1 font-mono text-[20px] tabular-nums text-ink">{value}</div>
+      <div
+        className={cn(
+          "mt-1 font-mono text-[20px] tabular-nums",
+          emphasis ? "text-crimson" : "text-ink"
+        )}
+      >
+        {value}
+      </div>
     </div>
   )
 }

@@ -303,6 +303,8 @@ mod tests {
             price_iqd: 50_000,
             doctor_cut_iqd: 20_000,
             operator_cut_iqd: 5_000,
+            total_iqd: 50_000,
+            amount_paid_override_iqd: None,
             net_iqd: 25_000,
         }
     }

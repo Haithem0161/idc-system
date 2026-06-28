@@ -1,0 +1,26 @@
+-- Phase: receptionist price override ("amount actually paid").
+--
+-- A receptionist may record that the patient paid LESS (or, in principle, a
+-- different amount) than the billed total -- e.g. the patient cannot afford the
+-- full price. This is captured at lock time as a single nullable column.
+--
+-- Semantics:
+--   * `amount_paid_override_iqd` is the CASH ACTUALLY COLLECTED for the visit.
+--     NULL  -> no override; the patient paid the full billed total
+--              (`total_amount_iqd_snapshot` = price + dye + report).
+--     0..n  -> an explicit collected amount; 0 is legal (waived / could not pay).
+--   * It is DECOUPLED from the billed money model. It does NOT enter the
+--     `total = price + dye + report` invariant and it does NOT affect the doctor
+--     or operator cut -- those stay computed from the billed price by the money
+--     engine. Accounting surfaces it as Collected vs Billed (the gap = discount).
+--   * Only meaningful on locked/voided visits (snapshot present). On a draft the
+--     column stays NULL.
+--
+-- Conflict policy: inherited from `visits` (manual / version-based). The override
+-- rides inside the same versioned visit snapshot, so it conflict-resolves with
+-- the rest of the snapshot as one unit -- no separate policy needed.
+--
+-- Forward-only, idempotent: nullable add, no backfill, existing rows keep NULL
+-- (= "paid in full"), which is exactly the historical meaning.
+
+ALTER TABLE visits ADD COLUMN amount_paid_override_iqd INTEGER NULL;

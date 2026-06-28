@@ -67,7 +67,8 @@ const VISIT_ROW_SELECT: &str = "v.id AS visit_id, \
     COALESCE(v.price_snapshot_iqd, 0) AS price, \
     COALESCE(v.doctor_cut_snapshot_iqd, 0) AS doc_cut, \
     COALESCE(v.operator_cut_snapshot_iqd, 0) AS op_cut, \
-    COALESCE(v.total_amount_iqd_snapshot, 0) AS total_iqd";
+    COALESCE(v.total_amount_iqd_snapshot, 0) AS total_iqd, \
+    v.amount_paid_override_iqd AS amount_paid_override_iqd";
 
 const VISIT_ROW_JOINS: &str = "FROM visits v \
     LEFT JOIN patients p ON p.id = v.patient_id \
@@ -101,6 +102,7 @@ struct VisitRowRaw {
     doc_cut: i64,
     op_cut: i64,
     total_iqd: i64,
+    amount_paid_override_iqd: Option<i64>,
 }
 
 impl VisitRowRaw {
@@ -108,6 +110,9 @@ impl VisitRowRaw {
         let price = self.price;
         let dc = self.doc_cut;
         let oc = self.op_cut;
+        // Net is against cash actually collected: the override when present,
+        // otherwise the billed total.
+        let collected = self.amount_paid_override_iqd.unwrap_or(self.total_iqd);
         Ok(VisitRow {
             visit_id: parse_uuid(&self.visit_id)?,
             locked_at: parse_dt_opt(self.locked_at)?,
@@ -124,7 +129,9 @@ impl VisitRowRaw {
             price_iqd: price,
             doctor_cut_iqd: dc,
             operator_cut_iqd: oc,
-            net_iqd: self.total_iqd.saturating_sub(dc).saturating_sub(oc),
+            total_iqd: self.total_iqd,
+            amount_paid_override_iqd: self.amount_paid_override_iqd,
+            net_iqd: collected.saturating_sub(dc).saturating_sub(oc),
         })
     }
 }
@@ -142,10 +149,15 @@ impl ReportsReadModel for SqliteReportsReadModel {
         // per PRD §7.2.1 ("sum of locked visit totals"). The Visits Report
         // per-row Price column is price_snapshot_iqd; that column's footer
         // is computed at the row layer (sum_visit_rows).
+        // `revenue` is the BILLED total; `collected` is the cash actually taken,
+        // falling back to the billed total for visits without an override. Their
+        // difference is the discount granted via receptionist overrides.
         let sql = format!(
             "SELECT \
                 COUNT(*) AS visits, \
                 COALESCE(SUM(total_amount_iqd_snapshot), 0) AS revenue, \
+                COALESCE(SUM(COALESCE(amount_paid_override_iqd, total_amount_iqd_snapshot)), 0) \
+                    AS collected, \
                 COALESCE(SUM(doctor_cut_snapshot_iqd), 0) AS dc, \
                 COALESCE(SUM(operator_cut_snapshot_iqd), 0) AS oc \
              FROM visits v \
@@ -154,7 +166,7 @@ impl ReportsReadModel for SqliteReportsReadModel {
                AND v.locked_at >= ? AND v.locked_at < ?",
             status = status_clause(include_voided)
         );
-        let row: (i64, i64, i64, i64) = sqlx::query_as(&sql)
+        let row: (i64, i64, i64, i64, i64) = sqlx::query_as(&sql)
             .bind(entity_id)
             .bind(dt_str(from))
             .bind(dt_str(to))
@@ -163,8 +175,9 @@ impl ReportsReadModel for SqliteReportsReadModel {
         Ok(VisitsAggregate {
             visits: row.0,
             revenue_iqd: row.1,
-            doctor_cut_iqd: row.2,
-            operator_cut_iqd: row.3,
+            collected_iqd: row.2,
+            doctor_cut_iqd: row.3,
+            operator_cut_iqd: row.4,
         })
     }
 
@@ -211,11 +224,15 @@ impl ReportsReadModel for SqliteReportsReadModel {
             }
             VisitsReportGroupBy::ByStatus => "v.status".to_string(),
         };
+        // `net` is against collected cash so the grouped nets reconcile with the
+        // collected-basis headline net on the daily close.
         let sql = format!(
             "SELECT {group_expr} AS group_key, \
                     MIN({label_expr}) AS group_label, \
                     COUNT(*) AS visits, \
                     COALESCE(SUM(total_amount_iqd_snapshot), 0) AS revenue, \
+                    COALESCE(SUM(COALESCE(amount_paid_override_iqd, total_amount_iqd_snapshot)), 0) \
+                        AS collected, \
                     COALESCE(SUM(doctor_cut_snapshot_iqd), 0) AS dc, \
                     COALESCE(SUM(operator_cut_snapshot_iqd), 0) AS oc \
              FROM visits v \
@@ -224,22 +241,24 @@ impl ReportsReadModel for SqliteReportsReadModel {
              ORDER BY revenue DESC, group_label ASC"
         );
         let (_, binds) = build_where_binds(filters);
-        let mut q = sqlx::query_as::<_, (String, Option<String>, i64, i64, i64, i64)>(&sql);
+        let mut q = sqlx::query_as::<_, (String, Option<String>, i64, i64, i64, i64, i64)>(&sql);
         for b in &binds {
             q = q.bind(b);
         }
         let rows = q.fetch_all(&self.pool).await?;
         Ok(rows
             .into_iter()
-            .map(|(k, label, visits, revenue, dc, oc)| VisitsReportGroup {
-                key: k.clone(),
-                label: label.unwrap_or(k),
-                visits,
-                revenue_iqd: revenue,
-                doctor_cut_iqd: dc,
-                operator_cut_iqd: oc,
-                net_iqd: revenue.saturating_sub(dc).saturating_sub(oc),
-            })
+            .map(
+                |(k, label, visits, revenue, collected, dc, oc)| VisitsReportGroup {
+                    key: k.clone(),
+                    label: label.unwrap_or(k),
+                    visits,
+                    revenue_iqd: revenue,
+                    doctor_cut_iqd: dc,
+                    operator_cut_iqd: oc,
+                    net_iqd: collected.saturating_sub(dc).saturating_sub(oc),
+                },
+            )
             .collect())
     }
 

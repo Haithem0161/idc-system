@@ -316,4 +316,105 @@ describe("NewVisitTabbedPage", () => {
       expect(mockNavigate).toHaveBeenCalledWith(`/reception/visits/${VISIT_ID}`)
     })
   })
+
+  it("override checkbox reveals the amount field and blocks Finish until filled", async () => {
+    installInvokeRouter(defaultResponses())
+    const tabId = useVisitTabsStore.getState().openTab(CHECK_ID)
+    useVisitTabsStore.getState().updateTabForm(tabId, {
+      patientId: PATIENT_ID,
+      patientName: "Salma A.",
+    })
+    useVisitTabsStore.getState().attachDraft(tabId, VISIT_ID)
+    render(<NewVisitTabbedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect((screen.getByTestId("finish-btn") as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    // No amount field until the override is enabled.
+    expect(screen.queryByTestId("override-amount")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("override-checkbox"))
+    // The amount field appears; with it empty, Finish is blocked.
+    await waitFor(() => expect(screen.getByTestId("override-amount")).toBeTruthy())
+    expect((screen.getByTestId("finish-btn") as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("override of 0 (waived) flows through to visits_lock", async () => {
+    installInvokeRouter(defaultResponses())
+    const tabId = useVisitTabsStore.getState().openTab(CHECK_ID)
+    useVisitTabsStore.getState().updateTabForm(tabId, {
+      patientId: PATIENT_ID,
+      patientName: "Salma A.",
+    })
+    useVisitTabsStore.getState().attachDraft(tabId, VISIT_ID)
+    render(<NewVisitTabbedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect((screen.getByTestId("finish-btn") as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    fireEvent.click(screen.getByTestId("override-checkbox"))
+    const amount = await screen.findByTestId("override-amount")
+    // Zero is a valid collected amount (the patient could not pay).
+    fireEvent.change(amount, { target: { value: "0" } })
+
+    await waitFor(() => {
+      expect((screen.getByTestId("finish-btn") as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("finish-btn"))
+    })
+    await waitFor(() => expect(screen.getByText("Neda")).toBeTruthy())
+    const confirmBtn = screen
+      .getAllByRole("button")
+      .find((b) => b.textContent && /Finish visit/.test(b.textContent))
+    fireEvent.click(confirmBtn!)
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("visits_lock", {
+        args: {
+          visit_id: VISIT_ID,
+          operator_id: OPERATOR_ID,
+          amount_paid_override_iqd: 0,
+        },
+      })
+    })
+  })
+
+  it("without the override, visits_lock sends a null amount", async () => {
+    installInvokeRouter(defaultResponses())
+    const tabId = useVisitTabsStore.getState().openTab(CHECK_ID)
+    useVisitTabsStore.getState().updateTabForm(tabId, {
+      patientId: PATIENT_ID,
+      patientName: "Salma A.",
+    })
+    useVisitTabsStore.getState().attachDraft(tabId, VISIT_ID)
+    render(<NewVisitTabbedPage />, { wrapper })
+
+    let finish: HTMLButtonElement
+    await waitFor(() => {
+      finish = screen.getByTestId("finish-btn") as HTMLButtonElement
+      expect(finish.disabled).toBe(false)
+    })
+    await act(async () => {
+      fireEvent.click(finish!)
+    })
+    await waitFor(() => expect(screen.getByText("Neda")).toBeTruthy())
+    const confirmBtn = screen
+      .getAllByRole("button")
+      .find((b) => b.textContent && /Finish visit/.test(b.textContent))
+    fireEvent.click(confirmBtn!)
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("visits_lock", {
+        args: {
+          visit_id: VISIT_ID,
+          operator_id: OPERATOR_ID,
+          amount_paid_override_iqd: null,
+        },
+      })
+    })
+  })
 })

@@ -1,6 +1,12 @@
 {
   "accounting.dashboard.eyebrow": "المحاسبة",
   "accounting.dashboard.title": "لوحة القيادة",
+  "accounting.kpi.revenue_billed": "الإيراد (المحتسب)",
+  "accounting.kpi.collected": "المحصّل",
+  "accounting.kpi.discount": "الخصم",
+  "accounting.visits.col.paid": "المدفوع",
+  "accounting.visits.overridden": "تعديل",
+  "accounting.visits.overridden_hint": "قام موظف الاستقبال بتعديل المبلغ المدفوع",
   "accounting.visits.eyebrow": "تقرير الزيارات",
   "accounting.visits.title": "الزيارات",
   "accounting.doctors.eyebrow": "الأرباح",

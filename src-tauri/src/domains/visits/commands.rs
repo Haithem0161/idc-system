@@ -402,6 +402,11 @@ pub async fn visits_qualified_operators(
 pub struct VisitLockArgs {
     pub visit_id: String,
     pub operator_id: String,
+    /// Cash actually collected when the receptionist overrides the billed total
+    /// (patient could not pay in full). Absent/null = paid in full. Zero is a
+    /// legal collected amount.
+    #[serde(default)]
+    pub amount_paid_override_iqd: Option<i64>,
 }
 
 #[instrument(skip(state))]
@@ -416,6 +421,7 @@ pub async fn visits_lock(args: VisitLockArgs, state: State<'_, AppState>) -> App
         role,
         Uuid::parse_str(&args.visit_id)?,
         Uuid::parse_str(&args.operator_id)?,
+        args.amount_paid_override_iqd,
         settings,
         receipt,
     )

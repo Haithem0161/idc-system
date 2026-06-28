@@ -389,6 +389,7 @@ async fn visits_lock_returns_visit_and_artifacts_block() {
             UserRole::Receptionist,
             id,
             r.operator.id,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )
@@ -429,6 +430,7 @@ async fn visits_void_returns_status_voided_with_void_reason_trimmed() {
             UserRole::Receptionist,
             id,
             r.operator.id,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )
@@ -468,6 +470,7 @@ async fn visits_discard_on_locked_returns_validation_envelope() {
             UserRole::Receptionist,
             id,
             r.operator.id,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )
@@ -524,6 +527,7 @@ async fn visits_lock_with_wrong_role_returns_validation_envelope() {
             UserRole::Accountant,
             id,
             r.operator.id,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )
@@ -591,6 +595,7 @@ async fn visits_list_workspace_returns_array_with_correct_status_filter() {
             UserRole::Receptionist,
             id,
             r.operator.id,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )

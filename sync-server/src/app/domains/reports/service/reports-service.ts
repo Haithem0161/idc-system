@@ -68,6 +68,8 @@ export class ReportsService {
     )
 
     const total_revenue_iqd = sumField(matched, 'total_amount_iqd_snapshot')
+    const total_collected_iqd = sumCollected(matched)
+    const total_discount_iqd = total_revenue_iqd - total_collected_iqd
     const total_doctor_cuts_iqd = sumField(matched, 'doctor_cut_snapshot_iqd')
     const total_operator_cuts_iqd = sumField(matched, 'operator_cut_snapshot_iqd')
 
@@ -79,7 +81,8 @@ export class ReportsService {
       inv += -adj.delta
     }
     const total_inventory_consumption_value_iqd = inv
-    const net_iqd = total_revenue_iqd - total_doctor_cuts_iqd - total_operator_cuts_iqd - inv
+    // Net is against cash actually COLLECTED, matching the desktop close.
+    const net_iqd = total_collected_iqd - total_doctor_cuts_iqd - total_operator_cuts_iqd - inv
 
     const voided_value_iqd = sumField(voidedMatched, 'total_amount_iqd_snapshot')
 
@@ -127,6 +130,8 @@ export class ReportsService {
       target_date: date,
       tz_offset: formatOffset(tzOffsetMinutes),
       total_revenue_iqd,
+      total_collected_iqd,
+      total_discount_iqd,
       total_doctor_cuts_iqd,
       total_operator_cuts_iqd,
       total_inventory_consumption_value_iqd,
@@ -234,6 +239,8 @@ export interface DailyCloseResponse {
   target_date: string
   tz_offset: string
   total_revenue_iqd: number
+  total_collected_iqd: number
+  total_discount_iqd: number
   total_doctor_cuts_iqd: number
   total_operator_cuts_iqd: number
   total_inventory_consumption_value_iqd: number
@@ -300,6 +307,20 @@ function sumField (rows: VisitSyncRecord[], field: keyof VisitSyncRecord): numbe
   for (const r of rows) {
     const v = r[field]
     if (typeof v === 'number') s += v
+  }
+  return s
+}
+
+/**
+ * Cash actually collected: the receptionist override when set, otherwise the
+ * billed total. Mirrors the desktop `SUM(COALESCE(amount_paid_override_iqd,
+ * total_amount_iqd_snapshot))`.
+ */
+function sumCollected (rows: VisitSyncRecord[]): number {
+  let s = 0
+  for (const r of rows) {
+    const collected = r.amount_paid_override_iqd ?? r.total_amount_iqd_snapshot ?? 0
+    s += collected
   }
   return s
 }

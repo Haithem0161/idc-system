@@ -29,6 +29,7 @@ pub struct VisitPushPayload {
     pub operator_cut_snapshot_iqd: Option<i64>,
     pub internal_pct_snapshot: Option<i64>,
     pub total_amount_iqd_snapshot: Option<i64>,
+    pub amount_paid_override_iqd: Option<i64>,
     pub patient_name_snapshot: Option<String>,
     pub doctor_name_snapshot: Option<String>,
     pub operator_name_snapshot: Option<String>,
@@ -69,6 +70,7 @@ impl From<&Visit> for VisitPushPayload {
             operator_cut_snapshot_iqd: snap.map(|s| s.operator_cut_iqd),
             internal_pct_snapshot: snap.and_then(|s| s.internal_pct),
             total_amount_iqd_snapshot: snap.map(|s| s.total_amount_iqd),
+            amount_paid_override_iqd: snap.and_then(|s| s.amount_paid_override_iqd),
             patient_name_snapshot: snap.map(|s| s.patient_name.clone()),
             doctor_name_snapshot: snap.and_then(|s| s.doctor_name.clone()),
             operator_name_snapshot: snap.map(|s| s.operator_name.clone()),
@@ -140,6 +142,7 @@ mod tests {
             operator_cut_iqd: 5_000,
             internal_pct: Some(40),
             total_amount_iqd: price,
+            amount_paid_override_iqd: None,
             patient_name: "Pat".into(),
             doctor_name: None,
             operator_name: "Op".into(),
@@ -206,6 +209,24 @@ mod tests {
         assert_eq!(payload.internal_pct_snapshot, Some(40));
         // doctor null in house mode -> doctor_name_snapshot None.
         assert!(payload.doctor_name_snapshot.is_none());
+        // No override on this visit -> the wire field is None.
+        assert!(payload.amount_paid_override_iqd.is_none());
+    }
+
+    #[test]
+    fn visit_push_payload_carries_amount_paid_override_through_round_trip() {
+        let v = draft();
+        let mut snap = snap_house(50_000);
+        snap.amount_paid_override_iqd = Some(30_000);
+        let locked = v.lock(Uuid::now_v7(), snap, chrono::Utc::now()).unwrap();
+        let payload = VisitPushPayload::from(&locked);
+        assert_eq!(payload.amount_paid_override_iqd, Some(30_000));
+        // Survives the MessagePack wire encoding used by the outbox.
+        let bytes = rmp_serde::to_vec_named(&payload).unwrap();
+        let decoded: VisitPushPayload = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.amount_paid_override_iqd, Some(30_000));
+        // The billed total is unchanged by the override.
+        assert_eq!(decoded.total_amount_iqd_snapshot, Some(50_000));
     }
 
     #[test]
@@ -237,6 +258,7 @@ mod tests {
         let mut keys: Vec<&str> = obj.keys().map(|s| s.as_str()).collect();
         keys.sort();
         let expected = [
+            "amount_paid_override_iqd",
             "check_subtype_id",
             "check_subtype_name_ar_snapshot",
             "check_subtype_name_en_snapshot",

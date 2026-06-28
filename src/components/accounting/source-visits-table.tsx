@@ -43,6 +43,7 @@ export function SourceVisitsTable ({
             <th className="text-start">{t("accounting.visits.col.operator", { defaultValue: "Operator" })}</th>
             <th className="text-center">{t("accounting.visits.col.dye", { defaultValue: "Dye" })}</th>
             <th className="text-end">{t("accounting.visits.col.price", { defaultValue: "Price" })}</th>
+            <th className="text-end">{t("accounting.visits.col.paid", { defaultValue: "Paid" })}</th>
             <th className="text-end">{t("accounting.visits.col.doctor_cut", { defaultValue: "Doc cut" })}</th>
             <th className="text-end">{t("accounting.visits.col.net", { defaultValue: "Net" })}</th>
             <th className="text-start">{t("accounting.visits.col.status", { defaultValue: "Status" })}</th>
@@ -64,6 +65,25 @@ export function SourceVisitsTable ({
               <td>{r.operator_name}</td>
               <td className="text-center text-ink-3">{r.dye ? "Y" : "—"}</td>
               <td className="text-end font-mono tabular-nums">{formatIqd(r.price_iqd, { locale })}</td>
+              <td className="text-end font-mono tabular-nums">
+                {r.amount_paid_override_iqd != null ? (
+                  <span className="inline-flex items-center justify-end gap-1.5">
+                    <span
+                      className="rounded-full bg-crimson-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.04em] text-crimson"
+                      title={t("accounting.visits.overridden_hint", {
+                        defaultValue: "Receptionist overrode the amount paid",
+                      })}
+                    >
+                      {t("accounting.visits.overridden", { defaultValue: "Override" })}
+                    </span>
+                    <span className="text-crimson">
+                      {formatIqd(r.amount_paid_override_iqd, { locale })}
+                    </span>
+                  </span>
+                ) : (
+                  formatIqd(r.total_iqd, { locale })
+                )}
+              </td>
               <td className="text-end font-mono tabular-nums">{formatIqd(r.doctor_cut_iqd, { locale })}</td>
               <td
                 className={cn(

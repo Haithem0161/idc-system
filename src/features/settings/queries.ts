@@ -7,6 +7,42 @@ import type { SettingRecord, SettingValueWire } from "@/lib/ipc"
 export const settingsKeys = {
   all: ["settings", "all"] as const,
   key: (k: string) => ["settings", "key", k] as const,
+  syncServerUrl: ["settings", "sync-server-url"] as const,
+}
+
+/** The configured sync server URL (read-only; null until first-launch setup). */
+export function useSyncServerUrl () {
+  return useQuery({
+    queryKey: settingsKeys.syncServerUrl,
+    enabled: isTauri(),
+    queryFn: () => invoke("config_get_sync_server_url"),
+    staleTime: 30_000,
+  })
+}
+
+/**
+ * Superadmin-gated update of the sync server URL from Settings. Repointing the
+ * server is security-relevant -- it decides which server the app trusts for
+ * auth and where PHI is pushed -- so it goes through the gated command, and we
+ * re-pin the new server's RS256 public key (TOFU) so offline JWT verification
+ * keeps working. Key re-pin is best-effort: a network hiccup must not leave the
+ * URL unsaved (it is retried on a later online action), matching first-run.
+ */
+export function useUpdateSyncServerUrl () {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (url: string) => {
+      await invoke("config_update_sync_server_url", { url })
+      try {
+        await invoke("auth_bootstrap_jwt_key", { args: { server_url: url } })
+      } catch {
+        // Non-fatal: pinning is retried on a later online action.
+      }
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: settingsKeys.syncServerUrl })
+    },
+  })
 }
 
 export function useSettings () {

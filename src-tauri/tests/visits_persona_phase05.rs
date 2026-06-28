@@ -328,6 +328,7 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
             UserRole::Receptionist,
             draft.id,
             kareem.id,
+            None,
             money,
             ReceiptRenderOptions::default(),
         )

@@ -38,6 +38,57 @@ async fn local_row_is_dirty(tx: &mut crate::db::Tx<'_>, table: &str, id: &str) -
     Ok(matches!(row, Some((1,))))
 }
 
+/// Tombstone any *other* live row that would collide with an incoming live row
+/// on a table's partial-unique secondary index, so the subsequent
+/// `ON CONFLICT(id)` upsert cannot abort the whole pull transaction.
+///
+/// Background: every syncable table is keyed by `id` (UUID v7), but several also
+/// carry a `UNIQUE(<business tuple>) WHERE deleted_at IS NULL` index. The server
+/// upserts by `id` only and has no such constraint, so it can legitimately hold
+/// two live rows with the SAME business tuple but DIFFERENT ids (delete+recreate
+/// on one device, or independent creation on two). When both are pulled, the
+/// second `INSERT` violates the local partial-unique index and aborts the pull
+/// for ALL entities -- the cursor never advances and sync wedges permanently.
+///
+/// Fix (LWW tables): before inserting an incoming *live* row, soft-delete the
+/// loser -- any *other* row that (a) shares the business tuple, (b) is itself
+/// live (`deleted_at IS NULL`, so it actually occupies the partial index), and
+/// (c) is NOT locally dirty (never clobber an unpushed local edit). The incoming
+/// server row then inserts collision-free and becomes the single live row;
+/// both ids survive (one tombstoned) so the convergence re-syncs cleanly.
+///
+/// `table` and `tuple_match` are fixed string literals supplied by the caller
+/// (never user input). `tuple_binds` are the business-key values, bound in the
+/// order their `?` placeholders appear in `tuple_match`.
+pub(crate) async fn tombstone_unique_collision(
+    tx: &mut crate::db::Tx<'_>,
+    table: &str,
+    keep_id: &str,
+    tuple_match: &str,
+    tuple_binds: &[&str],
+    now: &str,
+) -> AppResult<()> {
+    // Binds in `?` order: deleted_at(now), updated_at(now), id(keep_id), then
+    // the business-tuple values referenced by `tuple_match`.
+    let sql = format!(
+        "UPDATE {table} SET \
+            deleted_at = ?, \
+            updated_at = ?, \
+            version = version + 1, \
+            dirty = 1 \
+         WHERE id != ? \
+           AND deleted_at IS NULL \
+           AND dirty = 0 \
+           AND {tuple_match}"
+    );
+    let mut q = sqlx::query(&sql).bind(now).bind(now).bind(keep_id);
+    for b in tuple_binds {
+        q = q.bind(*b);
+    }
+    q.execute(&mut **tx).await?;
+    Ok(())
+}
+
 pub(crate) async fn apply_settings_change(
     tx: &mut crate::db::Tx<'_>,
     change: &PullChange,
@@ -55,6 +106,23 @@ pub(crate) async fn apply_settings_change(
     }
     let incoming_version = change.version;
     let now = chrono::Utc::now().to_rfc3339();
+    // Clear any OTHER clean live setting that shares the (entity_id, key) tuple
+    // before insert (partial unique `settings_key`) so the pull can't abort. The
+    // helper only touches `dirty = 0` rows, so an unsynced local edit is never
+    // clobbered -- consistent with the Manual policy above.
+    if p.get("deleted_at").and_then(|v| v.as_str()).is_none() {
+        let entity_id = p.get("entity_id").and_then(|v| v.as_str()).unwrap_or("");
+        let key = p.get("key").and_then(|v| v.as_str()).unwrap_or("");
+        tombstone_unique_collision(
+            tx,
+            "settings",
+            id,
+            "entity_id = ? AND key = ?",
+            &[entity_id, key],
+            &now,
+        )
+        .await?;
+    }
     sqlx::query(
         "INSERT INTO settings ( \
             id, key, value, value_type, \
@@ -315,6 +383,31 @@ pub(crate) async fn apply_doctor_check_pricing_change(
     // LWW: SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
     let now = chrono::Utc::now().to_rfc3339();
+    // Clear any other live row sharing the (doctor, check_type, subtype) tuple
+    // before insert (partial unique `doctor_check_pricing_unique`). The subtype
+    // is nullable; the index keys on IFNULL(check_subtype_id,'') so we match the
+    // same way.
+    let incoming_deleted = p.get("deleted_at").and_then(|v| v.as_str());
+    if incoming_deleted.is_none() {
+        let doctor_id = p.get("doctor_id").and_then(|v| v.as_str()).unwrap_or("");
+        let check_type_id = p
+            .get("check_type_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let subtype = p
+            .get("check_subtype_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        tombstone_unique_collision(
+            tx,
+            "doctor_check_pricing",
+            id,
+            "doctor_id = ? AND check_type_id = ? AND IFNULL(check_subtype_id, '') = ?",
+            &[doctor_id, check_type_id, subtype],
+            &now,
+        )
+        .await?;
+    }
     sqlx::query(
         "INSERT INTO doctor_check_pricing ( \
             id, doctor_id, check_type_id, check_subtype_id, \
@@ -446,6 +539,26 @@ pub(crate) async fn apply_operator_specialties_change(
     // LWW: SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
     let now = chrono::Utc::now().to_rfc3339();
+    // If the incoming row is live, clear any other live row sharing the
+    // (operator_id, check_type_id) tuple so the insert can't trip the partial
+    // unique index `operator_specialties_unique` and abort the pull.
+    let incoming_deleted = p.get("deleted_at").and_then(|v| v.as_str());
+    if incoming_deleted.is_none() {
+        let operator_id = p.get("operator_id").and_then(|v| v.as_str()).unwrap_or("");
+        let check_type_id = p
+            .get("check_type_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        tombstone_unique_collision(
+            tx,
+            "operator_specialties",
+            id,
+            "operator_id = ? AND check_type_id = ?",
+            &[operator_id, check_type_id],
+            &now,
+        )
+        .await?;
+    }
     sqlx::query(
         "INSERT INTO operator_specialties ( \
             id, operator_id, check_type_id, \
@@ -504,6 +617,39 @@ pub(crate) async fn apply_inventory_consumption_map_change(
     // LWW: SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
     let now = chrono::Utc::now().to_rfc3339();
+    // Clear any other live row sharing the consumption-rule tuple before insert
+    // (partial unique `inventory_consumption_unique`). `on_dye_only` is stored as
+    // 0/1, so compare against the integer literal form of the incoming bool.
+    let incoming_deleted = p.get("deleted_at").and_then(|v| v.as_str());
+    if incoming_deleted.is_none() {
+        let check_type_id = p
+            .get("check_type_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let item_id = p.get("item_id").and_then(|v| v.as_str()).unwrap_or("");
+        let subtype = p
+            .get("check_subtype_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let on_dye_only = if p
+            .get("on_dye_only")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            "1"
+        } else {
+            "0"
+        };
+        tombstone_unique_collision(
+            tx,
+            "inventory_consumption_map",
+            id,
+            "check_type_id = ? AND IFNULL(check_subtype_id, '') = ? AND item_id = ? AND on_dye_only = ?",
+            &[check_type_id, subtype, item_id, on_dye_only],
+            &now,
+        )
+        .await?;
+    }
     sqlx::query(
         "INSERT INTO inventory_consumption_map ( \
             id, check_type_id, check_subtype_id, item_id, \
@@ -577,6 +723,35 @@ pub(crate) async fn apply_operator_shifts_change(
     // SQL WHERE gate is the sole authoritative check (phase-10 T2).
     let incoming_version = change.version;
     let now = chrono::Utc::now().to_rfc3339();
+    // The partial unique index `operator_shifts_open` allows only ONE open shift
+    // (check_out_at IS NULL, not deleted) per operator. If the incoming row is an
+    // open, live shift, close any OTHER open, non-dirty shift for that operator
+    // first so the insert cannot abort the pull. This is an additive ledger, so
+    // we CLOSE the older shift (set check_out_at) rather than delete it -- the
+    // historical row survives, it just leaves the partial index.
+    let incoming_open = p.get("check_out_at").and_then(|v| v.as_str()).is_none();
+    let incoming_live = p.get("deleted_at").and_then(|v| v.as_str()).is_none();
+    if incoming_open && incoming_live {
+        let operator_id = p.get("operator_id").and_then(|v| v.as_str()).unwrap_or("");
+        sqlx::query(
+            "UPDATE operator_shifts SET \
+                check_out_at = ?, \
+                updated_at = ?, \
+                version = version + 1, \
+                dirty = 1 \
+             WHERE id != ? \
+               AND operator_id = ? \
+               AND check_out_at IS NULL \
+               AND deleted_at IS NULL \
+               AND dirty = 0",
+        )
+        .bind(&now)
+        .bind(&now)
+        .bind(id)
+        .bind(operator_id)
+        .execute(&mut **tx)
+        .await?;
+    }
     sqlx::query(
         "INSERT INTO operator_shifts ( \
             id, operator_id, check_in_at, check_out_at, \
@@ -709,13 +884,13 @@ pub(crate) async fn apply_visits_change(
             locked_at, voided_at, voided_by_user_id, void_reason, \
             price_snapshot_iqd, dye_cost_snapshot_iqd, report_cost_snapshot_iqd, \
             doctor_cut_snapshot_iqd, operator_cut_snapshot_iqd, \
-            internal_pct_snapshot, total_amount_iqd_snapshot, \
+            internal_pct_snapshot, total_amount_iqd_snapshot, amount_paid_override_iqd, \
             patient_name_snapshot, doctor_name_snapshot, operator_name_snapshot, \
             check_type_name_ar_snapshot, check_type_name_en_snapshot, \
             check_subtype_name_ar_snapshot, check_subtype_name_en_snapshot, \
             created_at, updated_at, deleted_at, version, dirty, \
             last_synced_at, origin_device_id, entity_id \
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?) \
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?) \
          ON CONFLICT(id) DO UPDATE SET \
             patient_id = excluded.patient_id, \
             status = excluded.status, \
@@ -737,6 +912,7 @@ pub(crate) async fn apply_visits_change(
             operator_cut_snapshot_iqd = excluded.operator_cut_snapshot_iqd, \
             internal_pct_snapshot = excluded.internal_pct_snapshot, \
             total_amount_iqd_snapshot = excluded.total_amount_iqd_snapshot, \
+            amount_paid_override_iqd = excluded.amount_paid_override_iqd, \
             patient_name_snapshot = excluded.patient_name_snapshot, \
             doctor_name_snapshot = excluded.doctor_name_snapshot, \
             operator_name_snapshot = excluded.operator_name_snapshot, \
@@ -783,6 +959,7 @@ pub(crate) async fn apply_visits_change(
     .bind(p.get("operator_cut_snapshot_iqd").and_then(|v| v.as_i64()))
     .bind(p.get("internal_pct_snapshot").and_then(|v| v.as_i64()))
     .bind(p.get("total_amount_iqd_snapshot").and_then(|v| v.as_i64()))
+    .bind(p.get("amount_paid_override_iqd").and_then(|v| v.as_i64()))
     .bind(p.get("patient_name_snapshot").and_then(|v| v.as_str()))
     .bind(p.get("doctor_name_snapshot").and_then(|v| v.as_str()))
     .bind(p.get("operator_name_snapshot").and_then(|v| v.as_str()))
@@ -839,17 +1016,51 @@ pub(crate) async fn apply_daily_close_change(
     let incoming_version = change.version;
     let now = chrono::Utc::now().to_rfc3339();
     let i64_field = |key: &str| p.get(key).and_then(|v| v.as_i64()).unwrap_or(0);
+    // The partial unique index `daily_close_active_per_day` allows only ONE
+    // in-force close (reopened_at IS NULL, not deleted) per (entity_id,
+    // target_date). If the incoming row is in force, retire any OTHER in-force,
+    // non-dirty close for the same day before insert so the pull can't abort.
+    // A duplicate freeze is being superseded, NOT reopened, so we set deleted_at
+    // (it leaves the index but the historical freeze row survives) rather than
+    // fabricate a `reopened_at` superadmin action.
+    let incoming_in_force = p.get("reopened_at").and_then(|v| v.as_str()).is_none()
+        && p.get("deleted_at").and_then(|v| v.as_str()).is_none();
+    if incoming_in_force {
+        let entity_id = p.get("entity_id").and_then(|v| v.as_str()).unwrap_or("");
+        let target_date = p.get("target_date").and_then(|v| v.as_str()).unwrap_or("");
+        sqlx::query(
+            "UPDATE daily_close SET \
+                deleted_at = ?, \
+                updated_at = ?, \
+                version = version + 1, \
+                dirty = 1 \
+             WHERE id != ? \
+               AND entity_id = ? \
+               AND target_date = ? \
+               AND reopened_at IS NULL \
+               AND deleted_at IS NULL \
+               AND dirty = 0",
+        )
+        .bind(&now)
+        .bind(&now)
+        .bind(id)
+        .bind(entity_id)
+        .bind(target_date)
+        .execute(&mut **tx)
+        .await?;
+    }
     sqlx::query(
         "INSERT INTO daily_close ( \
             id, target_date, tz_offset, input_hash, \
-            total_revenue_iqd, total_doctor_cuts_iqd, total_operator_cuts_iqd, \
+            total_revenue_iqd, total_collected_iqd, total_discount_iqd, \
+            total_doctor_cuts_iqd, total_operator_cuts_iqd, \
             total_inventory_consumption_value_iqd, net_iqd, locked_count, \
             voided_count, voided_value_iqd, \
             signed_by_user_id, signed_by_name, signed_at, \
             reopened_at, reopened_by_user_id, reopen_reason, \
             created_at, updated_at, deleted_at, version, dirty, \
             last_synced_at, origin_device_id, entity_id \
-         ) VALUES (?,?,?,?, ?,?,?, ?,?,?, ?,?, ?,?,?, ?,?,?, ?,?,?,?,0, ?,?,?) \
+         ) VALUES (?,?,?,?, ?,?,?,?,?, ?,?,?, ?,?, ?,?,?, ?,?,?, ?,?,?,?,0, ?,?,?) \
          ON CONFLICT(id) DO UPDATE SET \
             reopened_at = excluded.reopened_at, \
             reopened_by_user_id = excluded.reopened_by_user_id, \
@@ -868,6 +1079,8 @@ pub(crate) async fn apply_daily_close_change(
     .bind(p.get("tz_offset").and_then(|v| v.as_str()).unwrap_or(""))
     .bind(p.get("input_hash").and_then(|v| v.as_str()).unwrap_or(""))
     .bind(i64_field("total_revenue_iqd"))
+    .bind(i64_field("total_collected_iqd"))
+    .bind(i64_field("total_discount_iqd"))
     .bind(i64_field("total_doctor_cuts_iqd"))
     .bind(i64_field("total_operator_cuts_iqd"))
     .bind(i64_field("total_inventory_consumption_value_iqd"))
@@ -911,4 +1124,261 @@ pub(crate) async fn apply_daily_close_change(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod secondary_unique_collision_tests {
+    //! Regression tests for the pull-abort bug: the server can hold two LIVE
+    //! rows that share a business-key tuple but have different ids (the server
+    //! has no `WHERE deleted_at IS NULL` partial unique). When both are pulled,
+    //! the second INSERT used to trip the local partial-unique index and abort
+    //! the ENTIRE pull transaction. The handlers now clear the colliding live
+    //! row first, so the pull applies cleanly and converges.
+
+    use super::*;
+    use crate::db::sqlite::init_pool_in_memory;
+    use crate::domains::sync::infrastructure::PullChange;
+    use sqlx::Row;
+
+    const E: &str = "tenant-1";
+
+    async fn migrated_pool() -> sqlx::SqlitePool {
+        let pool = init_pool_in_memory().await.unwrap();
+        crate::db::migrations::run(&pool).await.unwrap();
+        pool
+    }
+
+    fn change(entity: &str, payload: serde_json::Value, version: i64) -> PullChange {
+        PullChange {
+            entity: entity.into(),
+            entity_id: payload
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .into(),
+            payload,
+            updated_at: "2026-06-26T10:00:00Z".into(),
+            version,
+        }
+    }
+
+    async fn seed_operator(pool: &sqlx::SqlitePool, id: &str) {
+        sqlx::query(
+            "INSERT INTO operators (id, name, base_cut_per_check_iqd, is_active, \
+             created_at, updated_at, version, dirty, entity_id) \
+             VALUES (?, 'Op', 0, 1, '2026-06-26T09:00:00Z', '2026-06-26T09:00:00Z', 1, 0, ?)",
+        )
+        .bind(id)
+        .bind(E)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn seed_check_type(pool: &sqlx::SqlitePool, id: &str) {
+        sqlx::query(
+            "INSERT INTO check_types (id, name_ar, has_subtypes, base_price_iqd, \
+             dye_supported, report_supported, sort_order, is_active, \
+             created_at, updated_at, version, dirty, entity_id) \
+             VALUES (?, 'فحص', 0, 1000, 0, 0, 0, 1, \
+             '2026-06-26T09:00:00Z', '2026-06-26T09:00:00Z', 1, 0, ?)",
+        )
+        .bind(id)
+        .bind(E)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn seed_user(pool: &sqlx::SqlitePool, id: &str) {
+        sqlx::query(
+            "INSERT INTO users (id, email, name, password_hash, role, is_active, \
+             created_at, updated_at, version, dirty, entity_id) \
+             VALUES (?, ?, 'U', '', 'receptionist', 1, \
+             '2026-06-26T09:00:00Z', '2026-06-26T09:00:00Z', 1, 0, ?)",
+        )
+        .bind(id)
+        .bind(format!("{id}@e.test"))
+        .bind(E)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// A pulled live operator_specialty that shares (operator, check_type) with
+    /// an existing live row (different id) must NOT abort the pull; the incoming
+    /// row wins and the old row is tombstoned -- exactly one live row remains.
+    #[tokio::test]
+    async fn operator_specialties_collision_tombstones_loser_instead_of_aborting() {
+        let pool = migrated_pool().await;
+        let op = "0190a000-0000-7000-8000-000000000001";
+        let ct = "0190a000-0000-7000-8000-000000000002";
+        seed_operator(&pool, op).await;
+        seed_check_type(&pool, ct).await;
+
+        let id1 = "0190b000-0000-7000-8000-00000000aaaa";
+        sqlx::query(
+            "INSERT INTO operator_specialties (id, operator_id, check_type_id, \
+             created_at, updated_at, deleted_at, version, dirty, entity_id) \
+             VALUES (?, ?, ?, '2026-06-26T09:00:00Z', '2026-06-26T09:00:00Z', NULL, 1, 0, ?)",
+        )
+        .bind(id1)
+        .bind(op)
+        .bind(ct)
+        .bind(E)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let id2 = "0190b000-0000-7000-8000-00000000bbbb";
+        let ch = change(
+            "operator_specialties",
+            serde_json::json!({
+                "id": id2, "operator_id": op, "check_type_id": ct,
+                "created_at": "2026-06-26T10:00:00Z", "updated_at": "2026-06-26T10:00:00Z",
+                "deleted_at": null, "origin_device_id": "dev-b", "entity_id": E,
+            }),
+            1,
+        );
+
+        let mut tx = pool.begin().await.unwrap();
+        // Must NOT error (previously: UNIQUE constraint failed -> pull abort).
+        apply_operator_specialties_change(&mut tx, &ch)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let live: Vec<String> =
+            sqlx::query("SELECT id FROM operator_specialties WHERE deleted_at IS NULL ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|r| r.get::<String, _>("id"))
+                .collect();
+        assert_eq!(
+            live,
+            vec![id2.to_string()],
+            "incoming row should be the sole live row"
+        );
+
+        let total: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM operator_specialties WHERE id = ?")
+                .bind(id1)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(total, 1, "loser is tombstoned, not deleted");
+    }
+
+    /// A locally-dirty colliding row must NEVER be tombstoned by the guard
+    /// (never clobber an unpushed local edit).
+    #[tokio::test]
+    async fn operator_specialties_collision_preserves_dirty_local_row() {
+        let pool = migrated_pool().await;
+        let op = "0190a000-0000-7000-8000-000000000011";
+        let ct = "0190a000-0000-7000-8000-000000000012";
+        seed_operator(&pool, op).await;
+        seed_check_type(&pool, ct).await;
+
+        let id1 = "0190b000-0000-7000-8000-00000000cccc";
+        sqlx::query(
+            "INSERT INTO operator_specialties (id, operator_id, check_type_id, \
+             created_at, updated_at, deleted_at, version, dirty, entity_id) \
+             VALUES (?, ?, ?, '2026-06-26T09:00:00Z', '2026-06-26T09:00:00Z', NULL, 3, 1, ?)",
+        )
+        .bind(id1)
+        .bind(op)
+        .bind(ct)
+        .bind(E)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let id2 = "0190b000-0000-7000-8000-00000000dddd";
+        let ch = change(
+            "operator_specialties",
+            serde_json::json!({
+                "id": id2, "operator_id": op, "check_type_id": ct,
+                "created_at": "2026-06-26T10:00:00Z", "updated_at": "2026-06-26T10:00:00Z",
+                "deleted_at": null, "origin_device_id": "dev-b", "entity_id": E,
+            }),
+            1,
+        );
+        let mut tx = pool.begin().await.unwrap();
+        // The dirty row is guarded; the insert itself may error on the unique
+        // index, which is fine -- the point is the dirty local edit is untouched.
+        let _ = apply_operator_specialties_change(&mut tx, &ch).await;
+        drop(tx);
+
+        let row = sqlx::query("SELECT deleted_at, dirty FROM operator_specialties WHERE id = ?")
+            .bind(id1)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(row.get::<Option<String>, _>("deleted_at").is_none());
+        assert_eq!(row.get::<i64, _>("dirty"), 1);
+    }
+
+    /// A pulled OPEN shift for an operator who already has a local open shift
+    /// (different id) must close the older one rather than abort the pull.
+    #[tokio::test]
+    async fn operator_shifts_open_collision_closes_older_shift() {
+        let pool = migrated_pool().await;
+        let op = "0190a000-0000-7000-8000-000000000021";
+        let usr = "0190a000-0000-7000-8000-000000000031";
+        seed_operator(&pool, op).await;
+        seed_user(&pool, usr).await;
+
+        let id1 = "0190c000-0000-7000-8000-00000000aaaa";
+        sqlx::query(
+            "INSERT INTO operator_shifts (id, operator_id, check_in_at, check_out_at, \
+             check_in_by_user_id, check_out_by_user_id, note, \
+             created_at, updated_at, deleted_at, version, dirty, entity_id) \
+             VALUES (?, ?, '2026-06-26T08:00:00Z', NULL, ?, NULL, NULL, \
+             '2026-06-26T08:00:00Z', '2026-06-26T08:00:00Z', NULL, 1, 0, ?)",
+        )
+        .bind(id1)
+        .bind(op)
+        .bind(usr)
+        .bind(E)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let id2 = "0190c000-0000-7000-8000-00000000bbbb";
+        let ch = change(
+            "operator_shifts",
+            serde_json::json!({
+                "id": id2, "operator_id": op, "check_in_at": "2026-06-26T10:00:00Z",
+                "check_out_at": null, "check_in_by_user_id": usr, "check_out_by_user_id": null,
+                "note": null, "created_at": "2026-06-26T10:00:00Z",
+                "updated_at": "2026-06-26T10:00:00Z", "deleted_at": null,
+                "origin_device_id": "dev-b", "entity_id": E,
+            }),
+            1,
+        );
+        let mut tx = pool.begin().await.unwrap();
+        apply_operator_shifts_change(&mut tx, &ch).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let open: Vec<String> = sqlx::query(
+            "SELECT id FROM operator_shifts \
+             WHERE check_out_at IS NULL AND deleted_at IS NULL ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.get::<String, _>("id"))
+        .collect();
+        assert_eq!(open, vec![id2.to_string()]);
+        let old_closed: Option<String> =
+            sqlx::query_scalar("SELECT check_out_at FROM operator_shifts WHERE id = ?")
+                .bind(id1)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(old_closed.is_some(), "older open shift should be closed");
+    }
 }

@@ -336,6 +336,7 @@ async fn lock_visit(r: &AccountantRig, dye: bool, doctor: Option<Uuid>) -> Uuid 
             UserRole::Receptionist,
             draft.id,
             r.operator.id,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )

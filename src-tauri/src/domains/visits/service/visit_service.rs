@@ -641,16 +641,28 @@ impl VisitService {
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn lock(
         &self,
         actor_user_id: Uuid,
         actor_role: UserRole,
         visit_id: Uuid,
         operator_id: Uuid,
+        amount_paid_override_iqd: Option<i64>,
         settings: MoneySettings,
         receipt_options: ReceiptRenderOptions,
     ) -> AppResult<LockResult> {
         Self::require_role(actor_role, &[UserRole::Receptionist, UserRole::Superadmin])?;
+        // The receptionist may record that the patient paid less than billed
+        // (e.g. could not afford the full price). Zero is allowed; negative is
+        // not. Validated here at the boundary and again in `Visit::lock`.
+        if let Some(paid) = amount_paid_override_iqd {
+            if paid < 0 {
+                return Err(AppError::Validation(
+                    "amount_paid_override_iqd must be >= 0".into(),
+                ));
+            }
+        }
         let current = self.load_visit(visit_id).await?;
         if current.status != VisitStatus::Draft {
             return Err(AppError::Validation(format!(
@@ -679,9 +691,13 @@ impl VisitService {
             ));
         }
         // Resolve snapshots + bundle (catalog references).
-        let (snap, bundle) = self
+        let (mut snap, bundle) = self
             .resolve_bundle(current.clone(), &Some(operator_id), settings)
             .await?;
+        // Overlay the collected-cash override onto the billed snapshot. This is
+        // deliberately applied AFTER the money engine: it never touches price,
+        // total, or the doctor/operator cut -- only what was actually collected.
+        snap.amount_paid_override_iqd = amount_paid_override_iqd;
 
         let locked_at = Utc::now();
         let entity_id = current.entity_id.clone();

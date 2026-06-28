@@ -27,6 +27,15 @@ export type VisitUpdateDraftInput = z.infer<typeof VisitUpdateDraftSchema>
 export const VisitLockSchema = z.object({
   visit_id: z.string().uuid(),
   operator_id: z.string().uuid(),
+  // Cash actually collected when the receptionist overrides the billed total
+  // (patient could not pay in full). Omitted/null = paid in full. Zero is a
+  // valid collected amount (waived). Must be a non-negative integer.
+  amount_paid_override_iqd: z
+    .number()
+    .int()
+    .min(0, "amount_paid_override_negative")
+    .nullable()
+    .optional(),
 })
 export type VisitLockInput = z.infer<typeof VisitLockSchema>
 

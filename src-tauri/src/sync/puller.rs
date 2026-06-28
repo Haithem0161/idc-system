@@ -544,6 +544,22 @@ async fn apply_users_change(tx: &mut crate::db::Tx<'_>, change: &PullChange) -> 
     // was actually applied.
     let incoming_version = change.version;
     let now = chrono::Utc::now().to_rfc3339();
+    // If the incoming user is live, clear any other live user sharing the
+    // (entity_id, email) tuple so the insert can't trip the partial unique index
+    // `users_email_unique` and abort the whole pull.
+    if p.get("deleted_at").and_then(|v| v.as_str()).is_none() {
+        let entity_id = p.get("entity_id").and_then(|v| v.as_str()).unwrap_or("");
+        let email = p.get("email").and_then(|v| v.as_str()).unwrap_or("");
+        crate::sync::puller_entities::tombstone_unique_collision(
+            tx,
+            "users",
+            id,
+            "entity_id = ? AND email = ?",
+            &[entity_id, email],
+            &now,
+        )
+        .await?;
+    }
     let result = sqlx::query(
         "INSERT INTO users ( \
             id, email, name, password_hash, role, is_active, last_login_at, \

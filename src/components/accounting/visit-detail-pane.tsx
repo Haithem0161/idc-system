@@ -180,8 +180,24 @@ export function VisitDetailPane ({ visitId }: { visitId: string }) {
                 ? t("common.yes", { defaultValue: "Yes" })
                 : t("common.no", { defaultValue: "No" })
             }
-            last
+            last={row.amount_paid_override_iqd == null}
           />
+          {row.amount_paid_override_iqd != null ? (
+            <Field
+              label={t("accounting.visits.col.paid", { defaultValue: "Amount paid" })}
+              value={
+                <span className="inline-flex items-center gap-2">
+                  <span className="font-mono tabular-nums text-crimson">
+                    {formatIqd(row.amount_paid_override_iqd, { locale })}
+                  </span>
+                  <span className="rounded-full bg-crimson-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.04em] text-crimson">
+                    {t("accounting.visits.overridden", { defaultValue: "Override" })}
+                  </span>
+                </span>
+              }
+              last
+            />
+          ) : null}
         </dl>
       </DetailSection>
     </div>

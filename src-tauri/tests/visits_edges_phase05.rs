@@ -309,6 +309,7 @@ async fn create_and_lock(r: &Rig) -> Uuid {
             UserRole::Receptionist,
             draft.id,
             r.operator.id,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )
@@ -417,6 +418,7 @@ async fn second_lock_attempt_on_same_visit_returns_validation_error() {
             UserRole::Receptionist,
             id,
             r.operator.id,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )
@@ -461,6 +463,7 @@ async fn operator_clocks_out_mid_session_makes_subsequent_lock_fail() {
             UserRole::Receptionist,
             draft.id,
             r.operator.id,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )
@@ -701,6 +704,7 @@ async fn sync_version_increments_on_every_visit_mutation() {
             UserRole::Receptionist,
             draft.id,
             r.operator.id,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )

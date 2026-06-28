@@ -447,6 +447,10 @@ model Visit {
   operatorCutSnapshotIqd          Int?         @map("operator_cut_snapshot_iqd")
   internalPctSnapshot             Int?         @map("internal_pct_snapshot")
   totalAmountIqdSnapshot          Int?         @map("total_amount_iqd_snapshot")
+  // Cash actually collected when the receptionist overrode the billed total
+  // (patient could not pay in full). Null = paid in full; 0 = waived. Decoupled
+  // from the billed total -- never affects the doctor/operator cut.
+  amountPaidOverrideIqd           Int?         @map("amount_paid_override_iqd")
   patientNameSnapshot             String?      @map("patient_name_snapshot")
   doctorNameSnapshot              String?      @map("doctor_name_snapshot")
   operatorNameSnapshot            String?      @map("operator_name_snapshot")
@@ -544,6 +548,11 @@ model DailyClose {
   // JSON numbers (i64 on the desktop); JSON.parse yields a JS `number`, which
   // maps cleanly onto Prisma `Int` without a bigint round-trip.
   totalRevenueIqd                   Int       @default(0) @map("total_revenue_iqd")
+  // Cash actually collected (override-where-set, else billed) and the discount
+  // granted via receptionist overrides (billed - collected). `netIqd` is on the
+  // collected basis from this phase on.
+  totalCollectedIqd                 Int       @default(0) @map("total_collected_iqd")
+  totalDiscountIqd                  Int       @default(0) @map("total_discount_iqd")
   totalDoctorCutsIqd                Int       @default(0) @map("total_doctor_cuts_iqd")
   totalOperatorCutsIqd              Int       @default(0) @map("total_operator_cuts_iqd")
   totalInventoryConsumptionValueIqd Int       @default(0) @map("total_inventory_consumption_value_iqd")

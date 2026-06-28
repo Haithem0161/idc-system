@@ -160,7 +160,11 @@ export function useVisitLock () {
   return useMutation<LockResultRecord, Error, VisitLockInput>({
     mutationFn: (input) =>
       invoke("visits_lock", {
-        args: { visit_id: input.visit_id, operator_id: input.operator_id },
+        args: {
+          visit_id: input.visit_id,
+          operator_id: input.operator_id,
+          amount_paid_override_iqd: input.amount_paid_override_iqd ?? null,
+        },
       }),
     // Locking consumes inventory server-side (consume-on-lock), so the
     // inventory views must refetch too. Invalidate on settle so a failed

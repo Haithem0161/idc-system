@@ -250,7 +250,7 @@ fn draw_masthead(c: &mut Canvas, close: &DailyClose, clinic_name: Option<&str>) 
 fn draw_summary(c: &mut Canvas, close: &DailyClose) {
     section_title(c, "SUMMARY");
 
-    let rows: [(&str, String); 7] = [
+    let rows: [(&str, String); 9] = [
         ("Locked visits", close.locked_count.to_string()),
         (
             "Voided visits",
@@ -261,8 +261,16 @@ fn draw_summary(c: &mut Canvas, close: &DailyClose) {
             ),
         ),
         (
-            "Revenue",
+            "Revenue (billed)",
             format!("{} IQD", fmt_iqd(close.total_revenue_iqd)),
+        ),
+        (
+            "Collected",
+            format!("{} IQD", fmt_iqd(close.total_collected_iqd)),
+        ),
+        (
+            "Discount",
+            format!("{} IQD", fmt_iqd(close.total_discount_iqd)),
         ),
         (
             "Doctor cuts",
@@ -582,6 +590,8 @@ mod tests {
             target_date: NaiveDate::from_ymd_opt(2026, 6, 19).unwrap(),
             tz_offset: "+03:00".into(),
             total_revenue_iqd: 50_000,
+            total_collected_iqd: 50_000,
+            total_discount_iqd: 0,
             total_doctor_cuts_iqd: 1_500,
             total_operator_cuts_iqd: 4_000,
             total_inventory_consumption_value_iqd: 0,

@@ -72,6 +72,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "015_daily_close.sql",
         include_str!("../../migrations/015_daily_close.sql"),
     ),
+    (
+        "016_visit_amount_paid_override.sql",
+        include_str!("../../migrations/016_visit_amount_paid_override.sql"),
+    ),
+    (
+        "017_daily_close_collected_discount.sql",
+        include_str!("../../migrations/017_daily_close_collected_discount.sql"),
+    ),
 ];
 
 /// The local sync schema version: the count of embedded migrations. Sent to the

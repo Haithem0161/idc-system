@@ -347,6 +347,42 @@ async fn lock_visit(f: &Fixture, dye: bool, doctor: Option<Uuid>) -> Uuid {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await
+        .unwrap();
+    res.visit.id
+}
+
+/// Lock a house visit (no dye/report) with an explicit collected-cash override.
+async fn lock_visit_with_override(f: &Fixture, paid: i64) -> Uuid {
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: None,
+                dye: false,
+                report: false,
+            },
+        )
+        .await
+        .unwrap();
+    let res = f
+        .visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            Some(paid),
             settings(),
             ReceiptRenderOptions::default(),
         )
@@ -541,6 +577,40 @@ async fn daily_close_emits_audit_row_and_breakdowns() {
         .unwrap();
     // Daily close adds one; the locked-visit workflow added many more.
     assert!(row.0 >= 1);
+}
+
+#[tokio::test]
+async fn daily_close_tracks_collected_discount_and_collected_net() {
+    let f = seed().await;
+    // House visit billed 50_000 but the receptionist collected only 30_000.
+    let _ = lock_visit_with_override(&f, 30_000).await;
+
+    let now = Utc::now();
+    let baghdad = now + Duration::hours(3);
+    let target: NaiveDate = baghdad.date_naive();
+
+    let mut settings_snapshot: BTreeMap<String, String> = BTreeMap::new();
+    settings_snapshot.insert("dye_cost_iqd".into(), "2000".into());
+    settings_snapshot.insert("report_cost_iqd".into(), "3000".into());
+    settings_snapshot.insert("internal_doctor_pct".into(), "40".into());
+
+    let close = f
+        .reports_service
+        .daily_close(f.superadmin.id, ENTITY_ID, target, settings_snapshot)
+        .await
+        .unwrap();
+
+    // Billed revenue is unchanged by the override; collected reflects the cash.
+    assert_eq!(close.total_revenue_iqd, 50_000);
+    assert_eq!(close.total_collected_iqd, 30_000);
+    assert_eq!(close.total_discount_iqd, 20_000);
+    // House mode: doctor cut = 40% of the BILLED price (override does not move
+    // it), operator cut = 4_000, inventory = 1 unit consumed.
+    assert_eq!(close.total_doctor_cuts_iqd, 20_000);
+    assert_eq!(close.total_operator_cuts_iqd, 4_000);
+    // Net is on the COLLECTED basis: 30_000 - 20_000 - 4_000 - inventory.
+    let expected_net = 30_000 - 20_000 - 4_000 - close.total_inventory_consumption_value_iqd;
+    assert_eq!(close.net_iqd, expected_net);
 }
 
 #[tokio::test]
@@ -1303,6 +1373,8 @@ async fn sign_freezes_the_day_and_enqueues_for_sync() {
         .unwrap();
     assert_eq!(frozen.net_iqd, live.net_iqd);
     assert_eq!(frozen.total_revenue_iqd, live.total_revenue_iqd);
+    assert_eq!(frozen.total_collected_iqd, live.total_collected_iqd);
+    assert_eq!(frozen.total_discount_iqd, live.total_discount_iqd);
     assert_eq!(frozen.input_hash, live.input_hash);
     assert_eq!(frozen.locked_count, live.locked_count);
 
@@ -1329,6 +1401,44 @@ async fn sign_freezes_the_day_and_enqueues_for_sync() {
     .await
     .unwrap();
     assert_eq!(audit.0, 1);
+}
+
+/// A signed close persists distinct collected/discount totals when a visit was
+/// overridden -- proving the frozen snapshot stores them, not just billed.
+#[tokio::test]
+async fn sign_persists_collected_and_discount_for_overridden_day() {
+    let f = seed().await;
+    let _ = lock_visit_with_override(&f, 30_000).await; // billed 50_000, collected 30_000
+    let target = baghdad_today();
+    drain_outbox(&f.pool).await;
+
+    let frozen = f
+        .reports_service
+        .sign_daily_close(
+            f.superadmin.id,
+            "Karrar".into(),
+            ENTITY_ID,
+            target,
+            close_settings(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(frozen.total_revenue_iqd, 50_000);
+    assert_eq!(frozen.total_collected_iqd, 30_000);
+    assert_eq!(frozen.total_discount_iqd, 20_000);
+
+    // Re-read from the repo so we prove the columns round-trip through SQLite,
+    // not just the in-memory return value.
+    let reread = f
+        .reports_service
+        .frozen_close_for_date(ENTITY_ID, target)
+        .await
+        .unwrap()
+        .expect("frozen close present");
+    assert_eq!(reread.total_collected_iqd, 30_000);
+    assert_eq!(reread.total_discount_iqd, 20_000);
+    assert_eq!(reread.net_iqd, frozen.net_iqd);
 }
 
 /// Double-sign is rejected: a day can only be frozen once (until reopened).
@@ -1406,6 +1516,7 @@ async fn freezing_blocks_further_locks_until_reopened() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )
@@ -1439,6 +1550,7 @@ async fn freezing_blocks_further_locks_until_reopened() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )
