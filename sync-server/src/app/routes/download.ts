@@ -1,7 +1,16 @@
 import { randomBytes } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { type FastifyPluginAsync } from 'fastify'
 
 import { renderDownloadPage } from '../common/download-page.js'
+
+// Brand logo, served as a same-origin asset (so the page's strict
+// `img-src 'self'` CSP covers it without inlining ~86KB of base64 per render).
+// The compiled app runs from /app (cwd) with dist/ in dist/ and the source tree
+// alongside it (COPY . . in the image, bind-mounted in dev); the .webp lives in
+// the source tree only, so resolve it from cwd. Read once at boot, cached.
+const LOGO_PATH = join(process.cwd(), 'src/app/assets/logo.webp')
 
 /**
  * Public download landing page, served by the sync server so it can sit behind
@@ -20,6 +29,23 @@ import { renderDownloadPage } from '../common/download-page.js'
  */
 const download: FastifyPluginAsync = async (fastify) => {
   const releasesHost = (process.env.RELEASES_HOST ?? 'idc-release.madebyhaithem.com').trim()
+
+  // Load the brand logo once at boot. If it is missing for any reason the page
+  // still renders (the <img> just 404s); we log and carry on rather than fail.
+  let logo: Buffer | null = null
+  try {
+    logo = await readFile(LOGO_PATH)
+  } catch (err) {
+    fastify.log.warn({ err, path: LOGO_PATH }, 'download page: brand logo not found; serving without it')
+  }
+
+  if (logo) {
+    fastify.get('/download/logo.webp', async (_request, reply) => {
+      reply.header('cache-control', 'public, max-age=86400, immutable')
+      reply.type('image/webp')
+      return reply.send(logo)
+    })
+  }
 
   const handler = async (
     _request: unknown,

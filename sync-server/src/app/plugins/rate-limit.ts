@@ -30,15 +30,19 @@ async function plugin (fastify: FastifyInstance): Promise<void> {
     // from every device in a clinic, far below what an abusive loop would hit.
     max: 300,
     timeWindow: '1 minute',
-    // Standardized envelope to match the server's error shape.
+    // The plugin THROWS whatever this returns (see @fastify/rate-limit
+    // index.js: `throw params.errorResponseBuilder(...)`). It must therefore be
+    // an Error carrying `statusCode` so the global error handler maps it to a
+    // 429 with Retry-After -- a plain object would lose the status and degrade
+    // to 500. The handler renders the final RATE_LIMITED envelope + header.
     errorResponseBuilder (_request, context) {
-      return {
-        success: false,
-        error: {
-          code: 'RATE_LIMITED',
-          message: `Too many requests. Retry in ${Math.ceil(context.ttl / 1000)}s.`,
-        },
-      }
+      const err = new Error(
+        `Too many requests. Retry in ${Math.ceil(context.ttl / 1000)}s.`
+      ) as Error & { statusCode: number, ttl: number, code: string }
+      err.statusCode = context.statusCode
+      err.ttl = context.ttl
+      err.code = 'RATE_LIMITED'
+      return err
     },
   })
 }

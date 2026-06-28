@@ -34,6 +34,23 @@ export default fp(async (fastify) => {
       return
     }
 
+    // @fastify/rate-limit throws a 429 (or 403 ban) that reaches this custom
+    // handler. Without this branch the fall-through emitted 500 because the
+    // thrown error's body carried no recognised shape. Preserve the real status
+    // and surface Retry-After so clients back off correctly.
+    if (err.statusCode === 429) {
+      const ttlMs = (err as FastifyError & { ttl?: number }).ttl
+      if (typeof ttlMs === 'number') {
+        void reply.header('Retry-After', Math.ceil(ttlMs / 1000))
+      }
+      void reply.status(429).send({
+        code: 'RATE_LIMITED',
+        message: err.message ?? 'Too many requests.',
+        traceId,
+      })
+      return
+    }
+
     if (err.code && typeof err.code === 'string' && err.code.startsWith('FAST_JWT_')) {
       void reply.status(401).send({
         code: 'SESSION_EXPIRED',

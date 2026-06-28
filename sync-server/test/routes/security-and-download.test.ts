@@ -31,9 +31,16 @@ test('GET /download serves the HTML page with a nonce-based CSP that matches its
     'the inline script must carry the CSP nonce'
   )
 
-  // It is the real download page, not a stub.
-  assert.match(res.payload, /Download the desktop app/)
-  assert.match(res.payload, /linux-x86_64/)
+  // It is the real download page, not a stub: the hero + both supported
+  // platform cards are present.
+  assert.match(res.payload, /Download IDC System/)
+  assert.match(res.payload, /data-platform="windows-x86_64"/)
+  assert.match(res.payload, /data-platform="linux-x86_64"/)
+  // macOS is intentionally unsupported -- no darwin platform keys and no macOS
+  // download card is offered.
+  assert.doesNotMatch(res.payload, /darwin/)
+  assert.doesNotMatch(res.payload, /data-platform="[^"]*darwin[^"]*"/)
+  assert.doesNotMatch(res.payload, /class="card-os"[^>]*>[^<]*macOS/)
   // It prefers the first-time-installer manifest (install.json) and falls back
   // to the updater manifest (latest.json).
   assert.match(res.payload, /install\.json/)

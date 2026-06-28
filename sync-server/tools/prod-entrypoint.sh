@@ -51,4 +51,7 @@ pnpm prisma db push
 psql "$DATABASE_URL" -f prisma/init-custom-sql.sql
 
 # 4. Start.
-exec pnpm exec fastify start -a 0.0.0.0 -p 3161 -l info dist/app/app.js
+# --options is REQUIRED so fastify-cli applies the exported `options` object
+# from app.ts (notably `trustProxy: true`). Without it, behind nginx every
+# request looks like 127.0.0.1 and the per-IP rate limiter shares one bucket.
+exec pnpm exec fastify start --options -a 0.0.0.0 -p 3161 -l info dist/app/app.js
