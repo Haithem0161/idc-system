@@ -147,14 +147,47 @@ pub async fn device_info_impl(state: &AppState) -> AppResult<DeviceInfo> {
     })
 }
 
-pub async fn config_set_sync_server_url_impl(state: &AppState, url: String) -> AppResult<()> {
-    let trimmed = url.trim();
+/// Validate and normalize a sync server URL. Accepts only absolute http(s)
+/// URLs with a host; trims a trailing slash so persisted values are stable.
+/// Pure (no I/O) so it can be unit-tested and reused by both the bootstrap and
+/// the superadmin update paths.
+pub fn validate_sync_server_url(raw: &str) -> AppResult<String> {
+    let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err(crate::error::AppError::Validation(
             "sync server url required".into(),
         ));
     }
-    let url = trimmed.to_string();
+    // Whitespace anywhere in a URL is always invalid and usually a paste error.
+    // Checked first so the host extraction below can ignore spacing.
+    if trimmed.chars().any(char::is_whitespace) {
+        return Err(crate::error::AppError::Validation(
+            "sync server url must not contain spaces".into(),
+        ));
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"))
+        .ok_or_else(|| {
+            crate::error::AppError::Validation(
+                "sync server url must start with http:// or https://".into(),
+            )
+        })?;
+    // Reject schemes with no host (e.g. "https://", "http:///path"). The host
+    // is everything before the first '/', '?', or '#'.
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if host.is_empty() {
+        return Err(crate::error::AppError::Validation(
+            "sync server url is missing a host".into(),
+        ));
+    }
+    // Normalize: drop a single trailing slash so the stored value is canonical.
+    Ok(trimmed.trim_end_matches('/').to_string())
+}
+
+pub async fn config_set_sync_server_url_impl(state: &AppState, url: String) -> AppResult<()> {
+    let url = validate_sync_server_url(&url)?;
     // Persist FIRST so a crash between writes can never leave the engine
     // pointing at a URL the DB has forgotten. The setter is also called by
     // the first-launch modal and the superadmin first-run wizard; without
@@ -261,8 +294,78 @@ pub async fn config_set_sync_server_url(state: State<'_, AppState>, url: String)
     config_set_sync_server_url_impl(&state, url).await
 }
 
+/// Superadmin-gated update of the sync server URL from the Settings screen.
+///
+/// `config_set_sync_server_url` (above) is the PRE-LOGIN bootstrap path used by
+/// the first-launch modal and first-run wizard, when no user exists yet, so it
+/// cannot be gated. Once a clinic is set up, repointing the sync server decides
+/// which server the app trusts for auth and where all PHI is pushed -- a
+/// security-relevant change that must be restricted to a superadmin (matching
+/// the settings invariant). This wrapper requires an authenticated superadmin
+/// and then reuses the same validated setter.
+pub async fn config_update_sync_server_url_impl(state: &AppState, url: String) -> AppResult<()> {
+    let ctx = state
+        .get_current_user()
+        .await
+        .ok_or(crate::error::AppError::NotAuthenticated)?;
+    let role = crate::domains::auth::domain::value_objects::UserRole::parse(&ctx.role)
+        .ok_or_else(|| crate::error::AppError::Validation("invalid actor role".into()))?;
+    if role != crate::domains::auth::domain::value_objects::UserRole::Superadmin {
+        return Err(crate::error::AppError::Validation(
+            "changing the sync server url is superadmin-only".into(),
+        ));
+    }
+    config_set_sync_server_url_impl(state, url).await
+}
+
+#[tauri::command]
+#[instrument(skip(state))]
+pub async fn config_update_sync_server_url(
+    state: State<'_, AppState>,
+    url: String,
+) -> AppResult<()> {
+    config_update_sync_server_url_impl(&state, url).await
+}
+
 #[tauri::command]
 #[instrument(skip(state))]
 pub async fn config_get_sync_server_url(state: State<'_, AppState>) -> AppResult<Option<String>> {
     config_get_sync_server_url_impl(&state).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_sync_server_url;
+
+    #[test]
+    fn accepts_https_and_http_and_normalizes_trailing_slash() {
+        assert_eq!(
+            validate_sync_server_url("https://idc-sync.example.com").unwrap(),
+            "https://idc-sync.example.com"
+        );
+        assert_eq!(
+            validate_sync_server_url("  https://idc-sync.example.com/  ").unwrap(),
+            "https://idc-sync.example.com"
+        );
+        assert_eq!(
+            validate_sync_server_url("http://192.168.1.10:3161").unwrap(),
+            "http://192.168.1.10:3161"
+        );
+        // A path is preserved (only a single trailing slash is trimmed).
+        assert_eq!(
+            validate_sync_server_url("https://h.example.com/api/").unwrap(),
+            "https://h.example.com/api"
+        );
+    }
+
+    #[test]
+    fn rejects_empty_missing_scheme_missing_host_and_whitespace() {
+        assert!(validate_sync_server_url("").is_err());
+        assert!(validate_sync_server_url("   ").is_err());
+        assert!(validate_sync_server_url("idc-sync.example.com").is_err()); // no scheme
+        assert!(validate_sync_server_url("ftp://h.example.com").is_err()); // wrong scheme
+        assert!(validate_sync_server_url("https://").is_err()); // no host
+        assert!(validate_sync_server_url("http:///path").is_err()); // no host
+        assert!(validate_sync_server_url("https://has space.example.com").is_err());
+    }
 }

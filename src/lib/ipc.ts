@@ -36,6 +36,9 @@ export type CommandMap = {
   }
   device_info: { args: void; result: DeviceInfo }
   config_set_sync_server_url: { args: { url: string }; result: null }
+  // Superadmin-gated update from the Settings screen (post-login). The
+  // unguarded `config_set_sync_server_url` above is the pre-login bootstrap path.
+  config_update_sync_server_url: { args: { url: string }; result: void }
   config_get_sync_server_url: { args: void; result: string | null }
   // Auth
   auth_login: {
@@ -396,7 +399,16 @@ export type CommandMap = {
     result: QualifiedOperatorRecord[]
   }
   visits_lock: {
-    args: { args: { visit_id: string; operator_id: string } }
+    args: {
+      args: {
+        visit_id: string
+        operator_id: string
+        // Cash actually collected when the receptionist overrides the billed
+        // total (patient could not pay in full). Omit/null = paid in full; 0 is
+        // a valid collected amount (waived).
+        amount_paid_override_iqd?: number | null
+      }
+    }
     result: LockResultRecord
   }
   visits_void: {
@@ -918,6 +930,8 @@ export interface VisitSnapshotRecord {
   operator_cut_iqd: number
   internal_pct: number | null
   total_amount_iqd: number
+  /** Cash actually collected when overridden (null = paid the billed total). */
+  amount_paid_override_iqd: number | null
   patient_name: string
   doctor_name: string | null
   operator_name: string
@@ -1152,6 +1166,11 @@ export interface VisitReportRowRecord {
   price_iqd: number
   doctor_cut_iqd: number
   operator_cut_iqd: number
+  /** Billed total for the visit (price + dye + report). */
+  total_iqd: number
+  /** Cash collected when overridden (null = paid the billed total; 0 = waived). */
+  amount_paid_override_iqd: number | null
+  /** Net against collected cash: collected - doctor cut - operator cut. */
   net_iqd: number
 }
 
@@ -1268,7 +1287,12 @@ export interface DailyCloseRecord {
   tenant_id: string
   target_date: string
   tz_offset: string
+  /** Billed revenue (price + dye + report) over locked visits. */
   total_revenue_iqd: number
+  /** Cash actually collected (override-where-set, else billed). */
+  total_collected_iqd: number
+  /** Discount granted via overrides: billed - collected (>= 0). */
+  total_discount_iqd: number
   total_doctor_cuts_iqd: number
   total_operator_cuts_iqd: number
   total_inventory_consumption_value_iqd: number
@@ -1292,6 +1316,8 @@ export interface FrozenCloseRecord {
   tz_offset: string
   input_hash: string
   total_revenue_iqd: number
+  total_collected_iqd: number
+  total_discount_iqd: number
   total_doctor_cuts_iqd: number
   total_operator_cuts_iqd: number
   total_inventory_consumption_value_iqd: number

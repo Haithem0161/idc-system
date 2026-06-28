@@ -134,6 +134,18 @@
         "max": "Must be at most {{max}}.",
         "pct": "Enter a whole number from 0 to 100.",
         "idle": "Enter at least 1 minute."
+      },
+      "connection": {
+        "title": "Sync server",
+        "desc": "The server this device syncs and signs in against.",
+        "url_label": "Server URL",
+        "change": "Change server",
+        "hint": "Use the address your clinic was given. Changing it re-pins the new server's security key.",
+        "invalid": "Enter a full http:// or https:// address.",
+        "confirm_warning": "Point this device at a different sync server? It will trust that server for sign-in and send all data there. Only do this if you were told to.",
+        "confirm": "Yes, change server",
+        "changing": "Changing...",
+        "saved": "Server updated"
       }
     }
   }

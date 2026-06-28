@@ -56,6 +56,7 @@ struct VisitRow {
     operator_cut_snapshot_iqd: Option<i64>,
     internal_pct_snapshot: Option<i64>,
     total_amount_iqd_snapshot: Option<i64>,
+    amount_paid_override_iqd: Option<i64>,
     patient_name_snapshot: Option<String>,
     doctor_name_snapshot: Option<String>,
     operator_name_snapshot: Option<String>,
@@ -86,6 +87,7 @@ impl VisitRow {
                 operator_cut_iqd: self.operator_cut_snapshot_iqd.unwrap_or(0),
                 internal_pct: self.internal_pct_snapshot,
                 total_amount_iqd: self.total_amount_iqd_snapshot.unwrap_or(0),
+                amount_paid_override_iqd: self.amount_paid_override_iqd,
                 patient_name: self.patient_name_snapshot.clone().unwrap_or_default(),
                 doctor_name: self.doctor_name_snapshot.clone(),
                 operator_name: self.operator_name_snapshot.clone().unwrap_or_default(),
@@ -104,6 +106,7 @@ impl VisitRow {
                 operator_cut_iqd: self.operator_cut_snapshot_iqd.unwrap_or(0),
                 internal_pct: self.internal_pct_snapshot,
                 total_amount_iqd: self.total_amount_iqd_snapshot.unwrap_or(0),
+                amount_paid_override_iqd: self.amount_paid_override_iqd,
                 patient_name: self.patient_name_snapshot.clone().unwrap_or_default(),
                 doctor_name: self.doctor_name_snapshot.clone(),
                 operator_name: self.operator_name_snapshot.clone().unwrap_or_default(),
@@ -152,6 +155,7 @@ const COLUMNS: &str = "id, patient_id, status, receptionist_user_id, check_type_
                        voided_at, voided_by_user_id, void_reason, price_snapshot_iqd, \
                        dye_cost_snapshot_iqd, report_cost_snapshot_iqd, doctor_cut_snapshot_iqd, \
                        operator_cut_snapshot_iqd, internal_pct_snapshot, total_amount_iqd_snapshot, \
+                       amount_paid_override_iqd, \
                        patient_name_snapshot, doctor_name_snapshot, operator_name_snapshot, \
                        check_type_name_ar_snapshot, check_type_name_en_snapshot, \
                        check_subtype_name_ar_snapshot, check_subtype_name_en_snapshot, \
@@ -175,7 +179,7 @@ impl VisitRepo for SqliteVisitRepo {
         let snap = v.snapshots.as_ref();
         let sql = format!(
             "INSERT INTO visits ({COLUMNS}) VALUES (\
-                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?\
+                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?\
              ) ON CONFLICT(id) DO UPDATE SET \
                status = excluded.status, \
                patient_id = excluded.patient_id, \
@@ -195,6 +199,7 @@ impl VisitRepo for SqliteVisitRepo {
                operator_cut_snapshot_iqd = excluded.operator_cut_snapshot_iqd, \
                internal_pct_snapshot = excluded.internal_pct_snapshot, \
                total_amount_iqd_snapshot = excluded.total_amount_iqd_snapshot, \
+               amount_paid_override_iqd = excluded.amount_paid_override_iqd, \
                patient_name_snapshot = excluded.patient_name_snapshot, \
                doctor_name_snapshot = excluded.doctor_name_snapshot, \
                operator_name_snapshot = excluded.operator_name_snapshot, \
@@ -230,6 +235,7 @@ impl VisitRepo for SqliteVisitRepo {
             .bind(snap.map(|s| s.operator_cut_iqd))
             .bind(snap.and_then(|s| s.internal_pct))
             .bind(snap.map(|s| s.total_amount_iqd))
+            .bind(snap.and_then(|s| s.amount_paid_override_iqd))
             .bind(snap.map(|s| s.patient_name.clone()))
             .bind(snap.and_then(|s| s.doctor_name.clone()))
             .bind(snap.map(|s| s.operator_name.clone()))

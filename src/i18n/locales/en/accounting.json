@@ -1,6 +1,12 @@
 {
   "accounting.dashboard.eyebrow": "Accounting",
   "accounting.dashboard.title": "Dashboard",
+  "accounting.kpi.revenue_billed": "Revenue (billed)",
+  "accounting.kpi.collected": "Collected",
+  "accounting.kpi.discount": "Discount",
+  "accounting.visits.col.paid": "Paid",
+  "accounting.visits.overridden": "Override",
+  "accounting.visits.overridden_hint": "Receptionist overrode the amount paid",
   "accounting.visits.eyebrow": "Visits report",
   "accounting.visits.title": "Visits",
   "accounting.doctors.eyebrow": "Earnings",

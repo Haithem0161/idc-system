@@ -10,6 +10,8 @@ import {
   settingValueAsText,
   useSettings,
   useSettingsUpdateBatch,
+  useSyncServerUrl,
+  useUpdateSyncServerUrl,
 } from "@/features/settings/queries"
 import { useUpdater } from "@/features/updater/use-updater"
 import { formatIqd } from "@/lib/format/money"
@@ -311,6 +313,7 @@ export default function SettingsPage () {
           {t("admin.settings.zone.maintenance", { defaultValue: "Maintenance" })}
         </span>
       </div>
+      <ConnectionPanel />
       <UpdatesPanel />
 
       <SaveBar
@@ -650,6 +653,154 @@ function Toggle ({
         )}
       />
     </button>
+  )
+}
+
+// ---- connection (sync server) ---------------------------------------------
+
+/** Client-side mirror of the Rust `validate_sync_server_url`: absolute http(s)
+ *  URL with a host and no whitespace. Server re-validates regardless. */
+function isValidSyncUrl (raw: string): boolean {
+  const v = raw.trim()
+  if (!v || /\s/.test(v)) return false
+  const m = /^https?:\/\/([^/?#]+)/i.exec(v)
+  return Boolean(m && m[1])
+}
+
+/**
+ * Sync server URL editor (superadmin-only screen). Repointing the server is a
+ * security-relevant change -- it decides which server the app trusts for auth
+ * and where all data is pushed -- so it commits through the gated
+ * `config_update_sync_server_url` command and re-pins the new server's RS256
+ * key. Kept separate from the batched clinic settings: it is one field, has its
+ * own confirm + warning, and a different commit path.
+ */
+function ConnectionPanel () {
+  const { t } = useTranslation()
+  const { data: current, isLoading } = useSyncServerUrl()
+  const update = useUpdateSyncServerUrl()
+  const inputId = useId()
+  const hintId = useId()
+  const [value, setValue] = useState("")
+  const [confirming, setConfirming] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Seed the field from the persisted URL once it loads / changes (when not
+  // mid-edit). `current` is null until first-launch setup has run.
+  const [seen, setSeen] = useState<string | null | undefined>(undefined)
+  if (current !== seen && !confirming) {
+    setSeen(current)
+    setValue(current ?? "")
+  }
+
+  useEffect(() => {
+    if (!saved) return
+    const id = window.setTimeout(() => setSaved(false), 2200)
+    return () => window.clearTimeout(id)
+  }, [saved])
+
+  const trimmed = value.trim()
+  const dirty = trimmed !== (current ?? "").trim()
+  const valid = isValidSyncUrl(trimmed)
+
+  const commit = async () => {
+    setError(null)
+    try {
+      await update.mutateAsync(trimmed)
+      setConfirming(false)
+      setSaved(true)
+    } catch (err) {
+      setError((err as { message?: string }).message ?? t("common.error", { defaultValue: "Something went wrong" }))
+    }
+  }
+
+  return (
+    <section className="panel">
+      <div className="panel-head flex-col items-start gap-0.5">
+        <span className="panel-title">
+          {t("admin.settings.connection.title", { defaultValue: "Sync server" })}
+        </span>
+        <span className="text-[12px] font-normal normal-case tracking-normal text-ink-3">
+          {t("admin.settings.connection.desc", {
+            defaultValue: "The server this device syncs and signs in against.",
+          })}
+        </span>
+      </div>
+      <div className="px-5 py-4">
+        <label htmlFor={inputId} className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">
+          {t("admin.settings.connection.url_label", { defaultValue: "Server URL" })}
+        </label>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <input
+            id={inputId}
+            type="url"
+            dir="ltr"
+            inputMode="url"
+            placeholder="https://idc-sync.example.com"
+            value={value}
+            disabled={isLoading || update.isPending}
+            aria-describedby={hintId}
+            aria-invalid={trimmed.length > 0 && !valid ? true : undefined}
+            onChange={(e) => { setValue(e.target.value); setConfirming(false); setError(null) }}
+            className={cn(
+              "input input-sm w-full max-w-md font-mono",
+              trimmed.length > 0 && !valid && "border-crimson"
+            )}
+          />
+          {!confirming ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={!dirty || !valid || update.isPending}
+              onClick={() => setConfirming(true)}
+            >
+              {t("admin.settings.connection.change", { defaultValue: "Change server" })}
+            </button>
+          ) : null}
+        </div>
+
+        <p id={hintId} className="mt-1.5 text-[12px] text-ink-3">
+          {trimmed.length > 0 && !valid
+            ? t("admin.settings.connection.invalid", { defaultValue: "Enter a full http:// or https:// address." })
+            : t("admin.settings.connection.hint", {
+                defaultValue: "Use the address your clinic was given. Changing it re-pins the new server's security key.",
+              })}
+        </p>
+
+        {confirming ? (
+          <div className="mt-3 rounded-md border border-crimson/30 bg-crimson-soft px-3.5 py-3">
+            <p className="text-[12px] leading-snug text-ink-2">
+              {t("admin.settings.connection.confirm_warning", {
+                defaultValue:
+                  "Point this device at a different sync server? It will trust that server for sign-in and send all data there. Only do this if you were told to.",
+              })}
+            </p>
+            <div className="mt-2.5 flex items-center gap-2">
+              <button type="button" className="btn btn-danger btn-sm" disabled={update.isPending} onClick={() => void commit()} aria-busy={update.isPending}>
+                {update.isPending
+                  ? t("admin.settings.connection.changing", { defaultValue: "Changing..." })
+                  : t("admin.settings.connection.confirm", { defaultValue: "Yes, change server" })}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={update.isPending} onClick={() => { setConfirming(false); setValue(current ?? "") }}>
+                {t("admin.settings.discard", { defaultValue: "Discard" })}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mt-2 min-h-[20px]" role="status" aria-live="polite">
+          {error ? (
+            <span className="status-pill is-danger">{error}</span>
+          ) : saved ? (
+            <span className="status-pill is-success">
+              <Check className="h-3 w-3" strokeWidth={2.4} aria-hidden />
+              {t("admin.settings.connection.saved", { defaultValue: "Server updated" })}
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </section>
   )
 }
 

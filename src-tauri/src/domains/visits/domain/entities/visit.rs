@@ -54,6 +54,12 @@ pub struct VisitSnapshots {
     pub operator_cut_iqd: i64,
     pub internal_pct: Option<i64>,
     pub total_amount_iqd: i64,
+    /// Cash actually collected when the receptionist overrides the billed total
+    /// (e.g. the patient cannot pay in full). `None` = paid the full
+    /// `total_amount_iqd`. Decoupled from the billed money model: it is excluded
+    /// from the `total = price + dye + report` invariant and never affects the
+    /// doctor or operator cut. `Some(0)` is legal (waived).
+    pub amount_paid_override_iqd: Option<i64>,
     pub patient_name: String,
     pub doctor_name: Option<String>,
     pub operator_name: String,
@@ -211,12 +217,23 @@ impl Visit {
             }
             _ => {}
         }
-        // Total-equals-sum (§7.2).
+        // Total-equals-sum (§7.2). The override is deliberately NOT part of this
+        // invariant: `total_amount_iqd` stays the BILLED total (price + dye +
+        // report); the override only records what was collected against it.
         let expected = snapshots.price_iqd + snapshots.dye_cost_iqd + snapshots.report_cost_iqd;
         if snapshots.total_amount_iqd != expected {
             return Err(AppError::Validation(
                 "total_amount_iqd_snapshot must equal price + dye + report".into(),
             ));
+        }
+        // A collected-amount override, when present, must be non-negative. Zero
+        // is allowed (the patient could not pay / the amount was waived).
+        if let Some(paid) = snapshots.amount_paid_override_iqd {
+            if paid < 0 {
+                return Err(AppError::Validation(
+                    "amount_paid_override_iqd must be >= 0".into(),
+                ));
+            }
         }
         self.status = VisitStatus::Locked;
         self.operator_id = Some(operator_id);
@@ -296,6 +313,7 @@ mod tests {
             operator_cut_iqd: 5_000,
             internal_pct: Some(40),
             total_amount_iqd: price,
+            amount_paid_override_iqd: None,
             patient_name: "Pat".into(),
             doctor_name: None,
             operator_name: "Op".into(),
@@ -315,6 +333,7 @@ mod tests {
             operator_cut_iqd: 5_000,
             internal_pct: None,
             total_amount_iqd: price,
+            amount_paid_override_iqd: None,
             patient_name: "Pat".into(),
             doctor_name: Some(doctor_name.into()),
             operator_name: "Op".into(),
@@ -469,6 +488,32 @@ mod tests {
         let mut bad = snap_house(50_000);
         bad.total_amount_iqd = 999_999;
         let err = v.lock(Uuid::now_v7(), bad, Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_accepts_amount_paid_override_including_zero() {
+        // A receptionist override (incl. 0 = waived) is decoupled from the
+        // billed total invariant: total still equals price + dye + report.
+        for paid in [Some(0_i64), Some(25_000), None] {
+            let v = Visit::create_draft(draft_input()).unwrap();
+            let mut snap = snap_house(50_000);
+            snap.amount_paid_override_iqd = paid;
+            let locked = v.lock(Uuid::now_v7(), snap, Utc::now()).unwrap();
+            let s = locked.snapshots.unwrap();
+            // The override never perturbs the billed total or the doctor cut.
+            assert_eq!(s.total_amount_iqd, 50_000);
+            assert_eq!(s.doctor_cut_iqd, 50_000 * 40 / 100);
+            assert_eq!(s.amount_paid_override_iqd, paid);
+        }
+    }
+
+    #[test]
+    fn lock_rejects_negative_amount_paid_override() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let mut snap = snap_house(50_000);
+        snap.amount_paid_override_iqd = Some(-1);
+        let err = v.lock(Uuid::now_v7(), snap, Utc::now());
         assert!(err.is_err());
     }
 

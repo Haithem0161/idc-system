@@ -12,6 +12,15 @@ export interface VisitTabForm {
   doctorId: string | null
   dye: boolean
   report: boolean
+  /**
+   * Receptionist price override: when true, the patient paid a custom amount
+   * (captured in `amountPaidOverrideIqd`) instead of the billed total. Does NOT
+   * affect the doctor's cut. Carried as UI state only -- applied at lock time.
+   */
+  overrideEnabled: boolean
+  /** Amount actually paid when `overrideEnabled`. `""` while the field is blank;
+   * 0 is a valid value (the patient could not pay). */
+  amountPaidOverrideIqd: number | ""
 }
 
 export interface VisitTab {
@@ -61,6 +70,8 @@ const emptyForm: VisitTabForm = {
   doctorId: null,
   dye: false,
   report: false,
+  overrideEnabled: false,
+  amountPaidOverrideIqd: "",
 }
 
 function makeTabId (): string {

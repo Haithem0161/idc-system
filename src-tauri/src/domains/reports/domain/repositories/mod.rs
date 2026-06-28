@@ -16,7 +16,12 @@ use super::entities::*;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VisitsAggregate {
     pub visits: i64,
+    /// Billed revenue: SUM(total_amount_iqd_snapshot) = price + dye + report.
     pub revenue_iqd: i64,
+    /// Cash actually collected: SUM(COALESCE(amount_paid_override_iqd,
+    /// total_amount_iqd_snapshot)). Equals `revenue_iqd` when no visit was
+    /// overridden; less than it when receptionists collected less than billed.
+    pub collected_iqd: i64,
     pub doctor_cut_iqd: i64,
     pub operator_cut_iqd: i64,
 }

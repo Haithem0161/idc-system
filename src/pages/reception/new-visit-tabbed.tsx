@@ -310,10 +310,18 @@ export default function NewVisitTabbedPage () {
     if (!activeTab) return
     const tab = useVisitTabsStore.getState().tabs.find((t) => t.tabId === activeTab.tabId)
     if (!tab?.draftVisitId) return
+    // Apply the receptionist price override only when enabled AND a numeric
+    // amount was entered (0 is valid). Otherwise the patient pays the billed
+    // total, so we send null.
+    const override =
+      tab.form.overrideEnabled && tab.form.amountPaidOverrideIqd !== ""
+        ? tab.form.amountPaidOverrideIqd
+        : null
     try {
       const result = await visitLock.mutateAsync({
         visit_id: tab.draftVisitId,
         operator_id: operatorId,
+        amount_paid_override_iqd: override,
       })
       setInfo(t("reception.new_visit.errors.locked"))
       setOperatorPickerOpen(false)
@@ -339,9 +347,13 @@ export default function NewVisitTabbedPage () {
   }
 
   const form = activeTab.form
+  // When the price override is on, a numeric amount must be entered (0 allowed)
+  // before the visit can be finished.
+  const overrideReady = !form.overrideEnabled || form.amountPaidOverrideIqd !== ""
   const lockEnabled =
     form.patientName.trim().length > 0 &&
-    (!checkType?.has_subtypes || Boolean(form.subtypeId))
+    (!checkType?.has_subtypes || Boolean(form.subtypeId)) &&
+    overrideReady
 
   return (
     <div className="space-y-6 px-9 pb-12 pt-6">
@@ -435,6 +447,62 @@ export default function NewVisitTabbedPage () {
           hasPrice={hasPrice}
           estimating={estimating}
         >
+          <div className="space-y-2">
+            <label className="flex cursor-pointer items-center gap-2 text-[13px] text-ink-2">
+              <input
+                type="checkbox"
+                className="size-4 accent-crimson"
+                checked={form.overrideEnabled}
+                onChange={(e) =>
+                  patchForm({
+                    overrideEnabled: e.target.checked,
+                    // Clear the amount when turning the override off so a stale
+                    // value can never be sent.
+                    amountPaidOverrideIqd: e.target.checked
+                      ? form.amountPaidOverrideIqd
+                      : "",
+                  })
+                }
+                data-testid="override-checkbox"
+              />
+              {t("reception.new_visit.override")}
+            </label>
+            {form.overrideEnabled ? (
+              <div className="space-y-1">
+                <label
+                  htmlFor="amount-paid-override"
+                  className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3"
+                >
+                  {t("reception.new_visit.override_label")}
+                </label>
+                <input
+                  id="amount-paid-override"
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  className="input input-sm w-full font-mono tabular-nums"
+                  value={form.amountPaidOverrideIqd}
+                  onChange={(e) => {
+                    const raw = e.target.value
+                    if (raw === "") {
+                      patchForm({ amountPaidOverrideIqd: "" })
+                      return
+                    }
+                    const n = Math.floor(Number(raw))
+                    // Ignore non-numeric / negative input; 0 is allowed.
+                    if (Number.isFinite(n) && n >= 0) {
+                      patchForm({ amountPaidOverrideIqd: n })
+                    }
+                  }}
+                  data-testid="override-amount"
+                />
+                <p className="text-[11px] text-ink-3">
+                  {t("reception.new_visit.override_hint")}
+                </p>
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             className="btn btn-primary w-full"

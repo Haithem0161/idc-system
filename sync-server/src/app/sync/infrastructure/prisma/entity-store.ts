@@ -272,6 +272,20 @@ export class PrismaEntityStore implements SyncEntityStore {
       row,
       async () => loadVersionMeta(this.prisma.doctorCheckPricing, row.id),
       async () => {
+        // Mirrors desktop partial index doctor_check_pricing_unique
+        // (doctor_id, check_type_id, IFNULL(check_subtype_id,'')). A NULL subtype
+        // is one bucket; `checkSubtypeId: null` in `where` matches it.
+        await this.dedupeLiveTuple(
+          this.prisma.doctorCheckPricing,
+          row.id,
+          row.deleted_at,
+          {
+            doctorId: row.doctor_id,
+            checkTypeId: row.check_type_id,
+            checkSubtypeId: row.check_subtype_id,
+          },
+          new Date()
+        )
         const data: Prisma.DoctorCheckPricingUncheckedCreateInput = {
           id: row.id,
           doctorId: row.doctor_id,
@@ -329,6 +343,16 @@ export class PrismaEntityStore implements SyncEntityStore {
       row,
       async () => loadVersionMeta(this.prisma.operatorSpecialty, row.id),
       async () => {
+        // Mirrors the desktop partial index operator_specialties_unique
+        // (operator_id, check_type_id). operatorId is a tenant-unique UUID, so
+        // no entity scoping is needed to stay tenant-safe.
+        await this.dedupeLiveTuple(
+          this.prisma.operatorSpecialty,
+          row.id,
+          row.deleted_at,
+          { operatorId: row.operator_id, checkTypeId: row.check_type_id },
+          new Date()
+        )
         const data: Prisma.OperatorSpecialtyUncheckedCreateInput = {
           id: row.id,
           operatorId: row.operator_id,
@@ -383,6 +407,20 @@ export class PrismaEntityStore implements SyncEntityStore {
       row,
       async () => loadVersionMeta(this.prisma.inventoryConsumptionMap, row.id),
       async () => {
+        // Mirrors desktop partial index inventory_consumption_unique
+        // (check_type_id, IFNULL(check_subtype_id,''), item_id, on_dye_only).
+        await this.dedupeLiveTuple(
+          this.prisma.inventoryConsumptionMap,
+          row.id,
+          row.deleted_at,
+          {
+            checkTypeId: row.check_type_id,
+            checkSubtypeId: row.check_subtype_id,
+            itemId: row.item_id,
+            onDyeOnly: row.on_dye_only,
+          },
+          new Date()
+        )
         const data: Prisma.InventoryConsumptionMapUncheckedCreateInput = {
           id: row.id,
           checkTypeId: row.check_type_id,
@@ -468,6 +506,7 @@ export class PrismaEntityStore implements SyncEntityStore {
           operatorCutSnapshotIqd: row.operator_cut_snapshot_iqd,
           internalPctSnapshot: row.internal_pct_snapshot,
           totalAmountIqdSnapshot: row.total_amount_iqd_snapshot,
+          amountPaidOverrideIqd: row.amount_paid_override_iqd,
           patientNameSnapshot: row.patient_name_snapshot,
           doctorNameSnapshot: row.doctor_name_snapshot,
           operatorNameSnapshot: row.operator_name_snapshot,
@@ -504,6 +543,7 @@ export class PrismaEntityStore implements SyncEntityStore {
       'operator_cut_snapshot_iqd',
       'internal_pct_snapshot',
       'total_amount_iqd_snapshot',
+      'amount_paid_override_iqd',
     ]
     const snapshotDiffers = snapshotKeys.some((k) => reified[k] !== incoming[k])
     if (incoming.version < reified.version && snapshotDiffers) return reified
@@ -591,6 +631,22 @@ export class PrismaEntityStore implements SyncEntityStore {
       row,
       async () => loadVersionMeta(this.prisma.operatorShift, row.id),
       async () => {
+        // Mirrors the desktop partial index operator_shifts_open (one OPEN shift
+        // per operator). If the incoming shift is open + live, CLOSE any other
+        // open, live shift for that operator (additive ledger -- close, don't
+        // delete) so a client pulling both can't trip its partial unique index.
+        if (row.check_out_at == null && row.deleted_at == null) {
+          const now = new Date()
+          await this.prisma.operatorShift.updateMany({
+            where: {
+              id: { not: row.id },
+              operatorId: row.operator_id,
+              checkOutAt: null,
+              deletedAt: null,
+            },
+            data: { checkOutAt: now, updatedAt: now, version: { increment: 1 } },
+          })
+        }
         const data: Prisma.OperatorShiftUncheckedCreateInput = {
           id: row.id,
           operatorId: row.operator_id,
@@ -637,6 +693,8 @@ export class PrismaEntityStore implements SyncEntityStore {
           tzOffset: row.tz_offset,
           inputHash: row.input_hash,
           totalRevenueIqd: row.total_revenue_iqd,
+          totalCollectedIqd: row.total_collected_iqd,
+          totalDiscountIqd: row.total_discount_iqd,
           totalDoctorCutsIqd: row.total_doctor_cuts_iqd,
           totalOperatorCutsIqd: row.total_operator_cuts_iqd,
           totalInventoryConsumptionValueIqd: row.total_inventory_consumption_value_iqd,
@@ -737,6 +795,35 @@ export class PrismaEntityStore implements SyncEntityStore {
   }
 
   // ---- LWW core ------------------------------------------------------------
+
+  /**
+   * Retire any OTHER live row that shares a business-key tuple with the incoming
+   * live row, so the server never holds two live rows for one logical key.
+   *
+   * The desktop SQLite schema enforces a `UNIQUE(<tuple>) WHERE deleted_at IS
+   * NULL` on several tables (operator_specialties, doctor_check_pricing,
+   * inventory_consumption_map, users, ...). The server has no such constraint,
+   * so a delete+recreate (or two independent creates) leaves two live rows with
+   * the same tuple but different ids -- and when a client pulls both, the second
+   * insert trips its partial-unique index and aborts the whole pull. We prevent
+   * that at the SOURCE: before writing an incoming live row, soft-delete any
+   * sibling live row matching the tuple. `model` is a Prisma delegate; `tuple`
+   * is the business-key `where` (must NOT include `id`). No-op when the incoming
+   * row is itself a tombstone (a delete never collides on the partial index).
+   */
+  private async dedupeLiveTuple (
+    model: { updateMany: (args: { where: Record<string, unknown>, data: Record<string, unknown> }) => Promise<{ count: number }> },
+    keepId: string,
+    incomingDeletedAt: string | null,
+    tuple: Record<string, unknown>,
+    now: Date
+  ): Promise<void> {
+    if (incomingDeletedAt != null) return
+    await model.updateMany({
+      where: { ...tuple, id: { not: keepId }, deletedAt: null },
+      data: { deletedAt: now, updatedAt: now, version: { increment: 1 } },
+    })
+  }
 
   private async lwwUpsert<R extends VersionedRow> (
     incoming: R,
@@ -1222,6 +1309,7 @@ function toVisitSyncRecord (r: {
   operatorCutSnapshotIqd: number | null
   internalPctSnapshot: number | null
   totalAmountIqdSnapshot: number | null
+  amountPaidOverrideIqd: number | null
   patientNameSnapshot: string | null
   doctorNameSnapshot: string | null
   operatorNameSnapshot: string | null
@@ -1258,6 +1346,7 @@ function toVisitSyncRecord (r: {
     operator_cut_snapshot_iqd: r.operatorCutSnapshotIqd,
     internal_pct_snapshot: r.internalPctSnapshot,
     total_amount_iqd_snapshot: r.totalAmountIqdSnapshot,
+    amount_paid_override_iqd: r.amountPaidOverrideIqd,
     patient_name_snapshot: r.patientNameSnapshot,
     doctor_name_snapshot: r.doctorNameSnapshot,
     operator_name_snapshot: r.operatorNameSnapshot,
@@ -1312,6 +1401,8 @@ function toDailyCloseSyncRecord (r: {
   tzOffset: string
   inputHash: string
   totalRevenueIqd: number
+  totalCollectedIqd: number
+  totalDiscountIqd: number
   totalDoctorCutsIqd: number
   totalOperatorCutsIqd: number
   totalInventoryConsumptionValueIqd: number
@@ -1338,6 +1429,8 @@ function toDailyCloseSyncRecord (r: {
     tz_offset: r.tzOffset,
     input_hash: r.inputHash,
     total_revenue_iqd: r.totalRevenueIqd,
+    total_collected_iqd: r.totalCollectedIqd,
+    total_discount_iqd: r.totalDiscountIqd,
     total_doctor_cuts_iqd: r.totalDoctorCutsIqd,
     total_operator_cuts_iqd: r.totalOperatorCutsIqd,
     total_inventory_consumption_value_iqd: r.totalInventoryConsumptionValueIqd,

@@ -86,6 +86,10 @@ pub fn compute(inputs: &MoneyMathInputs<'_>) -> AppResult<VisitSnapshots> {
         operator_cut_iqd: operator_cut,
         internal_pct,
         total_amount_iqd: total,
+        // The money engine only ever produces the billed snapshot. A collected
+        // override is a receptionist decision applied after compute(), so it is
+        // never set here.
+        amount_paid_override_iqd: None,
         patient_name: inputs.patient_name.to_string(),
         doctor_name: inputs.doctor.map(|d| d.name.clone()),
         operator_name: inputs.operator.name.clone(),

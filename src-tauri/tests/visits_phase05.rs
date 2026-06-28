@@ -339,6 +339,7 @@ async fn create_draft_and_lock_produces_receipt_and_consumption() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )
@@ -428,6 +429,7 @@ async fn lock_rejected_when_no_qualified_operator_on_shift() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )
@@ -462,6 +464,7 @@ async fn void_offsets_inventory_and_marks_visit_voided() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )
@@ -530,6 +533,7 @@ async fn discard_locked_visit_is_rejected() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )
@@ -665,6 +669,7 @@ async fn create_and_lock_visit(f: &Fixture) -> Uuid {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )
@@ -739,6 +744,7 @@ async fn lock_house_visit_records_internal_pct_and_null_doctor_snapshot() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )
@@ -828,6 +834,7 @@ async fn lock_rejects_when_operator_not_in_qualified_set() {
             UserRole::Receptionist,
             draft.id,
             stranger_id,
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )
@@ -855,6 +862,7 @@ async fn lock_rejects_voided_visit() {
             UserRole::Receptionist,
             visit_id,
             f.operator.id,
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )
@@ -1209,6 +1217,7 @@ async fn lock_increments_visit_version_monotonically_from_create() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )

@@ -83,6 +83,9 @@ describe.each(directions)("Settings page (dir=%s)", (dir) => {
     vi.mocked(invoke).mockImplementation(((cmd: string) => {
       if (cmd === "settings_list") return Promise.resolve(SETTINGS)
       if (cmd === "settings_update_batch") return Promise.resolve(SETTINGS)
+      if (cmd === "config_get_sync_server_url") return Promise.resolve("https://idc-sync.example.com")
+      if (cmd === "config_update_sync_server_url") return Promise.resolve(undefined)
+      if (cmd === "auth_bootstrap_jwt_key") return Promise.resolve(undefined)
       return Promise.resolve(undefined)
     }) as unknown as typeof invoke)
   })
@@ -158,5 +161,56 @@ describe.each(directions)("Settings page (dir=%s)", (dir) => {
       name: i18n.t("admin.settings.save_changes"),
     })
     expect(saveBtn).toBeDisabled()
+  })
+
+  it("shows the sync server field seeded with the configured URL", async () => {
+    renderPage()
+    await screen.findByRole("heading", { level: 1 })
+    const urlInput = await screen.findByLabelText(i18n.t("admin.settings.connection.url_label"))
+    await waitFor(() => {
+      expect((urlInput as HTMLInputElement).value).toBe("https://idc-sync.example.com")
+    })
+  })
+
+  it("changing the sync server is confirm-gated and goes through the gated command + key re-pin", async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("heading", { level: 1 })
+    const urlInput = await screen.findByLabelText(i18n.t("admin.settings.connection.url_label"))
+    await waitFor(() => expect((urlInput as HTMLInputElement).value).toBe("https://idc-sync.example.com"))
+
+    await user.clear(urlInput)
+    await user.type(urlInput, "https://new-sync.example.com")
+
+    // First click only reveals the confirm step -- nothing committed yet.
+    await user.click(screen.getByRole("button", { name: i18n.t("admin.settings.connection.change") }))
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith("config_update_sync_server_url", expect.anything())
+
+    // Confirm commits through the gated command and re-pins the new key.
+    await user.click(screen.getByRole("button", { name: i18n.t("admin.settings.connection.confirm") }))
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("config_update_sync_server_url", {
+        url: "https://new-sync.example.com",
+      })
+    })
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("auth_bootstrap_jwt_key", {
+      args: { server_url: "https://new-sync.example.com" },
+    })
+  })
+
+  it("rejects an invalid sync server URL (no Change button)", async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("heading", { level: 1 })
+    const urlInput = await screen.findByLabelText(i18n.t("admin.settings.connection.url_label"))
+    await waitFor(() => expect((urlInput as HTMLInputElement).value).toBe("https://idc-sync.example.com"))
+
+    await user.clear(urlInput)
+    await user.type(urlInput, "not-a-url")
+
+    // The change action is disabled for a non-http(s) value.
+    expect(
+      screen.getByRole("button", { name: i18n.t("admin.settings.connection.change") })
+    ).toBeDisabled()
   })
 })

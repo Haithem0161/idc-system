@@ -345,6 +345,7 @@ async fn lock_visit(r: &Rig, dye: bool, doctor: Option<Uuid>) -> Uuid {
             UserRole::Receptionist,
             draft.id,
             r.operator.id,
+            None,
             money_settings(),
             ReceiptRenderOptions::default(),
         )
@@ -433,6 +434,7 @@ async fn s6_2_mixed_direction_patient_names_round_trip_via_visits_report() {
             UserRole::Receptionist,
             draft.id,
             r.operator.id,
+            None,
             money_settings(),
             ReceiptRenderOptions::default(),
         )

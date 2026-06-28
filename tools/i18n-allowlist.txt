@@ -82,6 +82,8 @@ ReturnType
 # the local dev fallback.
 http://localhost:3161
 https://idc-sync.madebyhaithem.com
+# Sample URL placeholder in the Settings -> Sync server field. A URL, not copy.
+https://idc-sync.example.com
 
 # Dev-only role-account switcher (src/components/dev/dev-view-switcher.tsx).
 # Never ships to a clinic (gated on import.meta.env.DEV), so intentionally

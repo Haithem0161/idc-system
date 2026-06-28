@@ -307,6 +307,7 @@ mod tests {
             operator_cut_iqd: 5000,
             internal_pct: None,
             total_amount_iqd: 52000,
+            amount_paid_override_iqd: None,
             patient_name: "Ahmed".into(),
             doctor_name: Some("Dr. Sara".into()),
             operator_name: "Op One".into(),

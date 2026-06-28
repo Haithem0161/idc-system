@@ -68,6 +68,14 @@ pub struct VisitRow {
     pub price_iqd: i64,
     pub doctor_cut_iqd: i64,
     pub operator_cut_iqd: i64,
+    /// Billed total for the visit (price + dye + report).
+    pub total_iqd: i64,
+    /// Cash actually collected when the receptionist overrode the billed total
+    /// (`None` = paid the billed `total_iqd`). Drives the "overridden" marker in
+    /// accounting; `Some(0)` means waived.
+    pub amount_paid_override_iqd: Option<i64>,
+    /// Net against COLLECTED cash: collected - doctor_cut - operator_cut, where
+    /// collected = `amount_paid_override_iqd` when set, else `total_iqd`.
     pub net_iqd: i64,
 }
 
@@ -219,10 +227,17 @@ pub struct DailyClose {
     pub tenant_id: String,
     pub target_date: NaiveDate,
     pub tz_offset: String,
+    /// Billed revenue: SUM of locked visit totals (price + dye + report).
     pub total_revenue_iqd: i64,
+    /// Cash actually collected: SUM of override-where-set, else billed total.
+    pub total_collected_iqd: i64,
+    /// Discount granted via receptionist overrides: billed - collected (>= 0).
+    pub total_discount_iqd: i64,
     pub total_doctor_cuts_iqd: i64,
     pub total_operator_cuts_iqd: i64,
     pub total_inventory_consumption_value_iqd: i64,
+    /// Net against COLLECTED cash: collected - doctor cuts - operator cuts -
+    /// inventory value.
     pub net_iqd: i64,
     pub locked_count: i64,
     pub voided_count: i64,
@@ -288,6 +303,8 @@ pub struct FrozenClose {
     pub input_hash: String,
 
     pub total_revenue_iqd: i64,
+    pub total_collected_iqd: i64,
+    pub total_discount_iqd: i64,
     pub total_doctor_cuts_iqd: i64,
     pub total_operator_cuts_iqd: i64,
     pub total_inventory_consumption_value_iqd: i64,
@@ -320,6 +337,8 @@ pub struct FrozenCloseNewInput {
     pub tz_offset: String,
     pub input_hash: String,
     pub total_revenue_iqd: i64,
+    pub total_collected_iqd: i64,
+    pub total_discount_iqd: i64,
     pub total_doctor_cuts_iqd: i64,
     pub total_operator_cuts_iqd: i64,
     pub total_inventory_consumption_value_iqd: i64,
@@ -354,6 +373,8 @@ impl FrozenClose {
             tz_offset: input.tz_offset,
             input_hash: input.input_hash,
             total_revenue_iqd: input.total_revenue_iqd,
+            total_collected_iqd: input.total_collected_iqd,
+            total_discount_iqd: input.total_discount_iqd,
             total_doctor_cuts_iqd: input.total_doctor_cuts_iqd,
             total_operator_cuts_iqd: input.total_operator_cuts_iqd,
             total_inventory_consumption_value_iqd: input.total_inventory_consumption_value_iqd,
@@ -413,6 +434,8 @@ mod frozen_close_tests {
             tz_offset: "+03:00".into(),
             input_hash: "abc123".into(),
             total_revenue_iqd: 50_000,
+            total_collected_iqd: 50_000,
+            total_discount_iqd: 0,
             total_doctor_cuts_iqd: 1_500,
             total_operator_cuts_iqd: 4_000,
             total_inventory_consumption_value_iqd: 0,

@@ -358,6 +358,7 @@ async fn perf_lock_typical_case_under_200ms() {
                 UserRole::Receptionist,
                 draft.id,
                 r.operator.id,
+                None,
                 money(),
                 ReceiptRenderOptions::default(),
             )
@@ -470,6 +471,7 @@ async fn perf_list_today_by_check_50_rows_under_30ms() {
                 UserRole::Receptionist,
                 draft.id,
                 r.operator.id,
+                None,
                 money(),
                 ReceiptRenderOptions::default(),
             )

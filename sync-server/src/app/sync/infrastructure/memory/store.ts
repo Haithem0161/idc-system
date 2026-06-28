@@ -220,6 +220,7 @@ export interface VisitSyncRecord {
   operator_cut_snapshot_iqd: number | null
   internal_pct_snapshot: number | null
   total_amount_iqd_snapshot: number | null
+  amount_paid_override_iqd: number | null
   patient_name_snapshot: string | null
   doctor_name_snapshot: string | null
   operator_name_snapshot: string | null
@@ -265,6 +266,8 @@ export interface DailyCloseSyncRecord {
   tz_offset: string
   input_hash: string
   total_revenue_iqd: number
+  total_collected_iqd: number
+  total_discount_iqd: number
   total_doctor_cuts_iqd: number
   total_operator_cuts_iqd: number
   total_inventory_consumption_value_iqd: number
@@ -488,6 +491,7 @@ export class MemorySyncStore implements
       'operator_cut_snapshot_iqd',
       'internal_pct_snapshot',
       'total_amount_iqd_snapshot',
+      'amount_paid_override_iqd',
     ]
     const snapshotDiffers = snapshotKeys.some((k) => existing[k] !== incoming[k])
     if (incoming.version < existing.version && snapshotDiffers) {

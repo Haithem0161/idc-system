@@ -34,7 +34,8 @@ fn parse_date(s: &str) -> AppResult<NaiveDate> {
 }
 
 const SELECT_COLS: &str = "id, target_date, tz_offset, input_hash, \
-    total_revenue_iqd, total_doctor_cuts_iqd, total_operator_cuts_iqd, \
+    total_revenue_iqd, total_collected_iqd, total_discount_iqd, \
+    total_doctor_cuts_iqd, total_operator_cuts_iqd, \
     total_inventory_consumption_value_iqd, net_iqd, locked_count, voided_count, \
     voided_value_iqd, signed_by_user_id, signed_by_name, signed_at, \
     reopened_at, reopened_by_user_id, reopen_reason, \
@@ -47,6 +48,8 @@ fn map_row(r: &sqlx::sqlite::SqliteRow) -> AppResult<FrozenClose> {
         tz_offset: r.get("tz_offset"),
         input_hash: r.get("input_hash"),
         total_revenue_iqd: r.get("total_revenue_iqd"),
+        total_collected_iqd: r.get("total_collected_iqd"),
+        total_discount_iqd: r.get("total_discount_iqd"),
         total_doctor_cuts_iqd: r.get("total_doctor_cuts_iqd"),
         total_operator_cuts_iqd: r.get("total_operator_cuts_iqd"),
         total_inventory_consumption_value_iqd: r.get("total_inventory_consumption_value_iqd"),
@@ -85,20 +88,23 @@ impl FrozenCloseRepo for SqliteFrozenCloseRepo {
         sqlx::query(
             "INSERT OR IGNORE INTO daily_close ( \
                 id, target_date, tz_offset, input_hash, \
-                total_revenue_iqd, total_doctor_cuts_iqd, total_operator_cuts_iqd, \
+                total_revenue_iqd, total_collected_iqd, total_discount_iqd, \
+                total_doctor_cuts_iqd, total_operator_cuts_iqd, \
                 total_inventory_consumption_value_iqd, net_iqd, locked_count, \
                 voided_count, voided_value_iqd, \
                 signed_by_user_id, signed_by_name, signed_at, \
                 reopened_at, reopened_by_user_id, reopen_reason, \
                 created_at, updated_at, deleted_at, version, dirty, \
                 last_synced_at, origin_device_id, entity_id \
-             ) VALUES (?,?,?,?, ?,?,?, ?,?,?, ?,?, ?,?,?, ?,?,?, ?,?,NULL,?,1, NULL,?,?)",
+             ) VALUES (?,?,?,?, ?,?,?,?,?, ?,?,?, ?,?, ?,?,?, ?,?,?, ?,?,NULL,?,1, NULL,?,?)",
         )
         .bind(c.id.to_string())
         .bind(c.target_date.format("%Y-%m-%d").to_string())
         .bind(&c.tz_offset)
         .bind(&c.input_hash)
         .bind(c.total_revenue_iqd)
+        .bind(c.total_collected_iqd)
+        .bind(c.total_discount_iqd)
         .bind(c.total_doctor_cuts_iqd)
         .bind(c.total_operator_cuts_iqd)
         .bind(c.total_inventory_consumption_value_iqd)

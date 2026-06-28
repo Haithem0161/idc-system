@@ -61,6 +61,9 @@
       "total_label": "Running total",
       "total": "Total",
       "estimating": "Estimating…",
+      "override": "Override amount paid",
+      "override_label": "Amount paid",
+      "override_hint": "What the patient actually paid. Does not change the doctor's cut.",
       "finish": "Finish",
       "autosave": {
         "saving": "Saving…",
