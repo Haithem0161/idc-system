@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "IDC System",
   "mainBinaryName": "idc-system",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "identifier": "com.idc.system",
   "build": {
     "frontendDist": "../dist",
