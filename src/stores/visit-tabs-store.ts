@@ -11,7 +11,7 @@ export interface VisitTabForm {
   subtypeId: string | null
   doctorId: string | null
   /**
-   * Doctor-substitute "dalal" mode: a flat 10 IQD cut. Mutually exclusive with
+   * Doctor-substitute "dalal" mode: a flat 10,000 IQD cut. Mutually exclusive with
    * a referring doctor (`doctorId`); selecting one clears the other.
    */
   dalal: boolean

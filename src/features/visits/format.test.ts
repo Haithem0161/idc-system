@@ -86,17 +86,17 @@ describe("computeRunningTotal", () => {
     expect(computeRunningTotal(baseInputs).report_amount_iqd).toBe(0)
   })
 
-  it("dalal applies a flat 10 IQD doctor cut and skips house pct", () => {
+  it("dalal applies a flat 10,000 IQD doctor cut and skips house pct", () => {
     const snap = computeRunningTotal({ ...baseInputs, dalal: true })
-    expect(snap.doctor_cut_iqd).toBe(10)
+    expect(snap.doctor_cut_iqd).toBe(10_000)
     expect(snap.internal_pct).toBeNull()
-    // Report carves out of (price - dalal cut): (50_000 - 10) * 20% = 9_998.
+    // Report carves out of (price - dalal cut): (50_000 - 10_000) * 20% = 8_000.
     const withReport = computeRunningTotal({
       ...baseInputs,
       dalal: true,
       report: true,
     })
-    expect(withReport.report_amount_iqd).toBe(9_998)
+    expect(withReport.report_amount_iqd).toBe(8_000)
     expect(withReport.patient_total_iqd).toBe(50_000)
   })
 

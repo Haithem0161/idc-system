@@ -13,7 +13,7 @@ use crate::error::{AppError, AppResult};
 /// The دلال (dalal) money mode takes a built-in flat doctor cut: it is a
 /// doctor substitute that never resolves to a `doctors` row, so the cut is a
 /// fixed constant rather than a pct/fixed negotiation.
-const DALAL_CUT_IQD: i64 = 10;
+const DALAL_CUT_IQD: i64 = 10_000;
 
 #[derive(Debug, Clone)]
 pub struct MoneySettings {
@@ -729,7 +729,7 @@ mod tests {
     // ---- dalal (دلال) mode tests ----------------------------------------
 
     #[test]
-    fn dalal_takes_flat_ten_cut_and_no_internal_pct() {
+    fn dalal_takes_flat_cut_and_no_internal_pct() {
         let ct = ct(false, Some(50_000));
         let op = operator();
         let snap = compute(&MoneyMathInputs {
@@ -748,14 +748,14 @@ mod tests {
             settings: settings(),
         })
         .unwrap();
-        assert_eq!(snap.doctor_cut_iqd, 10);
+        assert_eq!(snap.doctor_cut_iqd, 10_000);
         assert_eq!(snap.internal_pct, None);
         assert_eq!(snap.total_amount_iqd, 50_000);
     }
 
     #[test]
     fn dalal_with_report_uses_flat_cut_as_report_base() {
-        // dalal doctor_cut = 10; report base = 50000 - 10 = 49990; 20% = 9998.
+        // dalal doctor_cut = 10000; report base = 50000 - 10000 = 40000; 20% = 8000.
         let ct = ct(false, Some(50_000));
         let op = operator();
         let snap = compute(&MoneyMathInputs {
@@ -774,8 +774,8 @@ mod tests {
             settings: settings(),
         })
         .unwrap();
-        assert_eq!(snap.doctor_cut_iqd, 10);
-        assert_eq!(snap.report_amount_iqd, 9_998);
+        assert_eq!(snap.doctor_cut_iqd, 10_000);
+        assert_eq!(snap.report_amount_iqd, 8_000);
         assert_eq!(snap.report_pct, Some(20));
     }
 

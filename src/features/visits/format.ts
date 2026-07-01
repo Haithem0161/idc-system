@@ -53,7 +53,7 @@ export function formatVisitTotal (
 }
 
 /** Flat doctor-substitute cut applied when the "dalal" option is chosen. */
-export const DALAL_DOCTOR_CUT_IQD = 10
+export const DALAL_DOCTOR_CUT_IQD = 10_000
 
 export interface MoneyMathInputs {
   base_price_iqd: number
@@ -75,9 +75,9 @@ export interface MoneyMathInputs {
   report_pct: number
   internal_doctor_pct: number
   /**
-   * Doctor-substitute mode: a flat 10 IQD doctor cut, mutually exclusive with
-   * a referring doctor (`doctor_pricing`). When true, the house internal_pct
-   * path is skipped.
+   * Doctor-substitute mode: a flat 10,000 IQD doctor cut, mutually exclusive
+   * with a referring doctor (`doctor_pricing`). When true, the house
+   * internal_pct path is skipped.
    */
   dalal: boolean
 }

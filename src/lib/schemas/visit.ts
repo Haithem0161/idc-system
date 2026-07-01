@@ -4,7 +4,7 @@ export const VisitStatusSchema = z.enum(["draft", "locked", "voided"])
 export type VisitStatusLiteral = z.infer<typeof VisitStatusSchema>
 
 // A referring doctor and the doctor-substitute "dalal" mode are mutually
-// exclusive: dalal stands in for a doctor (flat 10 IQD cut), so a visit can
+// exclusive: dalal stands in for a doctor (flat 10,000 IQD cut), so a visit can
 // carry at most one of them.
 const doctorAndDalalExclusive = (data: {
   doctor_id?: string | null

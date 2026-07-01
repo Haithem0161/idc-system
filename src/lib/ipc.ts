@@ -1043,7 +1043,7 @@ export interface VisitRecord {
   mandoub_id: string | null
   dye: boolean
   report: boolean
-  /** Doctor-substitute "dalal" mode: flat 10 IQD cut, mutually exclusive with doctor_id. */
+  /** Doctor-substitute "dalal" mode: flat 10,000 IQD cut, mutually exclusive with doctor_id. */
   dalal: boolean
   /** Discount: the referring doctor's cut was zeroed for this visit. Only set
    *  with a real referring doctor. */

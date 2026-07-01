@@ -34,7 +34,7 @@ interface Props {
  * cut. Clearing the field returns to Internal.
  *
  * A built-in "دلال" (dalal) row sits just under Internal: it is a
- * doctor-substitute that applies a flat 10 IQD cut. It is not a real doctor
+ * doctor-substitute that applies a flat 10,000 IQD cut. It is not a real doctor
  * row, is mutually exclusive with a referring doctor, and is tracked by the
  * `dalal` flag rather than a doctor id.
  *
