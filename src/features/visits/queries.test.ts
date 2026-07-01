@@ -101,6 +101,7 @@ function visit(overrides: Partial<VisitRecord> = {}): VisitRecord {
     dye: false,
     report: false,
     dalal: false,
+    discount: false,
     locked_at: null,
     voided_at: null,
     voided_by_user_id: null,
@@ -283,6 +284,7 @@ describe.each(directions)(
         patient_id: UUID_PATIENT,
         check_type_id: UUID_CHECK,
         dalal: false,
+        discount: false,
         dye: false,
         report: false,
       })
@@ -298,6 +300,7 @@ describe.each(directions)(
           patient_id: UUID_PATIENT,
           check_type_id: UUID_CHECK,
           dalal: false,
+          discount: false,
           dye: false,
           report: false,
         })

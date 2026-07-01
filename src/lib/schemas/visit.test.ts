@@ -105,6 +105,32 @@ describe("VisitCreateDraftSchema", () => {
       })
     ).toThrow(/mandoub_requires_doctor/)
   })
+
+  it("defaults discount to false", () => {
+    const parsed = VisitCreateDraftSchema.parse(base)
+    expect(parsed.discount).toBe(false)
+  })
+
+  it("accepts a discount alongside a referring doctor", () => {
+    const parsed = VisitCreateDraftSchema.parse({
+      ...base,
+      doctor_id: "01913d3a-7c70-7c00-a000-000000000099",
+      discount: true,
+    })
+    expect(parsed.discount).toBe(true)
+  })
+
+  it("rejects a discount without a referring doctor (house)", () => {
+    expect(() =>
+      VisitCreateDraftSchema.parse({ ...base, doctor_id: null, discount: true })
+    ).toThrow(/discount_requires_doctor/)
+  })
+
+  it("rejects a discount combined with dalal mode", () => {
+    expect(() =>
+      VisitCreateDraftSchema.parse({ ...base, dalal: true, discount: true })
+    ).toThrow(/discount_requires_doctor/)
+  })
 })
 
 describe("VisitUpdateDraftSchema", () => {

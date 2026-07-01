@@ -86,25 +86,25 @@ describe.each(directions)(
       expect(container.textContent).toContain(trendTitle)
     })
 
-    it("renders exactly five data rows (revenue, doctor_cuts, operator_cuts, inventory_value, net)", () => {
+    it("renders exactly seven data rows (revenue, doctor_cuts, operator_cuts, report_cuts, mandoub_cuts, inventory_value, net)", () => {
       const { container } = render(
         <TrendMatrix title="x" matrix={matrix()} />,
       )
       const rows = container.querySelectorAll("tbody tr")
-      expect(rows.length).toBe(5)
+      expect(rows.length).toBe(7)
     })
 
     it("numeric cells carry font-mono + tabular-nums (project tnum contract)", () => {
       const { container } = render(
         <TrendMatrix title="x" matrix={matrix()} />,
       )
-      // Each row has 3 mono cells (current, prior, delta) -> 15 mono
-      // cells across 5 rows. The tnum class is non-negotiable for
+      // Each row has 3 mono cells (current, prior, delta) -> 21 mono
+      // cells across 7 rows. The tnum class is non-negotiable for
       // receipts and report tables per .claude/rules/design-system.md
       // §11 ("Numbers are first-class -- always mono, always tnum,
       // always right-aligned in tables.").
       const monoCells = container.querySelectorAll(".font-mono.tabular-nums")
-      expect(monoCells.length).toBe(15)
+      expect(monoCells.length).toBe(21)
     })
 
     it("positive delta_permille paints the delta cell text-success (gain)", () => {

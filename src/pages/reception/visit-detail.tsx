@@ -87,7 +87,12 @@ export default function VisitDetailPage () {
       {visit ? <StatusBanner visit={visit} /> : null}
 
       {snap ? (
-        <DetailsTab snap={snap} money={money} localeShort={localeShort} />
+        <DetailsTab
+          snap={snap}
+          discount={visit?.discount ?? false}
+          money={money}
+          localeShort={localeShort}
+        />
       ) : (
         <p className="text-[13px] text-ink-3">
           {t("reception.visit_detail.draft_no_snapshot")}
@@ -162,10 +167,12 @@ function StatusBanner ({ visit }: { visit: VisitRecord }) {
 
 function DetailsTab ({
   snap,
+  discount,
   money,
   localeShort,
 }: {
   snap: VisitSnapshotRecord
+  discount: boolean
   money: ReturnType<typeof useMoneyDisplay>
   localeShort: "ar" | "en"
 }) {
@@ -272,9 +279,9 @@ function DetailsTab ({
               ? t("common:common.yes")
               : t("common:common.no")
           }
-          last={!visit.discount}
+          last={!discount}
         />
-        {visit.discount ? (
+        {discount ? (
           <Row
             label={t("reception.visit_detail.snapshot.discount_flag")}
             value={t("common:common.yes")}
