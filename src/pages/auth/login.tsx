@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react"
 import { Navigate, useLocation, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
+import { Server } from "lucide-react"
 
 import { Logo } from "@/components/shell/logo"
-import { useLogin } from "@/features/auth/queries"
+import { LanguageToggle } from "@/components/shell/language-toggle"
+import { useLogin, useBootstrapJwtKey } from "@/features/auth/queries"
 import { useAuthStore } from "@/stores/auth-store"
 import { invoke, isTauri } from "@/lib/ipc"
 import { formatIpcError } from "@/lib/errors"
@@ -76,6 +78,11 @@ export default function LoginPage () {
   return (
     <div className="flex min-h-screen items-center justify-center bg-paper px-6 py-10">
       <div className="w-full max-w-md">
+        {isTauri() ? (
+          <div className="mb-4 flex justify-center">
+            <LanguageToggle />
+          </div>
+        ) : null}
         <div className="mb-7 flex flex-col items-center text-center">
           <Logo size={56} className="mb-4" />
           <span className="eyebrow mb-3">{t("auth.eyebrow", { defaultValue: "IDC Clinic" })}</span>
@@ -130,6 +137,8 @@ export default function LoginPage () {
             </button>
           </div>
         </form>
+
+        {isTauri() ? <ChangeServer /> : null}
       </div>
     </div>
   )
@@ -141,5 +150,143 @@ function Field ({ label, children }: { label: string; children: React.ReactNode 
       <span className="field-label">{label}</span>
       {children}
     </label>
+  )
+}
+
+/**
+ * Pre-login "change sync server" affordance. A device can be pointed at the
+ * wrong clinic server (or need re-pointing before anyone can sign in), so this
+ * lives on the login screen -- not just behind the superadmin settings page.
+ * Uses the unguarded bootstrap IPC (`config_set_sync_server_url`), the same
+ * path first-launch setup uses, and re-pins the server's JWT key (TOFU) so
+ * offline verification works against the new server.
+ */
+function ChangeServer () {
+  const { t } = useTranslation()
+  const bootstrapJwtKey = useBootstrapJwtKey()
+  const [open, setOpen] = useState(false)
+  const [url, setUrl] = useState("")
+  const [current, setCurrent] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    invoke("config_get_sync_server_url")
+      .then((u) => {
+        if (cancelled) return
+        setCurrent(u ?? null)
+        if (u) setUrl(u)
+      })
+      .catch(() => {
+        /* transient bootstrap failure -- leave current unknown */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const trimmed = url.trim()
+    if (!trimmed) {
+      setError(t("setup.url_required", { defaultValue: "Sync server URL is required" }))
+      return
+    }
+    setSaving(true)
+    setError(null)
+    setSaved(false)
+    try {
+      await invoke("config_set_sync_server_url", { url: trimmed })
+      // Re-pin the new server's RS256 public key for offline JWT verification.
+      // Best-effort: a network hiccup must not block the change.
+      try {
+        await bootstrapJwtKey.mutateAsync({ server_url: trimmed })
+      } catch {
+        /* non-fatal: re-pinned on a later online action */
+      }
+      setCurrent(trimmed)
+      setSaved(true)
+      setOpen(false)
+    } catch (err) {
+      setError(
+        (err as { message?: string }).message ??
+          t("setup.url_invalid", { defaultValue: "Failed to save sync server URL" }),
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="mt-4 flex flex-col items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => {
+            setSaved(false)
+            setOpen(true)
+          }}
+          className="inline-flex items-center gap-1.5 text-[12px] font-medium text-ink-3 transition-colors hover:text-ink"
+        >
+          <Server className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden />
+          <span>{t("setup.change_server", { defaultValue: "Change sync server" })}</span>
+        </button>
+        {saved ? (
+          <span className="text-[11px] text-success">
+            {t("setup.server_saved", { defaultValue: "Sync server updated." })}
+          </span>
+        ) : current ? (
+          <span className="max-w-full truncate text-[11px] text-ink-4" title={current}>
+            {t("setup.current_server", { defaultValue: "Current server" })}: {current}
+          </span>
+        ) : null}
+      </div>
+    )
+  }
+
+  return (
+    <form onSubmit={submit} className="panel mt-4">
+      <div className="panel-body space-y-4">
+        <label className="block">
+          <span className="field-label">
+            {t("setup.url_label", { defaultValue: "Sync server URL" })}
+          </span>
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://idc-sync.madebyhaithem.com"
+            className="input"
+            required
+            autoFocus
+          />
+        </label>
+        {error ? (
+          <div role="alert" className="status-pill is-danger w-full justify-center">
+            {error}
+          </div>
+        ) : null}
+        <div className="flex gap-2">
+          <button type="submit" disabled={saving} className="btn btn-ink flex-1">
+            {saving
+              ? t("setup.saving", { defaultValue: "Saving..." })
+              : t("setup.save", { defaultValue: "Save" })}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              setError(null)
+              setUrl(current ?? "")
+            }}
+            className="btn btn-ghost"
+          >
+            {t("setup.cancel", { defaultValue: "Cancel" })}
+          </button>
+        </div>
+      </div>
+    </form>
   )
 }

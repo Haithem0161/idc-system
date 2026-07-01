@@ -2,42 +2,42 @@
   "eyebrow": "سجل التدقيق",
   "title": "سجل التدقيق",
   "summary": "{{count}} نتيجة، الوضع: {{mode}}",
-  "empty": "لا توجد سجلات تدقيق تطابق هذه المرشحات.",
+  "empty": "لا توجد سجلات تطابق هذه الفلاتر.",
   "error": "فشل تحميل سجلات التدقيق: {{msg}}",
   "load_more": "تحميل الصفحة التالية",
   "this_device": "هذا الجهاز",
   "filters": {
     "aria": "مرشحات التدقيق",
-    "title": "المرشحات",
-    "actor": "الفاعل",
+    "title": "الفلاتر",
+    "actor": "المستخدم",
     "actor_placeholder": "معرف المستخدم",
     "inactive": "غير نشط",
     "action": "الإجراء",
-    "entity": "الكيان",
-    "entity_id_prefix": "بادئة معرف الكيان",
-    "entity_id_prefix_placeholder": "أول 4 إلى 36 حرفاً من المعرف",
+    "entity": "السجل",
+    "entity_id_prefix": "بداية معرف السجل",
+    "entity_id_prefix_placeholder": "أول 4 إلى 36 حرف من المعرف",
     "from": "من",
     "to": "إلى",
-    "text": "نص حر",
+    "text": "بحث نصي",
     "text_placeholder": "ابحث في التغييرات أو المعرف (2 إلى 100 حرف)",
     "any": "الكل"
   },
   "columns": {
     "results": "{{count}} نتيجة",
     "at": "الوقت (UTC)",
-    "actor": "الفاعل",
+    "actor": "المستخدم",
     "action": "الإجراء",
-    "entity": "الكيان",
-    "entity_id": "معرف الكيان",
+    "entity": "السجل",
+    "entity_id": "معرف السجل",
     "device": "الجهاز",
-    "pending_sync": "معلق"
+    "pending_sync": "بانتظار المزامنة"
   },
   "actions": {
     "create": "إنشاء",
     "update": "تحديث",
     "soft_delete": "حذف",
-    "lock": "إقفال",
-    "void": "إبطال",
+    "lock": "قفل",
+    "void": "إلغاء",
     "discard": "تجاهل",
     "clock_in": "تسجيل دخول",
     "clock_out": "تسجيل خروج",
@@ -45,10 +45,10 @@
     "login": "دخول",
     "logout": "خروج",
     "conflict_resolve": "حل تعارض",
-    "vacuum": "تنظيف",
-    "daily_close_run": "إغلاق اليوم",
-    "daily_close_sign": "توقيع إغلاق اليوم",
-    "daily_close_reopen": "إعادة فتح إغلاق اليوم"
+    "vacuum": "تفريغ السجل",
+    "daily_close_run": "غلق اليوم",
+    "daily_close_sign": "توقيع غلق اليوم",
+    "daily_close_reopen": "إعادة فتح غلق اليوم"
   },
   "entities": {
     "users": "المستخدمون",
@@ -59,7 +59,7 @@
     "doctor_check_pricing": "تسعير الأطباء",
     "operators": "المشغلون",
     "operator_specialties": "تخصصات المشغلين",
-    "operator_shifts": "ورديات المشغلين",
+    "operator_shifts": "حضور المشغلين",
     "mandoubs": "المندوبون",
     "patients": "المرضى",
     "visits": "الزيارات",
@@ -67,7 +67,7 @@
     "inventory_consumption_map": "خريطة الاستهلاك",
     "inventory_adjustments": "تعديلات المخزون",
     "audit_log": "سجل التدقيق",
-    "daily_close": "إغلاق اليوم"
+    "daily_close": "غلق اليوم"
   },
   "delta": {
     "field": "الحقل",
@@ -85,7 +85,7 @@
   "vacuum": {
     "button": "تنظيف الآن",
     "aria": "تشغيل تنظيف سجل التدقيق الآن",
-    "success": "اكتمل التنظيف: تم حذف {{audit}} سجل تدقيق و{{metrics}} سجل قياس",
+    "success": "اكتمل التفريغ: تم حذف {{audit}} سجل تدقيق و{{metrics}} سجل قياس",
     "failure": "فشل التنظيف: {{msg}}"
   }
 }

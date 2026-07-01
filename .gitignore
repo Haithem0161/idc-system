@@ -49,3 +49,4 @@ docs/idc-system/testing/fixtures/*
 .audit-worklist.json
 .wl-backend.json
 .wl-frontend.json
+.scratch/

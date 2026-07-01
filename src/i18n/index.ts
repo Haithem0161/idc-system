@@ -90,14 +90,19 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    fallbackLng: "en",
+    // Arabic is the product default. Only an explicit user choice (persisted in
+    // localStorage via the language toggle) overrides it; we intentionally do
+    // NOT detect from `navigator`, so a fresh clinic machine -- whose OS is
+    // often en-US -- still boots in Arabic. Fallback is Arabic too, so any
+    // missing key resolves to the Arabic string, not English.
+    fallbackLng: "ar",
     supportedLngs: ["en", "ar"],
     ns: ["translation", "common", "errors", "receipts"],
     defaultNS: "translation",
     debug: import.meta.env.DEV,
     interpolation: { escapeValue: false },
     detection: {
-      order: ["localStorage", "navigator"],
+      order: ["localStorage"],
       caches: ["localStorage"],
     },
   })

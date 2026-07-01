@@ -193,7 +193,7 @@ describe.each(directions)(
       const text = container.textContent ?? ""
       const titleMatch =
         dir === "rtl"
-          ? /ورديات متداخلة/
+          ? /حضور متداخل/
           : /Overlapping shifts detected/i
       expect(text).toMatch(titleMatch)
     })

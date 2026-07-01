@@ -354,7 +354,7 @@ describe.each(directions)(
       expect(kind).toBe("warning")
       const warnMatch =
         dir === "rtl"
-          ? /تم حل هذا التعارض/
+          ? /حُلّ هذا التعارض/
           : /already resolved on another device/i
       expect(message).toMatch(warnMatch)
     })
@@ -477,9 +477,9 @@ describe.each(directions)(
         />,
       )
       const localLabel =
-        dir === "rtl" ? /البيانات المحلية/ : /Local payload/i
+        dir === "rtl" ? /بيانات هذا الجهاز/ : /Local payload/i
       const serverLabel =
-        dir === "rtl" ? /بيانات الخادم/ : /Server payload/i
+        dir === "rtl" ? /بيانات السيرفر/ : /Server payload/i
       const text = container.textContent ?? ""
       expect(text).toMatch(localLabel)
       expect(text).toMatch(serverLabel)

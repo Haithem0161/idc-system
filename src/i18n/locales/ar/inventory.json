@@ -10,9 +10,9 @@
       "filters": {
         "status": {
           "all": "الكل",
-          "ok": "جيد",
+          "ok": "متوفر",
           "low": "منخفض",
-          "neg": "سالب"
+          "neg": "بالسالب"
         },
         "active": {
           "label_active_only": "النشط فقط",
@@ -23,19 +23,19 @@
       "columns": {
         "name": "الاسم",
         "unit": "الوحدة",
-        "on_hand": "المتاح",
-        "threshold": "حد التنبيه",
+        "on_hand": "الموجود",
+        "threshold": "حد النفاد",
         "status": "الحالة",
-        "last_adjusted": "آخر تسوية",
+        "last_adjusted": "آخر تعديل",
         "pending_sync": "المزامنة"
       },
       "status_pill": {
-        "ok": "جيد",
+        "ok": "متوفر",
         "low": "منخفض",
-        "neg": "سالب"
+        "neg": "بالسالب"
       },
       "empty": "لا توجد أصناف بعد. أضفها أولاً من شاشة الإدارة.",
-      "empty_filtered": "لا توجد أصناف مطابقة للمرشحات الحالية.",
+      "empty_filtered": "لا توجد أصناف تطابق الفلاتر الحالية.",
       "open_detail": "فتح الصنف",
       "loading": "جارٍ تحميل الأصناف..."
     },
@@ -45,7 +45,7 @@
         "active": "نشط",
         "inactive": "غير نشط",
         "unit_label": "الوحدة",
-        "threshold_label": "حد التنبيه"
+        "threshold_label": "حد النفاد"
       },
       "tabs": {
         "overview": "نظرة عامة",
@@ -54,7 +54,7 @@
         "audit": "السجل"
       },
       "overview": {
-        "on_hand_label": "المتاح",
+        "on_hand_label": "الموجود",
         "threshold_label": "حد التنبيه",
         "last_adjusted_label": "آخر تسوية",
         "no_adjustments": "لا توجد تسويات مسجلة.",
@@ -63,7 +63,7 @@
       },
       "consumption_map": {
         "title": "خريطة الاستهلاك",
-        "subtitle": "قواعد الكمية لكل فحص (للعرض هنا، عدّلها من الإدارة).",
+        "subtitle": "قواعد الكمية لكل فحص (للعرض فقط، عدّلها من الإدارة).",
         "columns": {
           "check_type": "نوع الفحص",
           "subtype": "النوع الفرعي",
@@ -76,7 +76,7 @@
       },
       "adjustments": {
         "title": "التسويات",
-        "subtitle": "حسب الترتيب الزمني. عكوسات الزيارات الملغاة تظهر بقيمة موجبة.",
+        "subtitle": "حسب الترتيب الزمني. تراجعات الزيارات الملغية تظهر بقيمة موجبة.",
         "columns": {
           "created": "الوقت",
           "reason": "السبب",
@@ -86,12 +86,12 @@
         },
         "reasons": {
           "receive": "استلام",
-          "writeoff": "إتلاف",
+          "writeoff": "تلف",
           "count_correction": "تصحيح جرد",
           "consume_visit": "استهلاك زيارة"
         },
-        "reversal_badge": "عكس",
-        "reversal_tooltip": "يعكس صف استهلاك لزيارة ملغاة.",
+        "reversal_badge": "تراجع",
+        "reversal_tooltip": "يتراجع عن استهلاك زيارة ملغية.",
         "empty": "لا توجد تسويات."
       },
       "audit": {
@@ -104,12 +104,12 @@
       "title": "تسوية جديدة",
       "subtitle": "استلام مخزون أو إتلاف وحدات أو تصحيح جرد.",
       "back": "العودة إلى المخزون",
-      "item_label": "الصنف",
+      "item_label": "المادة",
       "item_placeholder": "اختر صنفاً",
       "reason_label": "السبب",
       "reasons": {
         "receive": "استلام",
-        "writeoff": "إتلاف",
+        "writeoff": "تلف",
         "count_correction": "تصحيح جرد"
       },
       "delta_label": {
@@ -118,13 +118,13 @@
         "count_correction": "تسوية بقيمة موجبة أو سالبة"
       },
       "helper": {
-        "receive": "عدد صحيح موجب يُضاف إلى المتاح.",
-        "writeoff": "عدد صحيح موجب يُخصم من المتاح.",
-        "count_correction_signed": "القيم السالبة تخفّض المخزون. ولا يجوز أن تكون صفراً.",
-        "large_warning": "تسوية ذات حجم غير معتاد - يرجى التأكيد قبل الحفظ."
+        "receive": "رقم موجب صحيح يُضاف إلى الموجود.",
+        "writeoff": "رقم موجب صحيح يُخصم من الموجود.",
+        "count_correction_signed": "القيم السالبة تنقص المخزون. ولا يمكن أن تكون صفراً.",
+        "large_warning": "تعديل بكمية غير معتادة - تأكد قبل الحفظ."
       },
       "note_label": "ملاحظة (اختيارية)",
-      "note_placeholder": "السبب أو رقم الدفعة أو الشاهد، إلخ.",
+      "note_placeholder": "السبب أو رقم الوجبة أو الشاهد، إلخ.",
       "submit": "حفظ التسوية",
       "cancel": "إلغاء",
       "submitting": "جارٍ الحفظ...",

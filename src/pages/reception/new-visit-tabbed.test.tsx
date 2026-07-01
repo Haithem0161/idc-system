@@ -45,7 +45,7 @@ import {
 } from "vitest"
 import type { ReactNode } from "react"
 
-import "@/i18n"
+import i18n from "@/i18n"
 
 const mockNavigate = vi.fn()
 vi.mock("react-router", async () => {
@@ -180,6 +180,9 @@ function defaultResponses (
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // These assertions match the English UI copy (e.g. "Finish visit"); the app
+  // now defaults to Arabic, so pin English for this logic-focused suite.
+  void i18n.changeLanguage("en")
   useVisitTabsStore.setState({
     ownerUserId: null,
     tabs: [],
