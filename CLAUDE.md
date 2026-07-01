@@ -55,6 +55,52 @@ This applies to: Tauri plugins, Tokio, sqlx/rusqlite, Axum, Fastify plugins, Pri
 **NEVER hand-edit `package.json` dependency sections.** Use `pnpm add <pkg>` / `pnpm add -D <pkg>` / `pnpm remove <pkg>`.
 **NEVER hand-edit `Cargo.toml` `[dependencies]`.** Use `cargo add <crate>` (with `--features` as needed). Hand-edit only `[workspace]`, `[profile]`, `[features]`, `[patch]`.
 
+## Server Access & Deployment (Production Sync Server)
+
+The production sync server runs on a VPS. Claude owns the push + deploy path for the sync server.
+
+### SSH access
+The host is aliased in `~/.ssh/config` as **`Personal`** (an SSH key is already installed -- no password):
+```bash
+ssh root@Personal          # = root@149.102.139.41
+```
+- Repo on the VPS: `/root/idc-system` (git remote `origin`, branch `main`). It tracks the same GitHub repo (`Haithem0161/idc-system`).
+- Public URL: `https://idc-sync.madebyhaithem.com` (nginx 443 -> `127.0.0.1:3161`). Node (3161) and Postgres (5449) are localhost-only; never expose them.
+
+### Containers (all on the `Personal` host)
+| Container | Role |
+|-|-|
+| `idc-sync-server` | Fastify sync server (image built from `sync-server/`, `Dockerfile.dev`). |
+| `idc-sync-db` | Postgres 16 for the sync server, DB `idc_sync`, port `127.0.0.1:5449`. |
+
+DB creds live in `/root/idc-system/sync-server/.env` (`DATABASE_URL`, `POSTGRES_PASSWORD`). Query the DB with:
+```bash
+ssh root@Personal 'docker exec idc-sync-db psql -U postgres -d idc_sync -tAc "SELECT count(*) FROM visits;"'
+```
+Server columns are **snake_case** (`entity_id`, not `entityId`) even though Prisma models are camelCase.
+
+### Deploy the sync server (the standard flow)
+1. Commit + push code to `main` on GitHub (see git rules below -- **no Claude authorship**).
+2. On the VPS, pull and rebuild:
+```bash
+ssh root@Personal 'cd /root/idc-system && git pull origin main && \
+  cd sync-server && \
+  docker compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d --build sync-server'
+```
+- The `prod-entrypoint.sh` boot sequence: gzipped `pg_dump` backup to `/backups/` -> `prisma generate` -> **plain `prisma db push`** (NO `--accept-data-loss`, so a destructive schema drift fails the boot instead of dropping prod data) -> start Node.
+- Verify after deploy:
+```bash
+ssh root@Personal 'docker logs idc-sync-server --tail 40; \
+  docker exec idc-sync-server sh -lc "grep SERVER_SCHEMA_VERSION /app/dist/app/common/version.js"'
+```
+- **Schema-version lockstep is mandatory:** the client `SYNC_SCHEMA_VERSION` (= count of `src-tauri/migrations/*.sql`) and the server `SERVER_SCHEMA_VERSION` (`sync-server/src/app/common/version.ts`) MUST match. Bump the server constant in the SAME commit as any new migration. A mismatch shows up as opaque per-field push `VALIDATION_ERROR`s, not a clean 426.
+
+### Rules
+- **Never** `docker rm` / `compose rm` / any `prune` on this host (it runs many unrelated stacks -- `tan-*`, `beeb-*`, `jerash-*`, `qr-ar-*`, `rudood-*`). The `.claude/hooks/block-destructive.sh` hook blocks the worst of these; the rule stands regardless.
+- **Never** run `prisma db push --accept-data-loss` against prod, and never `--force-reset`.
+- A schema change to a syncable model touches BOTH surfaces in one commit (desktop migration + Prisma model + `SERVER_SCHEMA_VERSION`) -- see the "never defer sync-server" rule.
+- Desktop app releases go through the CI pipeline (`.github/workflows/` -> `tools/ci-deploy-release.sh` publishes signed Tauri updater bundles); Claude does NOT hand-build/sign desktop bundles.
+
 ## Development Workflow
 
 1. **Study the Plan.** Read the relevant `docs/<plan-name>/phase-XX.md`. Identify surfaces touched.
