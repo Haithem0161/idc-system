@@ -72,6 +72,12 @@ export class ReportsService {
     const total_discount_iqd = total_revenue_iqd - total_collected_iqd
     const total_doctor_cuts_iqd = sumField(matched, 'doctor_cut_snapshot_iqd')
     const total_operator_cuts_iqd = sumField(matched, 'operator_cut_snapshot_iqd')
+    // Report payable is no longer part of the patient bill -- it is a derived
+    // amount the clinic owes the reporting doctor. It is SUBTRACTED from net.
+    const total_report_iqd = sumField(matched, 'report_amount_snapshot_iqd')
+    // مندوب payable: a net-side carve-out (500 or 1000 IQD per visit with a
+    // مندوب). Subtracted from net AFTER the report; never on the patient bill.
+    const total_mandoub_cuts_iqd = sumField(matched, 'mandoub_cut_snapshot_iqd')
 
     // Inventory consumption: SUM(-delta) for consume_visit rows in window.
     let inv = 0
@@ -82,7 +88,11 @@ export class ReportsService {
     }
     const total_inventory_consumption_value_iqd = inv
     // Net is against cash actually COLLECTED, matching the desktop close.
-    const net_iqd = total_collected_iqd - total_doctor_cuts_iqd - total_operator_cuts_iqd - inv
+    // مندوب is subtracted AFTER the report (net = collected - doctor - operator
+    // - report - MANDOUB - inventory).
+    const net_iqd =
+      total_collected_iqd - total_doctor_cuts_iqd - total_operator_cuts_iqd
+      - total_report_iqd - total_mandoub_cuts_iqd - inv
 
     const voided_value_iqd = sumField(voidedMatched, 'total_amount_iqd_snapshot')
 
@@ -112,6 +122,18 @@ export class ReportsService {
       }
     }).filter((r) => r.operator_id !== '')
 
+    // Per-مندوب breakdown: only visits that carry a مندوب (real referring
+    // doctor present). The empty key drops house/no-مندوب rows.
+    const per_mandoub = aggregateBy(matched, (v) => v.mandoub_id ?? '', (rows) => {
+      const first = rows[0]
+      return {
+        mandoub_id: first.mandoub_id ?? '',
+        name: first.mandoub_name_snapshot ?? '',
+        visits: rows.length,
+        mandoub_cut_iqd: sumField(rows, 'mandoub_cut_snapshot_iqd'),
+      }
+    }).filter((r) => r.mandoub_id !== '')
+
     const per_check_type = aggregateBy(matched, (v) => v.check_type_id, (rows) => {
       const first = rows[0]
       return {
@@ -134,6 +156,8 @@ export class ReportsService {
       total_discount_iqd,
       total_doctor_cuts_iqd,
       total_operator_cuts_iqd,
+      total_report_iqd,
+      total_mandoub_cuts_iqd,
       total_inventory_consumption_value_iqd,
       net_iqd,
       locked_count: matched.length,
@@ -141,6 +165,7 @@ export class ReportsService {
       voided_value_iqd,
       per_doctor,
       per_operator,
+      per_mandoub,
       per_check_type,
       generated_at: new Date().toISOString(),
     }
@@ -209,6 +234,8 @@ export interface VisitsReportRow {
   price_iqd: number
   doctor_cut_iqd: number
   operator_cut_iqd: number
+  report_iqd: number
+  mandoub_cut_iqd: number
   net_iqd: number
 }
 
@@ -219,6 +246,8 @@ export interface VisitsReportGroup {
   revenue_iqd: number
   doctor_cut_iqd: number
   operator_cut_iqd: number
+  report_iqd: number
+  mandoub_cut_iqd: number
   net_iqd: number
 }
 
@@ -227,6 +256,8 @@ export interface VisitsReportTotals {
   revenue_iqd: number
   doctor_cut_iqd: number
   operator_cut_iqd: number
+  report_iqd: number
+  mandoub_cut_iqd: number
   net_iqd: number
 }
 
@@ -243,6 +274,8 @@ export interface DailyCloseResponse {
   total_discount_iqd: number
   total_doctor_cuts_iqd: number
   total_operator_cuts_iqd: number
+  total_report_iqd: number
+  total_mandoub_cuts_iqd: number
   total_inventory_consumption_value_iqd: number
   net_iqd: number
   locked_count: number
@@ -263,6 +296,12 @@ export interface DailyCloseResponse {
     operator_cut_iqd: number
     hours_on_shift_milli: number
   }>
+  per_mandoub: Array<{
+    mandoub_id: string
+    name: string
+    visits: number
+    mandoub_cut_iqd: number
+  }>
   per_check_type: Array<{
     check_type_id: string
     name_ar: string
@@ -281,6 +320,8 @@ function toVisitRow (v: VisitSyncRecord): VisitsReportRow {
   const price = v.price_snapshot_iqd ?? 0
   const dc = v.doctor_cut_snapshot_iqd ?? 0
   const oc = v.operator_cut_snapshot_iqd ?? 0
+  const reportAmt = v.report_amount_snapshot_iqd ?? 0
+  const mandoubCut = v.mandoub_cut_snapshot_iqd ?? 0
   const total = v.total_amount_iqd_snapshot ?? price
   return {
     visit_id: v.id,
@@ -298,7 +339,11 @@ function toVisitRow (v: VisitSyncRecord): VisitsReportRow {
     price_iqd: price,
     doctor_cut_iqd: dc,
     operator_cut_iqd: oc,
-    net_iqd: total - dc - oc,
+    report_iqd: reportAmt,
+    mandoub_cut_iqd: mandoubCut,
+    // Report and مندوب are payables subtracted from net; neither is part of
+    // `total`. مندوب is subtracted AFTER the report.
+    net_iqd: total - dc - oc - reportAmt - mandoubCut,
   }
 }
 
@@ -330,6 +375,8 @@ function sumTotals (rows: VisitSyncRecord[]): VisitsReportTotals {
   let revenue = 0
   let dc = 0
   let oc = 0
+  let report = 0
+  let mandoub = 0
   let net = 0
   for (const r of rows) {
     visits += 1
@@ -337,12 +384,27 @@ function sumTotals (rows: VisitSyncRecord[]): VisitsReportTotals {
     const total = r.total_amount_iqd_snapshot ?? price
     const cutD = r.doctor_cut_snapshot_iqd ?? 0
     const cutO = r.operator_cut_snapshot_iqd ?? 0
+    const reportAmt = r.report_amount_snapshot_iqd ?? 0
+    const mandoubCut = r.mandoub_cut_snapshot_iqd ?? 0
     revenue += price
     dc += cutD
     oc += cutO
-    net += total - cutD - cutO
+    report += reportAmt
+    mandoub += mandoubCut
+    // Report and مندوب are payables SUBTRACTED here (neither is part of
+    // `total`) so grouped nets reconcile with the daily-close headline net.
+    // مندوب is subtracted AFTER the report.
+    net += total - cutD - cutO - reportAmt - mandoubCut
   }
-  return { visits, revenue_iqd: revenue, doctor_cut_iqd: dc, operator_cut_iqd: oc, net_iqd: net }
+  return {
+    visits,
+    revenue_iqd: revenue,
+    doctor_cut_iqd: dc,
+    operator_cut_iqd: oc,
+    report_iqd: report,
+    mandoub_cut_iqd: mandoub,
+    net_iqd: net,
+  }
 }
 
 function groupVisits (rows: VisitSyncRecord[], groupBy: NonNullable<VisitsReportParams['groupBy']>): VisitsReportGroup[] {
@@ -386,6 +448,8 @@ function groupVisits (rows: VisitSyncRecord[], groupBy: NonNullable<VisitsReport
       revenue_iqd: totals.revenue_iqd,
       doctor_cut_iqd: totals.doctor_cut_iqd,
       operator_cut_iqd: totals.operator_cut_iqd,
+      report_iqd: totals.report_iqd,
+      mandoub_cut_iqd: totals.mandoub_cut_iqd,
       net_iqd: totals.net_iqd,
     })
   }

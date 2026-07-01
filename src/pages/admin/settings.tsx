@@ -47,7 +47,8 @@ const SETTING_SPECS: Record<string, SettingSpec> = {
   clinic_display_name_en: { type: "text", default: "", dir: "ltr" },
   currency_symbol: { type: "text", default: "د.ع" },
   dye_cost_iqd: { type: "int", default: 10000, unit: "iqd", min: 0, moneyPreview: true },
-  report_cost_iqd: { type: "int", default: 10000, unit: "iqd", min: 0, moneyPreview: true },
+  report_pct: { type: "int", default: 20, unit: "pct", min: 0, max: 100 },
+  reporting_doctor_name: { type: "text", default: "" },
   internal_doctor_pct: { type: "int", default: 30, unit: "pct", min: 0, max: 100 },
   idle_lock_minutes: { type: "int", default: 10, unit: "min", min: 1 },
   arabic_numerals: { type: "bool", default: false },
@@ -72,7 +73,7 @@ const GROUPS: SettingGroup[] = [
   {
     key: "pricing",
     defaultTitle: "Pricing",
-    keys: ["dye_cost_iqd", "report_cost_iqd", "internal_doctor_pct"],
+    keys: ["dye_cost_iqd", "report_pct", "reporting_doctor_name", "internal_doctor_pct"],
   },
   {
     key: "security",
@@ -877,7 +878,7 @@ function validationMessage (
   spec: SettingSpec,
   errorId: string
 ): string {
-  if (keyName === "internal_doctor_pct") {
+  if (keyName === "internal_doctor_pct" || keyName === "report_pct") {
     return t("admin.settings.error.pct", { defaultValue: "Enter a whole number from 0 to 100." })
   }
   if (keyName === "idle_lock_minutes") {

@@ -19,7 +19,6 @@ pub struct CheckType {
     pub has_subtypes: bool,
     pub base_price_iqd: Option<i64>,
     pub dye_supported: bool,
-    pub report_supported: bool,
     pub sort_order: i64,
     pub is_active: bool,
     pub created_at: DateTime<Utc>,
@@ -39,7 +38,6 @@ pub struct CheckTypeNewInput {
     pub has_subtypes: bool,
     pub base_price_iqd: Option<i64>,
     pub dye_supported: bool,
-    pub report_supported: bool,
     pub sort_order: i64,
     pub entity_id: String,
     pub origin_device_id: Option<String>,
@@ -51,7 +49,6 @@ pub struct CheckTypeUpdate {
     pub name_en: Option<Option<String>>,
     pub base_price_iqd: Option<Option<i64>>,
     pub dye_supported: Option<bool>,
-    pub report_supported: Option<bool>,
     pub sort_order: Option<i64>,
     pub is_active: Option<bool>,
 }
@@ -76,7 +73,6 @@ impl CheckType {
             has_subtypes: input.has_subtypes,
             base_price_iqd: input.base_price_iqd,
             dye_supported: input.dye_supported,
-            report_supported: input.report_supported,
             sort_order: input.sort_order,
             is_active: true,
             created_at: now,
@@ -109,9 +105,6 @@ impl CheckType {
         }
         if let Some(d) = patch.dye_supported {
             self.dye_supported = d;
-        }
-        if let Some(r) = patch.report_supported {
-            self.report_supported = r;
         }
         if let Some(s) = patch.sort_order {
             self.sort_order = s;
@@ -194,7 +187,6 @@ mod tests {
             has_subtypes,
             base_price_iqd: base,
             dye_supported: false,
-            report_supported: false,
             sort_order: 0,
             entity_id: "unscoped".into(),
             origin_device_id: None,
@@ -239,13 +231,11 @@ mod tests {
     // --- phase-03 §1.1 expanded coverage ---
 
     #[test]
-    fn try_new_preserves_dye_and_report_flags() {
+    fn try_new_preserves_dye_flag() {
         let mut i = input("X", false, Some(0));
         i.dye_supported = true;
-        i.report_supported = true;
         let ct = CheckType::try_new(i).unwrap();
         assert!(ct.dye_supported);
-        assert!(ct.report_supported);
     }
 
     #[test]
@@ -256,7 +246,6 @@ mod tests {
             has_subtypes: false,
             base_price_iqd: Some(1000),
             dye_supported: false,
-            report_supported: false,
             sort_order: 0,
             entity_id: "e".into(),
             origin_device_id: None,
@@ -274,7 +263,6 @@ mod tests {
             has_subtypes: false,
             base_price_iqd: Some(1000),
             dye_supported: false,
-            report_supported: false,
             sort_order: 0,
             entity_id: "e".into(),
             origin_device_id: None,

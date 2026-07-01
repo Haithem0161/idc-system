@@ -10,10 +10,20 @@ use crate::domains::catalog::domain::entities::{
 use crate::domains::visits::domain::entities::VisitSnapshots;
 use crate::error::{AppError, AppResult};
 
-#[derive(Debug, Clone, Copy)]
+/// The دلال (dalal) money mode takes a built-in flat doctor cut: it is a
+/// doctor substitute that never resolves to a `doctors` row, so the cut is a
+/// fixed constant rather than a pct/fixed negotiation.
+const DALAL_CUT_IQD: i64 = 10;
+
+#[derive(Debug, Clone)]
 pub struct MoneySettings {
     pub dye_cost_iqd: i64,
-    pub report_cost_iqd: i64,
+    /// Percentage (0..=100) carved out of the price-after-doctor-cut and paid
+    /// to the internal reporting doctor when the visit's `report` flag is on.
+    pub report_pct: i64,
+    /// Name of the single internal reporting doctor who receives every report
+    /// amount. Captured into the snapshot when report is on (and non-empty).
+    pub reporting_doctor_name: String,
     pub internal_doctor_pct: i64,
 }
 
@@ -26,6 +36,22 @@ pub struct MoneyMathInputs<'a> {
     pub patient_name: &'a str,
     pub dye: bool,
     pub report: bool,
+    pub dalal: bool,
+    /// Discount mode: when true AND a real referring doctor is present, the
+    /// doctor's cut for this visit is forced to 0. It is the only thing the flag
+    /// changes -- the operator cut, the مندوب cut, and the patient total are
+    /// untouched. The report carve-out, being a pct of `price - doctor_cut`,
+    /// naturally widens to `price` since the doctor cut is now 0.
+    pub discount: bool,
+    /// مندوب (representative) per-visit cut, chosen on the visit: 500 or 1000
+    /// when a مندوب is referenced, 0 otherwise. PURE PASSTHROUGH -- it is copied
+    /// straight into the snapshot and does NOT route through `cuts()`; it never
+    /// changes the doctor cut, the operator cut, or the report base. The
+    /// net-side subtraction happens later in the reports read-model.
+    pub mandoub_cut_iqd: i64,
+    /// مندوب name, copied into the snapshot alongside the cut. `Some(name)` when
+    /// a مندوب is referenced, `None` otherwise.
+    pub mandoub_name: Option<&'a str>,
     pub settings: MoneySettings,
 }
 
@@ -36,11 +62,6 @@ pub fn compute(inputs: &MoneyMathInputs<'_>) -> AppResult<VisitSnapshots> {
     if inputs.dye && !inputs.check_type.dye_supported {
         return Err(AppError::Validation(
             "check type does not support dye".into(),
-        ));
-    }
-    if inputs.report && !inputs.check_type.report_supported {
-        return Err(AppError::Validation(
-            "check type does not support report".into(),
         ));
     }
     if inputs.check_type.has_subtypes && inputs.check_subtype.is_none() {
@@ -54,6 +75,24 @@ pub fn compute(inputs: &MoneyMathInputs<'_>) -> AppResult<VisitSnapshots> {
         ));
     }
 
+    // مندوب coherence guard: a non-zero مندوب cut implies a real referring
+    // doctor (the مندوب is referenced only when a doctor is selected). The cut
+    // itself is pure passthrough below -- this guard only rejects an
+    // impossible combination before the snapshot is built.
+    if inputs.mandoub_cut_iqd != 0 && inputs.doctor.is_none() {
+        return Err(AppError::Validation(
+            "mandoub cut requires a referring doctor".into(),
+        ));
+    }
+
+    // Discount coherence guard: the discount zeroes the referring doctor's cut,
+    // so it only makes sense when a real referring doctor is present.
+    if inputs.discount && inputs.doctor.is_none() {
+        return Err(AppError::Validation(
+            "discount requires a referring doctor".into(),
+        ));
+    }
+
     let base_price = base_price(inputs)?;
     let price_iqd = effective_price(base_price, inputs.doctor_pricing);
 
@@ -62,28 +101,62 @@ pub fn compute(inputs: &MoneyMathInputs<'_>) -> AppResult<VisitSnapshots> {
     } else {
         0
     };
-    let report_cost = if inputs.report {
-        inputs.settings.report_cost_iqd
-    } else {
-        0
-    };
 
-    let (doctor_cut, internal_pct, operator_cut) = cuts(
+    let (computed_doctor_cut, internal_pct, operator_cut) = cuts(
         price_iqd,
         inputs.operator,
         inputs.doctor,
+        inputs.dalal,
         inputs.doctor_pricing,
         &inputs.settings,
     )?;
 
-    let total = price_iqd + dye_cost + report_cost;
+    // Discount forces the referring doctor's cut to 0 for this visit. Applied
+    // here, BEFORE the report base, so the report carve-out (a pct of
+    // `price - doctor_cut`) sees the zeroed cut and widens accordingly. The
+    // discount is only valid with a real referring doctor (guarded above and at
+    // the entity level), so `internal_pct` is necessarily None here.
+    let doctor_cut = if inputs.discount && inputs.doctor.is_some() {
+        0
+    } else {
+        computed_doctor_cut
+    };
+
+    // Report is a net-side carve-out, not part of the patient bill. It is a
+    // percentage of the price AFTER the doctor cut (excluding dye and the
+    // operator cut) paid to the internal reporting doctor.
+    let report_amount = if inputs.report {
+        if !(0..=100).contains(&inputs.settings.report_pct) {
+            return Err(AppError::Validation("report_pct must be 0..=100".into()));
+        }
+        (price_iqd - doctor_cut).max(0) * inputs.settings.report_pct / 100
+    } else {
+        0
+    };
+    let report_pct = inputs.report.then_some(inputs.settings.report_pct);
+    let reporting_doctor_name =
+        if inputs.report && !inputs.settings.reporting_doctor_name.trim().is_empty() {
+            Some(inputs.settings.reporting_doctor_name.clone())
+        } else {
+            None
+        };
+
+    // Patient total no longer includes report.
+    let total = price_iqd + dye_cost;
 
     Ok(VisitSnapshots {
         price_iqd,
         dye_cost_iqd: dye_cost,
-        report_cost_iqd: report_cost,
+        report_amount_iqd: report_amount,
+        report_pct,
+        reporting_doctor_name,
         doctor_cut_iqd: doctor_cut,
         operator_cut_iqd: operator_cut,
+        // مندوب cut + name are PURE PASSTHROUGH: copied straight from the
+        // visit-chosen inputs into the snapshot. They never went through
+        // cuts() and never perturbed the doctor/operator cut or the report base.
+        mandoub_cut_iqd: inputs.mandoub_cut_iqd,
+        mandoub_name: inputs.mandoub_name.map(|s| s.to_string()),
         internal_pct,
         total_amount_iqd: total,
         // The money engine only ever produces the billed snapshot. A collected
@@ -138,10 +211,26 @@ fn cuts(
     price_iqd: i64,
     operator: &Operator,
     doctor: Option<&Doctor>,
+    dalal: bool,
     pricing: Option<&DoctorCheckPricing>,
     settings: &MoneySettings,
 ) -> AppResult<(i64, Option<i64>, i64)> {
     let operator_cut = operator.base_cut_per_check_iqd;
+
+    // دلال is a doctor substitute and is mutually exclusive with a referring
+    // doctor; a dalal visit always has `doctor_id` None. Reject the impossible
+    // combo defensively before dispatching on the money mode.
+    if dalal && doctor.is_some() {
+        return Err(AppError::Validation(
+            "dalal cannot coexist with a referring doctor".into(),
+        ));
+    }
+
+    // دلال takes precedence over house mode: a flat built-in cut, no
+    // internal_pct (it is not the house-employed doctor).
+    if dalal {
+        return Ok((DALAL_CUT_IQD, None, operator_cut));
+    }
 
     match (doctor, pricing) {
         (_, Some(p)) => {
@@ -192,7 +281,6 @@ mod tests {
             has_subtypes,
             base_price_iqd: base,
             dye_supported: true,
-            report_supported: true,
             sort_order: 0,
             is_active: true,
             created_at: now,
@@ -229,75 +317,10 @@ mod tests {
     fn settings() -> MoneySettings {
         MoneySettings {
             dye_cost_iqd: 2000,
-            report_cost_iqd: 3000,
+            report_pct: 20,
+            reporting_doctor_name: "Dr Report".into(),
             internal_doctor_pct: 40,
         }
-    }
-
-    #[test]
-    fn flat_house_with_dye() {
-        let ct = ct(false, Some(50000));
-        let op = operator();
-        let snap = compute(&MoneyMathInputs {
-            check_type: &ct,
-            check_subtype: None,
-            doctor: None,
-            doctor_pricing: None,
-            operator: &op,
-            patient_name: "Pat",
-            dye: true,
-            report: false,
-            settings: settings(),
-        })
-        .unwrap();
-        assert_eq!(snap.price_iqd, 50000);
-        assert_eq!(snap.dye_cost_iqd, 2000);
-        assert_eq!(snap.report_cost_iqd, 0);
-        assert_eq!(snap.doctor_cut_iqd, 20000); // 40% of 50000
-        assert_eq!(snap.internal_pct, Some(40));
-        assert_eq!(snap.operator_cut_iqd, 5000);
-        assert_eq!(snap.total_amount_iqd, 52000);
-    }
-
-    #[test]
-    fn total_equals_sum_invariant() {
-        let ct = ct(false, Some(75000));
-        let op = operator();
-        let snap = compute(&MoneyMathInputs {
-            check_type: &ct,
-            check_subtype: None,
-            doctor: None,
-            doctor_pricing: None,
-            operator: &op,
-            patient_name: "Pat",
-            dye: true,
-            report: true,
-            settings: settings(),
-        })
-        .unwrap();
-        assert_eq!(
-            snap.total_amount_iqd,
-            snap.price_iqd + snap.dye_cost_iqd + snap.report_cost_iqd
-        );
-    }
-
-    #[test]
-    fn rejects_dye_when_unsupported() {
-        let mut t = ct(false, Some(50000));
-        t.dye_supported = false;
-        let op = operator();
-        let err = compute(&MoneyMathInputs {
-            check_type: &t,
-            check_subtype: None,
-            doctor: None,
-            doctor_pricing: None,
-            operator: &op,
-            patient_name: "Pat",
-            dye: true,
-            report: false,
-            settings: settings(),
-        });
-        assert!(err.is_err());
     }
 
     // ---- Phase 05 plan §1.1: money_math coverage matrix ------------------
@@ -381,6 +404,409 @@ mod tests {
         }
     }
 
+    // ---- house / doctor / dye coverage (preserved under the new model) ---
+
+    #[test]
+    fn flat_house_with_dye() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "Pat",
+            dye: true,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.price_iqd, 50_000);
+        assert_eq!(snap.dye_cost_iqd, 2_000);
+        // Report off: no carve-out, no pct/name snapshots.
+        assert_eq!(snap.report_amount_iqd, 0);
+        assert_eq!(snap.report_pct, None);
+        assert_eq!(snap.reporting_doctor_name, None);
+        assert_eq!(snap.doctor_cut_iqd, 20_000); // 40% of 50000
+        assert_eq!(snap.internal_pct, Some(40));
+        assert_eq!(snap.operator_cut_iqd, 5_000);
+        // Patient total = price + dye only.
+        assert_eq!(snap.total_amount_iqd, 52_000);
+    }
+
+    #[test]
+    fn total_equals_price_plus_dye_invariant_excludes_report() {
+        // Even with report on, the patient total is price + dye; the report
+        // amount is a separate net-side carve-out.
+        let ct = ct(false, Some(75_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "Pat",
+            dye: true,
+            report: true,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.total_amount_iqd, snap.price_iqd + snap.dye_cost_iqd);
+        assert!(snap.report_amount_iqd > 0);
+        // The report amount is NOT added to the patient total.
+        assert_ne!(
+            snap.total_amount_iqd,
+            snap.price_iqd + snap.dye_cost_iqd + snap.report_amount_iqd
+        );
+    }
+
+    #[test]
+    fn rejects_dye_when_unsupported() {
+        let mut t = ct(false, Some(50_000));
+        t.dye_supported = false;
+        let op = operator();
+        let err = compute(&MoneyMathInputs {
+            check_type: &t,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "Pat",
+            dye: true,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        });
+        assert!(err.is_err());
+    }
+
+    // ---- report carve-out tests (new model) ------------------------------
+
+    #[test]
+    fn report_amount_is_pct_of_price_after_doctor_cut_in_house_mode() {
+        // House mode: doctor_cut = 40% of 50000 = 20000.
+        // report base = price - doctor_cut = 30000; 20% = 6000.
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: true,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 20_000);
+        assert_eq!(snap.report_amount_iqd, 6_000);
+        assert_eq!(snap.report_pct, Some(20));
+        assert_eq!(snap.reporting_doctor_name.as_deref(), Some("Dr Report"));
+    }
+
+    #[test]
+    fn report_off_zeroes_amount_and_nulls_pct_and_name() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.report_amount_iqd, 0);
+        assert_eq!(snap.report_pct, None);
+        assert_eq!(snap.reporting_doctor_name, None);
+    }
+
+    #[test]
+    fn report_base_excludes_dye() {
+        // With dye on, the report base must still be price - doctor_cut, NOT
+        // price + dye - doctor_cut. price=50000, doctor_cut=20000, base=30000,
+        // 20% = 6000 -- identical to the no-dye case.
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let with_dye = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: true,
+            report: true,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        let without_dye = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: true,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(with_dye.report_amount_iqd, 6_000);
+        assert_eq!(with_dye.report_amount_iqd, without_dye.report_amount_iqd);
+    }
+
+    #[test]
+    fn report_base_uses_doctor_cut_not_operator_cut() {
+        // Doctor mode with a per-check fixed cut: report base = price - doctor_cut
+        // and ignores the operator cut entirely.
+        // price=80000, doctor_cut=12000, base=68000, 20% = 13600.
+        let ct = ct(false, Some(80_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Fixed, 12_000, None);
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: true,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 12_000);
+        assert_eq!(snap.report_amount_iqd, 13_600);
+    }
+
+    #[test]
+    fn report_name_snapshot_omitted_when_setting_is_empty() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let mut s = settings();
+        s.reporting_doctor_name = "   ".into();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: true,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: s,
+        })
+        .unwrap();
+        // pct is still recorded, but the name snapshot stays None.
+        assert_eq!(snap.report_pct, Some(20));
+        assert_eq!(snap.reporting_doctor_name, None);
+    }
+
+    #[test]
+    fn report_pct_zero_yields_zero_amount_but_pct_some() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let mut s = settings();
+        s.report_pct = 0;
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: true,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: s,
+        })
+        .unwrap();
+        assert_eq!(snap.report_amount_iqd, 0);
+        assert_eq!(snap.report_pct, Some(0));
+    }
+
+    #[test]
+    fn rejects_report_pct_out_of_range_when_report_on() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let mut s = settings();
+        s.report_pct = 150;
+        let err = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: true,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: s,
+        });
+        match err {
+            Err(AppError::Validation(m)) => assert!(m.contains("report_pct")),
+            _ => panic!("expected Validation"),
+        }
+    }
+
+    #[test]
+    fn report_truncates_integer_division() {
+        // price=50001, house doctor_cut = 50001*40/100 = 20000 (trunc),
+        // base = 30001, 20% = 6000 (6000.2 truncated).
+        let ct = ct(false, Some(50_001));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: true,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 20_000);
+        assert_eq!(snap.report_amount_iqd, 6_000);
+    }
+
+    // ---- dalal (دلال) mode tests ----------------------------------------
+
+    #[test]
+    fn dalal_takes_flat_ten_cut_and_no_internal_pct() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            dalal: true,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 10);
+        assert_eq!(snap.internal_pct, None);
+        assert_eq!(snap.total_amount_iqd, 50_000);
+    }
+
+    #[test]
+    fn dalal_with_report_uses_flat_cut_as_report_base() {
+        // dalal doctor_cut = 10; report base = 50000 - 10 = 49990; 20% = 9998.
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: true,
+            dalal: true,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 10);
+        assert_eq!(snap.report_amount_iqd, 9_998);
+        assert_eq!(snap.report_pct, Some(20));
+    }
+
+    #[test]
+    fn dalal_with_doctor_present_is_rejected() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let doc = doctor();
+        let err = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            dalal: true,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        });
+        match err {
+            Err(AppError::Validation(m)) => assert!(m.contains("dalal")),
+            _ => panic!("expected Validation"),
+        }
+    }
+
+    // ---- existing coverage matrix (threaded with dalal: false) ----------
+
     #[test]
     fn flat_pricing_check_with_no_subtype_no_doctor() {
         let ct = ct(false, Some(50_000));
@@ -394,12 +820,16 @@ mod tests {
             patient_name: "Pat",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
         assert_eq!(snap.price_iqd, 50_000);
         assert_eq!(snap.dye_cost_iqd, 0);
-        assert_eq!(snap.report_cost_iqd, 0);
+        assert_eq!(snap.report_amount_iqd, 0);
         assert_eq!(snap.internal_pct, Some(40));
         assert_eq!(snap.operator_cut_iqd, op.base_cut_per_check_iqd);
         assert_eq!(snap.total_amount_iqd, 50_000);
@@ -419,6 +849,10 @@ mod tests {
             patient_name: "Pat",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -440,6 +874,10 @@ mod tests {
             patient_name: "Pat",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -463,6 +901,10 @@ mod tests {
             patient_name: "Pat",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -485,6 +927,10 @@ mod tests {
             patient_name: "Pat",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -494,9 +940,6 @@ mod tests {
 
     #[test]
     fn doctor_without_pricing_row_keeps_internal_pct_none_and_zero_cut() {
-        // Referring doctor selected but no DoctorCheckPricing configured: price
-        // falls back to base, doctor cut is zero, and internal_pct must be None
-        // so Visit::lock (invariant 6) accepts the snapshot.
         let ct = ct(false, Some(15_000));
         let op = operator();
         let doc = doctor();
@@ -509,6 +952,10 @@ mod tests {
             patient_name: "Pat",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -520,9 +967,6 @@ mod tests {
 
     #[test]
     fn doctor_default_pct_cut_applies_when_no_per_check_row() {
-        // No DoctorCheckPricing row, but the doctor has a default 20% cut: the
-        // engine falls back to it instead of zero. internal_pct stays None
-        // (still doctor mode, not house mode).
         let ct = ct(false, Some(50_000));
         let op = operator();
         let doc = doctor_with_default_cut("pct", 20);
@@ -535,6 +979,10 @@ mod tests {
             patient_name: "Pat",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -556,6 +1004,10 @@ mod tests {
             patient_name: "Pat",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -565,8 +1017,6 @@ mod tests {
 
     #[test]
     fn per_check_pricing_overrides_doctor_default_cut() {
-        // A doctor with a default cut still defers to an explicit per-check
-        // DoctorCheckPricing row when one exists.
         let ct = ct(false, Some(50_000));
         let op = operator();
         let doc = doctor_with_default_cut("pct", 20);
@@ -580,6 +1030,10 @@ mod tests {
             patient_name: "Pat",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -599,6 +1053,10 @@ mod tests {
             patient_name: "Pat",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -619,6 +1077,10 @@ mod tests {
             patient_name: "p",
             dye: true,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -632,6 +1094,10 @@ mod tests {
             patient_name: "p",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -652,46 +1118,16 @@ mod tests {
             patient_name: "p",
             dye: true,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         });
         match err {
             Err(AppError::Validation(m)) => assert!(m.contains("dye")),
             _ => panic!("expected Validation"),
         }
-    }
-
-    #[test]
-    fn report_cost_added_when_report_true_zero_otherwise_and_rejects_when_unsupported() {
-        let ct = ct(false, Some(50_000));
-        let op = operator();
-        let on = compute(&MoneyMathInputs {
-            check_type: &ct,
-            check_subtype: None,
-            doctor: None,
-            doctor_pricing: None,
-            operator: &op,
-            patient_name: "p",
-            dye: false,
-            report: true,
-            settings: settings(),
-        })
-        .unwrap();
-        assert_eq!(on.report_cost_iqd, 3000);
-
-        let mut t = ct.clone();
-        t.report_supported = false;
-        let err = compute(&MoneyMathInputs {
-            check_type: &t,
-            check_subtype: None,
-            doctor: None,
-            doctor_pricing: None,
-            operator: &op,
-            patient_name: "p",
-            dye: false,
-            report: true,
-            settings: settings(),
-        });
-        assert!(err.is_err());
     }
 
     #[test]
@@ -709,6 +1145,10 @@ mod tests {
             patient_name: "p",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         });
         assert!(err.is_err());
@@ -723,6 +1163,10 @@ mod tests {
             patient_name: "p",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         });
         assert!(err2.is_err());
@@ -742,6 +1186,10 @@ mod tests {
             patient_name: "p",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -765,6 +1213,10 @@ mod tests {
                 patient_name: "p",
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
+                mandoub_cut_iqd: 0,
+                mandoub_name: None,
                 settings: settings(),
             })
             .unwrap();
@@ -792,6 +1244,10 @@ mod tests {
             patient_name: "p",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         });
         assert!(err.is_err());
@@ -803,7 +1259,8 @@ mod tests {
         let op = operator();
         let bad = MoneySettings {
             dye_cost_iqd: 0,
-            report_cost_iqd: 0,
+            report_pct: 0,
+            reporting_doctor_name: String::new(),
             internal_doctor_pct: 250,
         };
         let err = compute(&MoneyMathInputs {
@@ -815,6 +1272,10 @@ mod tests {
             patient_name: "p",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: bad,
         });
         assert!(err.is_err());
@@ -833,6 +1294,10 @@ mod tests {
             patient_name: "p",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         });
         assert!(err.is_err());
@@ -854,6 +1319,10 @@ mod tests {
             patient_name: "John Doe",
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             settings: settings(),
         })
         .unwrap();
@@ -862,5 +1331,217 @@ mod tests {
         assert_eq!(snap.operator_name, op.name);
         assert_eq!(snap.check_type_name_ar, ct.name_ar);
         assert_eq!(snap.check_subtype_name_ar.as_deref(), Some("فرعي"));
+    }
+
+    #[test]
+    fn mandoub_cut_and_name_pass_through_without_changing_other_cuts() {
+        // With a doctor + per-check pricing, the doctor/operator cut is fixed;
+        // adding a مندوب cut+name must copy them straight into the snapshot
+        // WITHOUT perturbing any of the computed cuts or the patient total.
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 25, None);
+
+        let baseline = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+
+        let with_mandoub = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 1_000,
+            mandoub_name: Some("Rep"),
+            settings: settings(),
+        })
+        .unwrap();
+
+        // Passthrough captured.
+        assert_eq!(with_mandoub.mandoub_cut_iqd, 1_000);
+        assert_eq!(with_mandoub.mandoub_name.as_deref(), Some("Rep"));
+        // Baseline carries no مندوب.
+        assert_eq!(baseline.mandoub_cut_iqd, 0);
+        assert!(baseline.mandoub_name.is_none());
+        // Nothing else moved: doctor cut, operator cut, and patient total are
+        // identical with and without the مندوب cut.
+        assert_eq!(with_mandoub.doctor_cut_iqd, baseline.doctor_cut_iqd);
+        assert_eq!(with_mandoub.operator_cut_iqd, baseline.operator_cut_iqd);
+        assert_eq!(with_mandoub.total_amount_iqd, baseline.total_amount_iqd);
+        assert_eq!(with_mandoub.report_amount_iqd, baseline.report_amount_iqd);
+    }
+
+    // ---- discount tests --------------------------------------------------
+
+    #[test]
+    fn discount_zeroes_referring_doctor_cut_only() {
+        // Doctor with a 25% per-check cut on a 100k price -> 25k cut normally.
+        // With discount on, the doctor cut is 0; operator cut and total are
+        // untouched.
+        let ct = ct(false, Some(100_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 25, None);
+
+        let baseline = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(baseline.doctor_cut_iqd, 25_000);
+
+        let discounted = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            dalal: false,
+            discount: true,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(discounted.doctor_cut_iqd, 0);
+        // Everything else identical: price, operator cut, total, internal_pct.
+        assert_eq!(discounted.price_iqd, baseline.price_iqd);
+        assert_eq!(discounted.operator_cut_iqd, baseline.operator_cut_iqd);
+        assert_eq!(discounted.total_amount_iqd, baseline.total_amount_iqd);
+        assert_eq!(discounted.internal_pct, baseline.internal_pct);
+    }
+
+    #[test]
+    fn discount_widens_report_base_to_full_price() {
+        // With discount the doctor cut is 0, so the report base = price - 0.
+        // price=100k, report_pct=20 -> report = 20k (vs 15k with the 25% cut).
+        let ct = ct(false, Some(100_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 25, None);
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: true,
+            dalal: false,
+            discount: true,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 0);
+        assert_eq!(snap.report_amount_iqd, 20_000);
+    }
+
+    #[test]
+    fn discount_without_doctor_is_rejected() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let err = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            dalal: false,
+            discount: true,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            settings: settings(),
+        });
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn discount_preserves_mandoub_passthrough() {
+        // Discount zeroes the doctor cut but never the مندوب cut: both coexist.
+        let ct = ct(false, Some(80_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 30, None);
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            dalal: false,
+            discount: true,
+            mandoub_cut_iqd: 1_000,
+            mandoub_name: Some("Rep"),
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 0);
+        assert_eq!(snap.mandoub_cut_iqd, 1_000);
+        assert_eq!(snap.mandoub_name.as_deref(), Some("Rep"));
+    }
+
+    #[test]
+    fn mandoub_cut_without_doctor_is_rejected() {
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let err = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 500,
+            mandoub_name: Some("Rep"),
+            settings: settings(),
+        });
+        assert!(err.is_err());
     }
 }

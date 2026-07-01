@@ -3,7 +3,7 @@
 // AuditRowSchema (per-row), and AuditQueryResponseSchema (envelope).
 //
 // Critical invariants pinned:
-// - The 16-action and 16-entity closed enums (mirror phase-01 §7.36 + the
+// - The 16-action and 17-entity closed enums (mirror phase-01 §7.36 + the
 //   phase-07 §7.18 `daily_close_run` extension + phase-08's exhaustive
 //   syncable-entity list + the signed-close `daily_close_sign` /
 //   `daily_close_reopen` actions and the materialized `daily_close` entity).
@@ -69,11 +69,11 @@ test('ACTION_VALUES enumerates exactly the 16 phase-09 actions', () => {
   }
 })
 
-test('ENTITY_VALUES enumerates exactly the 16 syncable entities', () => {
-  assert.equal(ENTITY_VALUES.length, 16, 'must list exactly 16 entities')
+test('ENTITY_VALUES enumerates exactly the 17 syncable entities', () => {
+  assert.equal(ENTITY_VALUES.length, 17, 'must list exactly 17 entities')
   for (const expected of [
     'users', 'settings', 'check_types', 'check_subtypes', 'doctors',
-    'doctor_check_pricing', 'operators', 'operator_specialties',
+    'doctor_check_pricing', 'operators', 'mandoubs', 'operator_specialties',
     'operator_shifts', 'patients', 'visits', 'inventory_items',
     'inventory_consumption_map', 'inventory_adjustments', 'audit_log',
     'daily_close',

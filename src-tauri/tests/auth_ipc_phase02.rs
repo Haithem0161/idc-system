@@ -965,13 +965,16 @@ async fn users_create_first_admin_defaults_entity_id_to_unscoped_when_missing() 
 #[tokio::test]
 async fn settings_list_returns_seeded_v1_keys_for_unscoped_tenant_before_login() {
     let rig = rig(None).await;
-    // Migration seeds 10 required keys under entity_id='unscoped'.
+    // Migration seeds the v1 keys under entity_id='unscoped'. Migration 018
+    // retired `report_cost_iqd` (tombstoned) and added `report_pct` plus
+    // `reporting_doctor_name`, so the live count is 11.
     let rows = settings_list_impl(&rig.state).await.unwrap();
-    assert_eq!(rows.len(), 10);
+    assert_eq!(rows.len(), 11);
     let keys: Vec<_> = rows.iter().map(|s| s.key.as_str()).collect();
     for k in [
         "dye_cost_iqd",
-        "report_cost_iqd",
+        "report_pct",
+        "reporting_doctor_name",
         "internal_doctor_pct",
         "idle_lock_minutes",
         "arabic_numerals",
@@ -983,6 +986,11 @@ async fn settings_list_returns_seeded_v1_keys_for_unscoped_tenant_before_login()
     ] {
         assert!(keys.contains(&k), "missing seed key: {k}");
     }
+    // The retired key must no longer appear as a live row.
+    assert!(
+        !keys.contains(&"report_cost_iqd"),
+        "report_cost_iqd should be tombstoned by migration 018"
+    );
 }
 
 #[tokio::test]

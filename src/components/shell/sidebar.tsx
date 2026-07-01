@@ -12,6 +12,7 @@ import {
   Microscope,
   HardHat,
   UsersRound,
+  Contact,
   LayoutDashboard,
   Activity,
   Boxes,
@@ -114,6 +115,12 @@ export function Sidebar() {
           enabled: role === "accountant" || role === "superadmin",
         },
         {
+          key: "acc_mandoubs",
+          to: "/accounting/explore/mandoubs",
+          icon: Contact,
+          enabled: role === "accountant" || role === "superadmin",
+        },
+        {
           key: "acc_checks",
           to: "/accounting/explore/checks",
           icon: Boxes,
@@ -134,6 +141,7 @@ export function Sidebar() {
         { key: "check_types", to: "/admin/check-types", icon: Microscope, enabled: role === "superadmin" },
         { key: "doctors", to: "/admin/doctors", icon: Stethoscope, enabled: role === "superadmin" },
         { key: "operators", to: "/admin/operators", icon: HardHat, enabled: role === "superadmin" },
+        { key: "mandoubs", to: "/admin/mandoubs", icon: Contact, enabled: role === "superadmin" },
         { key: "inventory", to: "/admin/inventory", icon: Package, enabled: role === "superadmin" },
         { key: "audit", to: "/audit", icon: ShieldCheck, enabled: role === "superadmin" },
         { key: "settings", to: "/admin/settings", icon: Settings, enabled: role === "superadmin" },

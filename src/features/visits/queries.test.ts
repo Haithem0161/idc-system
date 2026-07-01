@@ -97,8 +97,10 @@ function visit(overrides: Partial<VisitRecord> = {}): VisitRecord {
     check_subtype_id: null,
     doctor_id: UUID_DOCTOR,
     operator_id: null,
+    mandoub_id: null,
     dye: false,
     report: false,
+    dalal: false,
     locked_at: null,
     voided_at: null,
     voided_by_user_id: null,
@@ -121,7 +123,6 @@ function checksGridCard(): ChecksGridCardRecord {
     name_en: "X-Ray",
     has_subtypes: false,
     dye_supported: true,
-    report_supported: false,
     todays_visits: 3,
   }
 }
@@ -281,6 +282,7 @@ describe.each(directions)(
       await result.current.mutateAsync({
         patient_id: UUID_PATIENT,
         check_type_id: UUID_CHECK,
+        dalal: false,
         dye: false,
         report: false,
       })
@@ -295,6 +297,7 @@ describe.each(directions)(
         result.current.mutateAsync({
           patient_id: UUID_PATIENT,
           check_type_id: UUID_CHECK,
+          dalal: false,
           dye: false,
           report: false,
         })

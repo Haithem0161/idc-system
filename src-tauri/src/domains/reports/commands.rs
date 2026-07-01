@@ -17,8 +17,8 @@ use uuid::Uuid;
 use crate::domains::auth::domain::value_objects::UserRole;
 use crate::domains::reports::domain::entities::{
     DailyClose, DashboardKpis, DashboardTops, DateRange, DoctorDrilldown, DoctorEarningsRow,
-    FrozenClose, OperatorDrilldown, OperatorEarningsRow, VisitsReport, VisitsReportFilters,
-    VisitsReportGroupBy,
+    FrozenClose, MandoubDrilldown, MandoubEarningsRow, OperatorDrilldown, OperatorEarningsRow,
+    VisitsReport, VisitsReportFilters, VisitsReportGroupBy,
 };
 use crate::domains::reports::service::ReportsService;
 use crate::error::{AppError, AppResult};
@@ -243,6 +243,48 @@ pub async fn reports_operator_drilldown(
         .await
 }
 
+// ---- مندوب earnings -------------------------------------------------------
+
+#[instrument(skip(state))]
+#[tauri::command]
+pub async fn reports_mandoub_earnings(
+    args: RangeArgs,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<MandoubEarningsRow>> {
+    let (_, role, entity_id) = actor(state.inner()).await?;
+    ReportsService::require_reports_role(role)?;
+    let svc = service(state.inner())?;
+    svc.mandoub_earnings(&entity_id, args.range(), args.include_voided)
+        .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MandoubDrilldownArgs {
+    pub mandoub_id: String,
+    pub from_utc: chrono::DateTime<chrono::Utc>,
+    pub to_utc: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    pub include_voided: bool,
+}
+
+#[instrument(skip(state))]
+#[tauri::command]
+pub async fn reports_mandoub_drilldown(
+    args: MandoubDrilldownArgs,
+    state: State<'_, AppState>,
+) -> AppResult<MandoubDrilldown> {
+    let (_, role, entity_id) = actor(state.inner()).await?;
+    ReportsService::require_reports_role(role)?;
+    let svc = service(state.inner())?;
+    let mandoub = Uuid::parse_str(&args.mandoub_id)?;
+    let range = DateRange {
+        from_utc: args.from_utc,
+        to_utc: args.to_utc,
+    };
+    svc.mandoub_drilldown(&entity_id, mandoub, range, args.include_voided)
+        .await
+}
+
 // ---- daily close ----------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
@@ -443,6 +485,25 @@ pub async fn reports_export_operators_csv(
         to_utc: args.to_utc,
     };
     svc.export_operator_earnings_csv(&entity_id, range, args.include_voided, &path)
+        .await?;
+    Ok(ExportResultDto { path })
+}
+
+#[instrument(skip(state))]
+#[tauri::command]
+pub async fn reports_export_mandoub_earnings_csv(
+    args: ExportEarningsArgs,
+    state: State<'_, AppState>,
+) -> AppResult<ExportResultDto> {
+    let (_, role, entity_id) = actor(state.inner()).await?;
+    ReportsService::require_reports_role(role)?;
+    let svc = service(state.inner())?;
+    let path = PathBuf::from(args.path);
+    let range = DateRange {
+        from_utc: args.from_utc,
+        to_utc: args.to_utc,
+    };
+    svc.export_mandoub_earnings_csv(&entity_id, range, args.include_voided, &path)
         .await?;
     Ok(ExportResultDto { path })
 }

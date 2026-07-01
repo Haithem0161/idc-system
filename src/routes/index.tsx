@@ -19,6 +19,8 @@ import DoctorsListPage from "@/pages/admin/doctors/list"
 import DoctorDetailPage from "@/pages/admin/doctors/detail"
 import OperatorsListPage from "@/pages/admin/operators/list"
 import OperatorDetailPage from "@/pages/admin/operators/detail"
+import MandoubsListPage from "@/pages/admin/mandoubs/list"
+import MandoubDetailPage from "@/pages/admin/mandoubs/detail"
 import InventoryCatalogListPage from "@/pages/admin/inventory/list"
 import InventoryItemDetailPage from "@/pages/admin/inventory/detail"
 import ShiftsPage from "@/pages/reception/shifts"
@@ -69,6 +71,8 @@ export const router = createBrowserRouter([
               { path: "doctors/:id", Component: DoctorDetailPage },
               { path: "operators", Component: OperatorsListPage },
               { path: "operators/:id", Component: OperatorDetailPage },
+              { path: "mandoubs", Component: MandoubsListPage },
+              { path: "mandoubs/:id", Component: MandoubDetailPage },
               { path: "inventory", Component: InventoryCatalogListPage },
               { path: "inventory/:id", Component: InventoryItemDetailPage },
               { path: "settings", Component: SettingsPage },

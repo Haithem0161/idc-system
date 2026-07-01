@@ -26,20 +26,21 @@ use app_lib::domains::catalog::domain::entities::doctor::DoctorNewInput;
 use app_lib::domains::catalog::domain::entities::doctor_pricing::DoctorPricingNewInput;
 use app_lib::domains::catalog::domain::entities::inventory_consumption::ConsumptionMapNewInput;
 use app_lib::domains::catalog::domain::entities::inventory_item::InventoryItemNewInput;
+use app_lib::domains::catalog::domain::entities::mandoub::MandoubNewInput;
 use app_lib::domains::catalog::domain::entities::operator::OperatorNewInput;
 use app_lib::domains::catalog::domain::entities::operator_specialty::OperatorSpecialtyNewInput;
 use app_lib::domains::catalog::domain::entities::{
-    CheckType, Doctor, DoctorCheckPricing, InventoryConsumptionMap, InventoryItem, Operator,
-    OperatorSpecialty,
+    CheckType, Doctor, DoctorCheckPricing, InventoryConsumptionMap, InventoryItem, Mandoub,
+    Operator, OperatorSpecialty,
 };
 use app_lib::domains::catalog::domain::repositories::{
     CheckSubtypeRepo, CheckTypeRepo, DoctorPricingRepo, DoctorRepo, InventoryConsumptionRepo,
-    InventoryItemRepo, OperatorRepo, OperatorSpecialtyRepo,
+    InventoryItemRepo, MandoubRepo, OperatorRepo, OperatorSpecialtyRepo,
 };
 use app_lib::domains::catalog::domain::value_objects::CutKind;
 use app_lib::domains::catalog::infrastructure::{
     SqliteCheckSubtypeRepo, SqliteCheckTypeRepo, SqliteDoctorPricingRepo, SqliteDoctorRepo,
-    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
+    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteMandoubRepo, SqliteOperatorRepo,
     SqliteOperatorSpecialtyRepo,
 };
 use app_lib::domains::patients::domain::entities::Patient;
@@ -154,7 +155,6 @@ async fn seed() -> Fixture {
         has_subtypes: false,
         base_price_iqd: Some(50_000),
         dye_supported: true,
-        report_supported: false,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
@@ -277,6 +277,7 @@ async fn seed() -> Fixture {
         doctor_pricing: dp_repo,
         operators: op_repo,
         operator_specialties: os_repo,
+        mandoubs: Arc::new(SqliteMandoubRepo::new(pool.clone())),
         consumption: cons_repo,
         inventory_items: item_repo,
         shifts: shift_repo,
@@ -317,7 +318,8 @@ async fn seed() -> Fixture {
 fn settings() -> MoneySettings {
     MoneySettings {
         dye_cost_iqd: 2_000,
-        report_cost_iqd: 3_000,
+        report_pct: 20,
+        reporting_doctor_name: String::new(),
         internal_doctor_pct: 40,
     }
 }
@@ -334,8 +336,11 @@ async fn lock_visit(f: &Fixture, dye: bool, doctor: Option<Uuid>) -> Uuid {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: doctor,
+                mandoub_id: None,
                 dye,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -347,6 +352,7 @@ async fn lock_visit(f: &Fixture, dye: bool, doctor: Option<Uuid>) -> Uuid {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),
@@ -369,8 +375,11 @@ async fn lock_visit_with_override(f: &Fixture, paid: i64) -> Uuid {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -383,12 +392,231 @@ async fn lock_visit_with_override(f: &Fixture, paid: i64) -> Uuid {
             draft.id,
             f.operator.id,
             Some(paid),
+            None,
             settings(),
             ReceiptRenderOptions::default(),
         )
         .await
         .unwrap();
     res.visit.id
+}
+
+/// Lock a house visit (no doctor, no dye) with the report flag ON. Returns the
+/// locked visit id so the caller can read its snapshot.
+async fn lock_report_visit(f: &Fixture) -> Uuid {
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: None,
+                mandoub_id: None,
+                dye: false,
+                report: true,
+                dalal: false,
+                discount: false,
+            },
+        )
+        .await
+        .unwrap();
+    let res = f
+        .visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            None,
+            None,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await
+        .unwrap();
+    res.visit.id
+}
+
+/// End-to-end coverage of the report carve-out: a `report: true` visit must
+/// snapshot the report amount as a percentage of price-after-doctor-cut, and the
+/// daily close must surface it as `total_report_iqd` AND subtract it from net.
+/// This guards the full path (lock -> snapshot -> daily_close aggregate -> net)
+/// that the unit tests in `money_math` do not exercise together.
+#[tokio::test]
+async fn report_visit_snapshots_and_subtracts_from_daily_close_net() {
+    let f = seed().await;
+    let visit_id = lock_report_visit(&f).await;
+
+    // House mode: price 50_000, internal_pct 40 -> doctor_cut 20_000.
+    // report_amount = floor((50_000 - 20_000) * 20 / 100) = 6_000.
+    // total (patient) = price + dye = 50_000 (report is NOT on the bill).
+    let visit = f.visit_service.get(visit_id).await.unwrap();
+    let snap = visit.snapshots.expect("locked visit has a snapshot");
+    assert_eq!(snap.price_iqd, 50_000);
+    assert_eq!(snap.doctor_cut_iqd, 20_000);
+    assert_eq!(snap.report_amount_iqd, 6_000, "20% of price-after-cut");
+    assert_eq!(snap.report_pct, Some(20));
+    assert_eq!(
+        snap.total_amount_iqd, 50_000,
+        "patient total excludes report"
+    );
+
+    let now = Utc::now();
+    let baghdad = now + Duration::hours(3);
+    let target: NaiveDate = baghdad.date_naive();
+    let close = f
+        .reports_service
+        .daily_close(f.superadmin.id, ENTITY_ID, target, snapshot_settings())
+        .await
+        .unwrap();
+
+    // The daily close itemizes the reporting-doctor payable...
+    assert_eq!(close.total_report_iqd, 6_000);
+    assert_eq!(close.total_doctor_cuts_iqd, 20_000);
+    assert_eq!(close.total_operator_cuts_iqd, 4_000);
+    // ...and net subtracts it on the collected basis (no override -> collected
+    // == billed 50_000): 50_000 - 20_000 - 4_000 - 6_000 - inventory.
+    let expected_net =
+        50_000 - 20_000 - 4_000 - 6_000 - close.total_inventory_consumption_value_iqd;
+    assert_eq!(close.net_iqd, expected_net);
+}
+
+/// Seed a مندوب (representative) into the fixture and return it.
+async fn seed_mandoub(f: &Fixture) -> Mandoub {
+    let mandoub = Mandoub::try_new(MandoubNewInput {
+        name: "Rep Zed".into(),
+        phone: None,
+        notes: None,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    })
+    .unwrap();
+    let repo = SqliteMandoubRepo::new(f.pool.clone());
+    let mut tx = f.pool.begin().await.unwrap();
+    repo.upsert(&mut tx, &mandoub).await.unwrap();
+    tx.commit().await.unwrap();
+    mandoub
+}
+
+/// Lock a visit with a referring doctor AND a مندوب, choosing one of the two
+/// fixed cut tiers (500 or 1000). Mirrors `lock_visit` but threads the مندوب
+/// reference and the cut through create_draft + lock.
+async fn lock_mandoub_visit(f: &Fixture, mandoub_id: Uuid, cut: i64) -> Uuid {
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: Some(f.doctor.id),
+                mandoub_id: Some(mandoub_id),
+                dye: false,
+                report: false,
+                dalal: false,
+                discount: false,
+            },
+        )
+        .await
+        .unwrap();
+    let res = f
+        .visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            None,
+            Some(cut),
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await
+        .unwrap();
+    res.visit.id
+}
+
+/// End-to-end coverage of the مندوب carve-out: a visit with a referring doctor
+/// and a مندوب must snapshot the chosen 500/1000 cut and the مندوب name, and the
+/// daily close must surface it as `total_mandoub_cuts_iqd` AND subtract it from
+/// net. The مندوب cut is independent of the doctor cut, operator cut, and the
+/// report base. This guards the full path (lock -> snapshot -> daily_close
+/// aggregate -> net), comparing a مندوب visit against an otherwise-identical
+/// doctor-only visit to isolate the 1_000 delta.
+#[tokio::test]
+async fn mandoub_visit_snapshots_and_subtracts_from_daily_close_net() {
+    let f = seed().await;
+    let mandoub = seed_mandoub(&f).await;
+    let visit_id = lock_mandoub_visit(&f, mandoub.id, 1_000).await;
+
+    // The locked visit snapshots the chosen cut and the مندوب name; the patient
+    // total is unchanged (the cut never touches the bill).
+    let visit = f.visit_service.get(visit_id).await.unwrap();
+    let snap = visit.snapshots.expect("locked visit has a snapshot");
+    assert_eq!(snap.mandoub_cut_iqd, 1_000, "chosen 1000 tier snapshotted");
+    assert_eq!(snap.mandoub_name.as_deref(), Some("Rep Zed"));
+    assert_eq!(snap.price_iqd, 50_000);
+    assert_eq!(
+        snap.total_amount_iqd, 50_000,
+        "patient total excludes the مندوب cut"
+    );
+
+    let now = Utc::now();
+    let baghdad = now + Duration::hours(3);
+    let target: NaiveDate = baghdad.date_naive();
+    let close = f
+        .reports_service
+        .daily_close(f.superadmin.id, ENTITY_ID, target, snapshot_settings())
+        .await
+        .unwrap();
+
+    // The daily close itemizes the مندوب payable and subtracts it from net on
+    // the collected basis. The مندوب cut does NOT change the doctor or operator
+    // cuts: doctor_cut = floor(50_000 * 30%) = 15_000, operator_cut = 4_000.
+    assert_eq!(close.total_mandoub_cuts_iqd, 1_000);
+    assert_eq!(close.total_doctor_cuts_iqd, 15_000);
+    assert_eq!(close.total_operator_cuts_iqd, 4_000);
+    let expected_net = 50_000
+        - 15_000
+        - 4_000
+        - 1_000
+        - close.total_report_iqd
+        - close.total_inventory_consumption_value_iqd;
+    assert_eq!(close.net_iqd, expected_net);
+
+    // The per-representative breakdown must be populated (it was defined on the
+    // entity + repo but never wired into the daily-close assembly, so the
+    // frontend's `per_mandoub` read was always undefined). One مندوب visit ->
+    // exactly one row carrying the 1_000 cut.
+    assert_eq!(
+        close.per_mandoub.len(),
+        1,
+        "one representative had cuts today"
+    );
+    let row = &close.per_mandoub[0];
+    assert_eq!(row.name, "Rep Zed");
+    assert_eq!(row.visits, 1);
+    assert_eq!(row.mandoub_cut_iqd, 1_000);
+
+    // The dashboard KPIs surface the same مندوب cut as a first-class figure
+    // (previously the carve-out was folded into net but never shown).
+    let range = DateRange {
+        from_utc: now - Duration::days(1),
+        to_utc: now + Duration::days(1),
+    };
+    let kpis = f
+        .reports_service
+        .dashboard_kpis(ENTITY_ID, range, false)
+        .await
+        .unwrap();
+    assert_eq!(kpis.mandoub_cuts_iqd, 1_000);
 }
 
 #[tokio::test]
@@ -419,6 +647,9 @@ async fn dashboard_kpis_aggregate_locked_visits() {
     assert_eq!(kpis.revenue_iqd, 102_000);
     assert_eq!(kpis.doctor_cuts_iqd, 35_000);
     assert_eq!(kpis.operator_cuts_iqd, 8_000);
+    // No report, no مندوب on these two visits -> both carve-outs surface as 0.
+    assert_eq!(kpis.report_cuts_iqd, 0);
+    assert_eq!(kpis.mandoub_cuts_iqd, 0);
     // Inventory consumption: 1 unit per visit x 2 visits = 2 IQD-equivalent.
     assert_eq!(kpis.inventory_consumption_value_iqd, 2);
     assert_eq!(kpis.net_iqd, 102_000 - 35_000 - 8_000 - 2);
@@ -1503,8 +1734,11 @@ async fn freezing_blocks_further_locks_until_reopened() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(f.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -1516,6 +1750,7 @@ async fn freezing_blocks_further_locks_until_reopened() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),
@@ -1550,6 +1785,7 @@ async fn freezing_blocks_further_locks_until_reopened() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),

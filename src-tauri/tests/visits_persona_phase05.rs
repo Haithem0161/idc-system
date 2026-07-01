@@ -45,7 +45,7 @@ use app_lib::domains::catalog::domain::repositories::{
 use app_lib::domains::catalog::domain::value_objects::CutKind;
 use app_lib::domains::catalog::infrastructure::{
     SqliteCheckSubtypeRepo, SqliteCheckTypeRepo, SqliteDoctorPricingRepo, SqliteDoctorRepo,
-    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
+    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteMandoubRepo, SqliteOperatorRepo,
     SqliteOperatorSpecialtyRepo,
 };
 use app_lib::domains::patients::domain::repositories::PatientRepo;
@@ -138,7 +138,6 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
         has_subtypes: false,
         base_price_iqd: Some(75_000),
         dye_supported: true,
-        report_supported: true,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
@@ -253,6 +252,7 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
         doctor_pricing: dp_repo,
         operators: op_repo,
         operator_specialties: os_repo,
+        mandoubs: Arc::new(SqliteMandoubRepo::new(pool.clone())),
         consumption: cons_repo,
         inventory_items: item_repo,
         shifts: shift_repo,
@@ -265,7 +265,8 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
 
     let money = MoneySettings {
         dye_cost_iqd: 2_000,
-        report_cost_iqd: 3_000,
+        report_pct: 20,
+        reporting_doctor_name: String::new(),
         internal_doctor_pct: 40,
     };
 
@@ -301,8 +302,11 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
                 check_type_id: check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -311,7 +315,7 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
 
     // ---- Step 5: pricing resolve is read-only --------------------------
     let resolved = visit_service
-        .resolve_snapshots(draft.id, money)
+        .resolve_snapshots(draft.id, money.clone())
         .await
         .unwrap();
     assert_eq!(resolved.snapshots.price_iqd, 75_000);
@@ -328,6 +332,7 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
             UserRole::Receptionist,
             draft.id,
             kareem.id,
+            None,
             None,
             money,
             ReceiptRenderOptions::default(),
@@ -396,8 +401,11 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
                 check_type_id: check_type.id,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -426,8 +434,11 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
                 check_type_id: check_type.id,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await

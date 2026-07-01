@@ -23,7 +23,7 @@ use app_lib::domains::catalog::domain::services::EffectivePriceQuery;
 use app_lib::domains::catalog::domain::value_objects::CutKind;
 use app_lib::domains::catalog::infrastructure::{
     SqliteCheckSubtypeRepo, SqliteCheckTypeRepo, SqliteDoctorPricingRepo, SqliteDoctorRepo,
-    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
+    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteMandoubRepo, SqliteOperatorRepo,
     SqliteOperatorSpecialtyRepo,
 };
 use app_lib::domains::catalog::service::operator_specialty_service::OperatorSpecialtyInput;
@@ -79,6 +79,7 @@ async fn p3_mariam_superadmin_catalog_day_walks_every_phase_03_ipc() {
         doctor_pricing_repo: Arc::new(SqliteDoctorPricingRepo::new(pool.clone())),
         operator_repo: Arc::new(SqliteOperatorRepo::new(pool.clone())),
         operator_specialty_repo: Arc::new(SqliteOperatorSpecialtyRepo::new(pool.clone())),
+        mandoub_repo: Arc::new(SqliteMandoubRepo::new(pool.clone())),
         inventory_item_repo: Arc::new(SqliteInventoryItemRepo::new(pool.clone())),
         consumption_repo: Arc::new(SqliteInventoryConsumptionRepo::new(pool.clone())),
         audit_repo,
@@ -108,7 +109,6 @@ async fn p3_mariam_superadmin_catalog_day_walks_every_phase_03_ipc() {
                 has_subtypes: false,
                 base_price_iqd: Some(20_000),
                 dye_supported: false,
-                report_supported: true,
                 sort_order: 1,
             },
         )
@@ -126,7 +126,6 @@ async fn p3_mariam_superadmin_catalog_day_walks_every_phase_03_ipc() {
                 has_subtypes: true,
                 base_price_iqd: None,
                 dye_supported: true,
-                report_supported: true,
                 sort_order: 2,
             },
         )

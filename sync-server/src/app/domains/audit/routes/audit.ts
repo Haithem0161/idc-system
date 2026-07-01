@@ -27,7 +27,7 @@ export const ACTION_VALUES = [
 
 export const ENTITY_VALUES = [
   'users', 'settings', 'check_types', 'check_subtypes', 'doctors',
-  'doctor_check_pricing', 'operators', 'operator_specialties',
+  'doctor_check_pricing', 'operators', 'mandoubs', 'operator_specialties',
   'operator_shifts', 'patients', 'visits', 'inventory_items',
   'inventory_consumption_map', 'inventory_adjustments', 'audit_log',
   'daily_close',

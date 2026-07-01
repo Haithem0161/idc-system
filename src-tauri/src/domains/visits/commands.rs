@@ -50,9 +50,16 @@ async fn money_settings(state: &AppState) -> AppResult<MoneySettings> {
                 AppError::Configuration(format!("required money setting `{key}` is not configured"))
             })
     }
+    // `reporting_doctor_name` is optional text (may be empty) -- default to "".
+    let reporting_doctor_name = state
+        .get_setting("reporting_doctor_name")
+        .await
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_default();
     Ok(MoneySettings {
         dye_cost_iqd: required_i64(state, "dye_cost_iqd").await?,
-        report_cost_iqd: required_i64(state, "report_cost_iqd").await?,
+        report_pct: required_i64(state, "report_pct").await?,
+        reporting_doctor_name,
         internal_doctor_pct: required_i64(state, "internal_doctor_pct").await?,
     })
 }
@@ -100,8 +107,16 @@ pub struct VisitDto {
     pub check_subtype_id: Option<Uuid>,
     pub doctor_id: Option<Uuid>,
     pub operator_id: Option<Uuid>,
+    pub mandoub_id: Option<Uuid>,
+    /// مندوب cut snapshotted at lock (500/1000), surfaced from the snapshot for
+    /// the UI. `None` on drafts and on visits with no مندوب.
+    pub mandoub_cut_snapshot_iqd: Option<i64>,
+    /// مندوب name snapshotted at lock, surfaced from the snapshot for the UI.
+    pub mandoub_name_snapshot: Option<String>,
     pub dye: bool,
     pub report: bool,
+    pub dalal: bool,
+    pub discount: bool,
     pub locked_at: Option<String>,
     pub voided_at: Option<String>,
     pub voided_by_user_id: Option<Uuid>,
@@ -126,8 +141,13 @@ impl From<&Visit> for VisitDto {
             check_subtype_id: v.check_subtype_id,
             doctor_id: v.doctor_id,
             operator_id: v.operator_id,
+            mandoub_id: v.mandoub_id,
+            mandoub_cut_snapshot_iqd: v.snapshots.as_ref().map(|s| s.mandoub_cut_iqd),
+            mandoub_name_snapshot: v.snapshots.as_ref().and_then(|s| s.mandoub_name.clone()),
             dye: v.dye,
             report: v.report,
+            dalal: v.dalal,
+            discount: v.discount,
             locked_at: v.locked_at.map(|d| d.to_rfc3339()),
             voided_at: v.voided_at.map(|d| d.to_rfc3339()),
             voided_by_user_id: v.voided_by_user_id,
@@ -171,9 +191,15 @@ pub struct VisitCreateDraftArgs {
     #[serde(default)]
     pub doctor_id: Option<String>,
     #[serde(default)]
+    pub mandoub_id: Option<String>,
+    #[serde(default)]
     pub dye: bool,
     #[serde(default)]
     pub report: bool,
+    #[serde(default)]
+    pub dalal: bool,
+    #[serde(default)]
+    pub discount: bool,
 }
 
 #[instrument(skip(state))]
@@ -200,8 +226,14 @@ pub async fn visits_create_draft(
                     Some(d) => Some(Uuid::parse_str(&d)?),
                     None => None,
                 },
+                mandoub_id: match args.mandoub_id {
+                    Some(m) => Some(Uuid::parse_str(&m)?),
+                    None => None,
+                },
                 dye: args.dye,
                 report: args.report,
+                dalal: args.dalal,
+                discount: args.discount,
             },
         )
         .await?;
@@ -218,9 +250,15 @@ pub struct VisitUpdateDraftArgs {
     #[serde(default)]
     pub doctor_id: Option<Option<String>>,
     #[serde(default)]
+    pub mandoub_id: Option<Option<String>>,
+    #[serde(default)]
     pub dye: Option<bool>,
     #[serde(default)]
     pub report: Option<bool>,
+    #[serde(default)]
+    pub dalal: Option<bool>,
+    #[serde(default)]
+    pub discount: Option<bool>,
 }
 
 fn parse_uuid_set_opt(v: Option<Option<String>>) -> AppResult<Option<Option<Uuid>>> {
@@ -248,8 +286,11 @@ pub async fn visits_update_draft(
                 patient_id: args.patient_id.map(|s| Uuid::parse_str(&s)).transpose()?,
                 check_subtype_id: parse_uuid_set_opt(args.check_subtype_id)?,
                 doctor_id: parse_uuid_set_opt(args.doctor_id)?,
+                mandoub_id: parse_uuid_set_opt(args.mandoub_id)?,
                 dye: args.dye,
                 report: args.report,
+                dalal: args.dalal,
+                discount: args.discount,
             },
         )
         .await?;
@@ -407,6 +448,11 @@ pub struct VisitLockArgs {
     /// legal collected amount.
     #[serde(default)]
     pub amount_paid_override_iqd: Option<i64>,
+    /// مندوب (representative) cut chosen on the draft form (500 or 1000),
+    /// supplied at lock time. Required when the visit references a مندوب;
+    /// absent/null otherwise.
+    #[serde(default)]
+    pub mandoub_cut: Option<i64>,
 }
 
 #[instrument(skip(state))]
@@ -422,6 +468,7 @@ pub async fn visits_lock(args: VisitLockArgs, state: State<'_, AppState>) -> App
         Uuid::parse_str(&args.visit_id)?,
         Uuid::parse_str(&args.operator_id)?,
         args.amount_paid_override_iqd,
+        args.mandoub_cut,
         settings,
         receipt,
     )

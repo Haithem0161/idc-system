@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 
 import {
   useDoctorEarnings,
+  useMandoubEarnings,
   useOperatorEarnings,
   useVisitsReport,
 } from "@/features/reports/queries"
@@ -53,6 +54,7 @@ export function useMasterRows (
   // Always call every hook (rules of hooks); disable the unused ones.
   const doctors = useDoctorEarnings(range)
   const operators = useOperatorEarnings(range)
+  const mandoubs = useMandoubEarnings(range)
   const checksArgs: ReportsVisitsArgs = useMemo(
     () => ({ ...range, group_by: "by_check_type" }),
     [range]
@@ -117,6 +119,27 @@ export function useMasterRows (
       return { rows, isLoading: false }
     }
 
+    if (entity === "mandoubs") {
+      if (!mandoubs.data) return { rows: [], isLoading: mandoubs.isLoading }
+      const rows = [...mandoubs.data]
+        .sort((a, b) => b.mandoub_cut_total_iqd - a.mandoub_cut_total_iqd)
+        .map<MasterRow>((m) => {
+          const name = m.name || m.mandoub_id
+          return {
+            id: m.mandoub_id,
+            name,
+            sub: t("accounting.tops.visits_count", { defaultValue: "{{count}} visits", count: m.visits }),
+            primary: abbreviateIqd(m.mandoub_cut_total_iqd),
+            secondary: t("accounting.tops.per_visit", {
+              defaultValue: "{{value}} / visit",
+              value: thousandsK(m.avg_cut_per_visit_iqd),
+            }),
+            searchText: name.toLowerCase(),
+          }
+        })
+      return { rows, isLoading: false }
+    }
+
     if (entity === "checks") {
       if (!checks.data) return { rows: [], isLoading: checks.isLoading }
       const groups = checks.data.mode === "groups" ? checks.data.groups : []
@@ -154,7 +177,7 @@ export function useMasterRows (
       }
     })
     return { rows, isLoading: false }
-  }, [entity, doctors, operators, checks, visits, t, locale, localeShort])
+  }, [entity, doctors, operators, mandoubs, checks, visits, t, locale, localeShort])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -167,6 +190,8 @@ export function useMasterRows (
       case "doctors":
         return t("accounting.explorer.sort.cut_total", { defaultValue: "Cut total" })
       case "operators":
+        return t("accounting.explorer.sort.cut_total", { defaultValue: "Cut total" })
+      case "mandoubs":
         return t("accounting.explorer.sort.cut_total", { defaultValue: "Cut total" })
       case "checks":
         return t("accounting.explorer.sort.revenue", { defaultValue: "Revenue" })
@@ -183,13 +208,15 @@ export function useMasterRows (
       total = doctors.data.reduce((s, d) => s + d.doctor_cut_total_iqd, 0)
     } else if (entity === "operators" && operators.data) {
       total = operators.data.reduce((s, o) => s + o.operator_cut_total_iqd, 0)
+    } else if (entity === "mandoubs" && mandoubs.data) {
+      total = mandoubs.data.reduce((s, m) => s + m.mandoub_cut_total_iqd, 0)
     } else if (entity === "checks" && checks.data && checks.data.mode === "groups") {
       total = checks.data.totals.revenue_iqd
     } else if (entity === "visits" && visits.data && visits.data.mode === "rows") {
       total = visits.data.totals.revenue_iqd
     }
     return formatIqd(total, { locale, withSuffix: true })
-  }, [entity, doctors.data, operators.data, checks.data, visits.data, locale])
+  }, [entity, doctors.data, operators.data, mandoubs.data, checks.data, visits.data, locale])
 
   return { rows: filtered, isLoading: all.isLoading, sortLabel, footTotal }
 }

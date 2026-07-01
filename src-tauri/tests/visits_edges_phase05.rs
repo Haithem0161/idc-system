@@ -32,7 +32,7 @@ use app_lib::domains::catalog::domain::repositories::{
 use app_lib::domains::catalog::domain::value_objects::CutKind;
 use app_lib::domains::catalog::infrastructure::{
     SqliteCheckSubtypeRepo, SqliteCheckTypeRepo, SqliteDoctorPricingRepo, SqliteDoctorRepo,
-    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
+    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteMandoubRepo, SqliteOperatorRepo,
     SqliteOperatorSpecialtyRepo,
 };
 use app_lib::domains::patients::domain::entities::{Patient, PatientNewInput};
@@ -137,7 +137,6 @@ async fn rig() -> Rig {
         has_subtypes: false,
         base_price_iqd: Some(50_000),
         dye_supported: true,
-        report_supported: false,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
@@ -254,6 +253,7 @@ async fn rig() -> Rig {
         doctor_pricing: dp_repo,
         operators: op_repo,
         operator_specialties: os_repo,
+        mandoubs: Arc::new(SqliteMandoubRepo::new(pool.clone())),
         consumption: cons_repo,
         inventory_items: item_repo,
         shifts: shift_repo,
@@ -280,7 +280,8 @@ async fn rig() -> Rig {
 fn money() -> MoneySettings {
     MoneySettings {
         dye_cost_iqd: 2_000,
-        report_cost_iqd: 3_000,
+        report_pct: 20,
+        reporting_doctor_name: String::new(),
         internal_doctor_pct: 40,
     }
 }
@@ -297,8 +298,11 @@ async fn create_and_lock(r: &Rig) -> Uuid {
                 check_type_id: r.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(r.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -309,6 +313,7 @@ async fn create_and_lock(r: &Rig) -> Uuid {
             UserRole::Receptionist,
             draft.id,
             r.operator.id,
+            None,
             None,
             money(),
             ReceiptRenderOptions::default(),
@@ -419,6 +424,7 @@ async fn second_lock_attempt_on_same_visit_returns_validation_error() {
             id,
             r.operator.id,
             None,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )
@@ -440,8 +446,11 @@ async fn operator_clocks_out_mid_session_makes_subsequent_lock_fail() {
                 check_type_id: r.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(r.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -463,6 +472,7 @@ async fn operator_clocks_out_mid_session_makes_subsequent_lock_fail() {
             UserRole::Receptionist,
             draft.id,
             r.operator.id,
+            None,
             None,
             money(),
             ReceiptRenderOptions::default(),
@@ -488,8 +498,11 @@ async fn failed_create_draft_leaves_no_partial_state() {
                 check_type_id: r.check_type.id,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await;
@@ -518,8 +531,11 @@ async fn list_workspace_at_100_visits_under_one_second_smoke() {
                     check_type_id: r.check_type.id,
                     check_subtype_id: None,
                     doctor_id: None,
+                    mandoub_id: None,
                     dye: false,
                     report: false,
+                    dalal: false,
+                    discount: false,
                 },
             )
             .await
@@ -577,8 +593,11 @@ async fn role_bypass_accountant_cannot_create_draft_or_lock() {
                 check_type_id: r.check_type.id,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await;
@@ -614,8 +633,11 @@ async fn soft_deleted_visit_is_hidden_from_reads_but_persists_in_table() {
                 check_type_id: r.check_type.id,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -669,8 +691,11 @@ async fn fk_violation_when_visit_references_unknown_patient() {
                 check_type_id: r.check_type.id,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await;
@@ -691,8 +716,11 @@ async fn sync_version_increments_on_every_visit_mutation() {
                 check_type_id: r.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(r.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -704,6 +732,7 @@ async fn sync_version_increments_on_every_visit_mutation() {
             UserRole::Receptionist,
             draft.id,
             r.operator.id,
+            None,
             None,
             money(),
             ReceiptRenderOptions::default(),

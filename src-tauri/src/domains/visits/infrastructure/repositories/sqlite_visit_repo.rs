@@ -43,17 +43,24 @@ struct VisitRow {
     check_subtype_id: Option<String>,
     doctor_id: Option<String>,
     operator_id: Option<String>,
+    mandoub_id: Option<String>,
     dye: i64,
     report: i64,
+    dalal: i64,
+    discount: i64,
     locked_at: Option<String>,
     voided_at: Option<String>,
     voided_by_user_id: Option<String>,
     void_reason: Option<String>,
     price_snapshot_iqd: Option<i64>,
     dye_cost_snapshot_iqd: Option<i64>,
-    report_cost_snapshot_iqd: Option<i64>,
+    report_amount_snapshot_iqd: Option<i64>,
+    report_pct_snapshot: Option<i64>,
+    reporting_doctor_name_snapshot: Option<String>,
     doctor_cut_snapshot_iqd: Option<i64>,
     operator_cut_snapshot_iqd: Option<i64>,
+    mandoub_cut_snapshot_iqd: Option<i64>,
+    mandoub_name_snapshot: Option<String>,
     internal_pct_snapshot: Option<i64>,
     total_amount_iqd_snapshot: Option<i64>,
     amount_paid_override_iqd: Option<i64>,
@@ -78,32 +85,19 @@ impl VisitRow {
     fn into_domain(self) -> AppResult<Visit> {
         let status = VisitStatus::parse(&self.status)
             .ok_or_else(|| AppError::Validation(format!("status: {}", self.status)))?;
-        let snapshots = if status == VisitStatus::Locked {
+        let snapshots = if status == VisitStatus::Locked || status == VisitStatus::Voided {
+            // Snapshots persist across the void transition; both states map the
+            // same set of columns.
             Some(VisitSnapshots {
                 price_iqd: self.price_snapshot_iqd.unwrap_or(0),
                 dye_cost_iqd: self.dye_cost_snapshot_iqd.unwrap_or(0),
-                report_cost_iqd: self.report_cost_snapshot_iqd.unwrap_or(0),
+                report_amount_iqd: self.report_amount_snapshot_iqd.unwrap_or(0),
+                report_pct: self.report_pct_snapshot,
+                reporting_doctor_name: self.reporting_doctor_name_snapshot.clone(),
                 doctor_cut_iqd: self.doctor_cut_snapshot_iqd.unwrap_or(0),
                 operator_cut_iqd: self.operator_cut_snapshot_iqd.unwrap_or(0),
-                internal_pct: self.internal_pct_snapshot,
-                total_amount_iqd: self.total_amount_iqd_snapshot.unwrap_or(0),
-                amount_paid_override_iqd: self.amount_paid_override_iqd,
-                patient_name: self.patient_name_snapshot.clone().unwrap_or_default(),
-                doctor_name: self.doctor_name_snapshot.clone(),
-                operator_name: self.operator_name_snapshot.clone().unwrap_or_default(),
-                check_type_name_ar: self.check_type_name_ar_snapshot.clone().unwrap_or_default(),
-                check_type_name_en: self.check_type_name_en_snapshot.clone(),
-                check_subtype_name_ar: self.check_subtype_name_ar_snapshot.clone(),
-                check_subtype_name_en: self.check_subtype_name_en_snapshot.clone(),
-            })
-        } else if status == VisitStatus::Voided {
-            // Snapshots persist across the void transition.
-            Some(VisitSnapshots {
-                price_iqd: self.price_snapshot_iqd.unwrap_or(0),
-                dye_cost_iqd: self.dye_cost_snapshot_iqd.unwrap_or(0),
-                report_cost_iqd: self.report_cost_snapshot_iqd.unwrap_or(0),
-                doctor_cut_iqd: self.doctor_cut_snapshot_iqd.unwrap_or(0),
-                operator_cut_iqd: self.operator_cut_snapshot_iqd.unwrap_or(0),
+                mandoub_cut_iqd: self.mandoub_cut_snapshot_iqd.unwrap_or(0),
+                mandoub_name: self.mandoub_name_snapshot.clone(),
                 internal_pct: self.internal_pct_snapshot,
                 total_amount_iqd: self.total_amount_iqd_snapshot.unwrap_or(0),
                 amount_paid_override_iqd: self.amount_paid_override_iqd,
@@ -131,8 +125,11 @@ impl VisitRow {
             check_subtype_id: parse_uuid_opt(self.check_subtype_id.as_deref())?,
             doctor_id: parse_uuid_opt(self.doctor_id.as_deref())?,
             operator_id: parse_uuid_opt(self.operator_id.as_deref())?,
+            mandoub_id: parse_uuid_opt(self.mandoub_id.as_deref())?,
             dye: self.dye != 0,
             report: self.report != 0,
+            dalal: self.dalal != 0,
+            discount: self.discount != 0,
             locked_at: parse_dt_opt(self.locked_at.as_deref())?,
             voided_at: parse_dt_opt(self.voided_at.as_deref())?,
             voided_by_user_id: parse_uuid_opt(self.voided_by_user_id.as_deref())?,
@@ -151,10 +148,13 @@ impl VisitRow {
 }
 
 const COLUMNS: &str = "id, patient_id, status, receptionist_user_id, check_type_id, \
-                       check_subtype_id, doctor_id, operator_id, dye, report, locked_at, \
-                       voided_at, voided_by_user_id, void_reason, price_snapshot_iqd, \
-                       dye_cost_snapshot_iqd, report_cost_snapshot_iqd, doctor_cut_snapshot_iqd, \
-                       operator_cut_snapshot_iqd, internal_pct_snapshot, total_amount_iqd_snapshot, \
+                       check_subtype_id, doctor_id, operator_id, mandoub_id, dye, report, dalal, \
+                       discount, \
+                       locked_at, voided_at, voided_by_user_id, void_reason, price_snapshot_iqd, \
+                       dye_cost_snapshot_iqd, report_amount_snapshot_iqd, report_pct_snapshot, \
+                       reporting_doctor_name_snapshot, doctor_cut_snapshot_iqd, \
+                       operator_cut_snapshot_iqd, mandoub_cut_snapshot_iqd, mandoub_name_snapshot, \
+                       internal_pct_snapshot, total_amount_iqd_snapshot, \
                        amount_paid_override_iqd, \
                        patient_name_snapshot, doctor_name_snapshot, operator_name_snapshot, \
                        check_type_name_ar_snapshot, check_type_name_en_snapshot, \
@@ -179,24 +179,31 @@ impl VisitRepo for SqliteVisitRepo {
         let snap = v.snapshots.as_ref();
         let sql = format!(
             "INSERT INTO visits ({COLUMNS}) VALUES (\
-                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?\
+                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?\
              ) ON CONFLICT(id) DO UPDATE SET \
                status = excluded.status, \
                patient_id = excluded.patient_id, \
                check_subtype_id = excluded.check_subtype_id, \
                doctor_id = excluded.doctor_id, \
                operator_id = excluded.operator_id, \
+               mandoub_id = excluded.mandoub_id, \
                dye = excluded.dye, \
                report = excluded.report, \
+               dalal = excluded.dalal, \
+               discount = excluded.discount, \
                locked_at = excluded.locked_at, \
                voided_at = excluded.voided_at, \
                voided_by_user_id = excluded.voided_by_user_id, \
                void_reason = excluded.void_reason, \
                price_snapshot_iqd = excluded.price_snapshot_iqd, \
                dye_cost_snapshot_iqd = excluded.dye_cost_snapshot_iqd, \
-               report_cost_snapshot_iqd = excluded.report_cost_snapshot_iqd, \
+               report_amount_snapshot_iqd = excluded.report_amount_snapshot_iqd, \
+               report_pct_snapshot = excluded.report_pct_snapshot, \
+               reporting_doctor_name_snapshot = excluded.reporting_doctor_name_snapshot, \
                doctor_cut_snapshot_iqd = excluded.doctor_cut_snapshot_iqd, \
                operator_cut_snapshot_iqd = excluded.operator_cut_snapshot_iqd, \
+               mandoub_cut_snapshot_iqd = excluded.mandoub_cut_snapshot_iqd, \
+               mandoub_name_snapshot = excluded.mandoub_name_snapshot, \
                internal_pct_snapshot = excluded.internal_pct_snapshot, \
                total_amount_iqd_snapshot = excluded.total_amount_iqd_snapshot, \
                amount_paid_override_iqd = excluded.amount_paid_override_iqd, \
@@ -222,17 +229,28 @@ impl VisitRepo for SqliteVisitRepo {
             .bind(v.check_subtype_id.map(|u| u.to_string()))
             .bind(v.doctor_id.map(|u| u.to_string()))
             .bind(v.operator_id.map(|u| u.to_string()))
+            .bind(v.mandoub_id.map(|u| u.to_string()))
             .bind(v.dye as i64)
             .bind(v.report as i64)
+            .bind(v.dalal as i64)
+            .bind(v.discount as i64)
             .bind(dt_opt_str(v.locked_at))
             .bind(dt_opt_str(v.voided_at))
             .bind(v.voided_by_user_id.map(|u| u.to_string()))
             .bind(v.void_reason.as_deref())
             .bind(snap.map(|s| s.price_iqd))
             .bind(snap.map(|s| s.dye_cost_iqd))
-            .bind(snap.map(|s| s.report_cost_iqd))
+            .bind(snap.map(|s| s.report_amount_iqd))
+            .bind(snap.and_then(|s| s.report_pct))
+            .bind(snap.and_then(|s| s.reporting_doctor_name.clone()))
             .bind(snap.map(|s| s.doctor_cut_iqd))
             .bind(snap.map(|s| s.operator_cut_iqd))
+            // مندوب cut/name are persisted together and ONLY when a مندوب is
+            // referenced (name is Some). When absent both columns bind NULL --
+            // the migration-021 CHECK requires both null when mandoub_id is null,
+            // so a 0 here would abort the write.
+            .bind(snap.and_then(|s| s.mandoub_name.as_ref().map(|_| s.mandoub_cut_iqd)))
+            .bind(snap.and_then(|s| s.mandoub_name.clone()))
             .bind(snap.and_then(|s| s.internal_pct))
             .bind(snap.map(|s| s.total_amount_iqd))
             .bind(snap.and_then(|s| s.amount_paid_override_iqd))

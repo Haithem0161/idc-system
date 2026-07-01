@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::domains::catalog::domain::entities::{
     CheckSubtype, CheckType, Doctor, DoctorCheckPricing, InventoryConsumptionMap, InventoryItem,
-    Operator, OperatorSpecialty,
+    Mandoub, Operator, OperatorSpecialty,
 };
 
 #[derive(Serialize)]
@@ -16,7 +16,6 @@ pub struct CheckTypePushPayload {
     pub has_subtypes: bool,
     pub base_price_iqd: Option<i64>,
     pub dye_supported: bool,
-    pub report_supported: bool,
     pub sort_order: i64,
     pub is_active: bool,
     pub entity_id: String,
@@ -35,7 +34,6 @@ impl From<&CheckType> for CheckTypePushPayload {
             has_subtypes: ct.has_subtypes,
             base_price_iqd: ct.base_price_iqd,
             dye_supported: ct.dye_supported,
-            report_supported: ct.report_supported,
             sort_order: ct.sort_order,
             is_active: ct.is_active,
             entity_id: ct.entity_id.clone(),
@@ -184,6 +182,37 @@ impl From<&Operator> for OperatorPushPayload {
             updated_at: o.updated_at.to_rfc3339(),
             deleted_at: o.deleted_at.map(|t| t.to_rfc3339()),
             origin_device_id: o.origin_device_id.clone(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct MandoubPushPayload {
+    pub id: String,
+    pub name: String,
+    pub phone: Option<String>,
+    pub is_active: bool,
+    pub notes: Option<String>,
+    pub entity_id: String,
+    pub version: i64,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+    pub origin_device_id: Option<String>,
+}
+
+impl From<&Mandoub> for MandoubPushPayload {
+    fn from(m: &Mandoub) -> Self {
+        Self {
+            id: m.id.to_string(),
+            name: m.name.clone(),
+            phone: m.phone.clone(),
+            is_active: m.is_active,
+            notes: m.notes.clone(),
+            entity_id: m.entity_id.clone(),
+            version: m.version,
+            updated_at: m.updated_at.to_rfc3339(),
+            deleted_at: m.deleted_at.map(|t| t.to_rfc3339()),
+            origin_device_id: m.origin_device_id.clone(),
         }
     }
 }

@@ -49,16 +49,34 @@ impl VisitStatus {
 pub struct VisitSnapshots {
     pub price_iqd: i64,
     pub dye_cost_iqd: i64,
-    pub report_cost_iqd: i64,
+    /// Net-side carve-out paid to the internal reporting doctor when the
+    /// visit's `report` flag is on: `report_pct * (price - doctor_cut) / 100`.
+    /// 0 when report is off. NOT part of the patient total.
+    pub report_amount_iqd: i64,
+    /// The report percentage captured at lock time. `Some(pct)` when report is
+    /// on, `None` when off.
+    pub report_pct: Option<i64>,
+    /// The internal reporting doctor's name captured at lock time. `Some(name)`
+    /// when report is on and the setting is non-empty, `None` otherwise.
+    pub reporting_doctor_name: Option<String>,
     pub doctor_cut_iqd: i64,
     pub operator_cut_iqd: i64,
+    /// مندوب (representative) per-visit cut: 500 or 1000 IQD when a مندوب is
+    /// referenced, 0 otherwise. PURE PASSTHROUGH -- chosen on the visit and
+    /// snapshotted as-is; it is a net-side carve-out subtracted later in the
+    /// reports read-model and never participates in the doctor/operator cut or
+    /// the patient total.
+    pub mandoub_cut_iqd: i64,
+    /// مندوب name captured at lock time. `Some(name)` when a مندوب is
+    /// referenced, `None` otherwise. Mirrors the doctor/operator name snapshots.
+    pub mandoub_name: Option<String>,
     pub internal_pct: Option<i64>,
     pub total_amount_iqd: i64,
     /// Cash actually collected when the receptionist overrides the billed total
     /// (e.g. the patient cannot pay in full). `None` = paid the full
     /// `total_amount_iqd`. Decoupled from the billed money model: it is excluded
-    /// from the `total = price + dye + report` invariant and never affects the
-    /// doctor or operator cut. `Some(0)` is legal (waived).
+    /// from the `total = price + dye` invariant and never affects the doctor or
+    /// operator cut. `Some(0)` is legal (waived).
     pub amount_paid_override_iqd: Option<i64>,
     pub patient_name: String,
     pub doctor_name: Option<String>,
@@ -79,8 +97,22 @@ pub struct Visit {
     pub check_subtype_id: Option<Uuid>,
     pub doctor_id: Option<Uuid>,
     pub operator_id: Option<Uuid>,
+    /// مندوب (representative) reference. Valid ONLY when a real referring doctor
+    /// is selected (`mandoub_id` Some => `doctor_id` Some). The chosen 500/1000
+    /// cut is NOT stored here -- it travels through the lock path and lands in
+    /// the snapshot.
+    pub mandoub_id: Option<Uuid>,
     pub dye: bool,
     pub report: bool,
+    /// دلال (dalal) money mode: a built-in doctor substitute with a flat cut.
+    /// Mutually exclusive with a referring doctor (`dalal` true => `doctor_id`
+    /// None).
+    pub dalal: bool,
+    /// Discount mode: valid ONLY with a real referring doctor (`discount` true =>
+    /// `doctor_id` Some). When set, the money engine forces the referring
+    /// doctor's cut for this visit to 0; nothing else moves (patient total,
+    /// operator cut, report, and مندوب cut are unchanged).
+    pub discount: bool,
     pub locked_at: Option<DateTime<Utc>>,
     pub voided_at: Option<DateTime<Utc>>,
     pub voided_by_user_id: Option<Uuid>,
@@ -103,8 +135,11 @@ pub struct VisitCreateDraftInput {
     pub check_type_id: Uuid,
     pub check_subtype_id: Option<Uuid>,
     pub doctor_id: Option<Uuid>,
+    pub mandoub_id: Option<Uuid>,
     pub dye: bool,
     pub report: bool,
+    pub dalal: bool,
+    pub discount: bool,
     pub entity_id: String,
     pub origin_device_id: Option<String>,
 }
@@ -116,14 +151,38 @@ pub struct VisitDraftPatch {
     pub patient_id: Option<Uuid>,
     pub check_subtype_id: Option<Option<Uuid>>,
     pub doctor_id: Option<Option<Uuid>>,
+    pub mandoub_id: Option<Option<Uuid>>,
     pub dye: Option<bool>,
     pub report: Option<bool>,
+    pub dalal: Option<bool>,
+    pub discount: Option<bool>,
 }
 
 impl Visit {
     pub fn create_draft(input: VisitCreateDraftInput) -> AppResult<Self> {
         if input.entity_id.trim().is_empty() {
             return Err(AppError::Validation("entity_id required".into()));
+        }
+        // دلال is a doctor substitute: it can never coexist with a referring
+        // doctor.
+        if input.dalal && input.doctor_id.is_some() {
+            return Err(AppError::Validation(
+                "dalal cannot coexist with a referring doctor".into(),
+            ));
+        }
+        // مندوب requires a real referring doctor (the opposite polarity of
+        // dalal): it can only be referenced when a doctor is selected.
+        if input.mandoub_id.is_some() && input.doctor_id.is_none() {
+            return Err(AppError::Validation(
+                "mandoub requires a referring doctor".into(),
+            ));
+        }
+        // Discount applies to the referring doctor's cut, so it requires a real
+        // referring doctor (and is therefore incompatible with house/dalal).
+        if input.discount && input.doctor_id.is_none() {
+            return Err(AppError::Validation(
+                "discount requires a referring doctor".into(),
+            ));
         }
         let now = Utc::now();
         Ok(Self {
@@ -135,8 +194,11 @@ impl Visit {
             check_subtype_id: input.check_subtype_id,
             doctor_id: input.doctor_id,
             operator_id: None,
+            mandoub_id: input.mandoub_id,
             dye: input.dye,
             report: input.report,
+            dalal: input.dalal,
+            discount: input.discount,
             locked_at: None,
             voided_at: None,
             voided_by_user_id: None,
@@ -181,11 +243,38 @@ impl Visit {
         if let Some(doc) = patch.doctor_id {
             self.doctor_id = doc;
         }
+        if let Some(mandoub) = patch.mandoub_id {
+            self.mandoub_id = mandoub;
+        }
         if let Some(dye) = patch.dye {
             self.dye = dye;
         }
         if let Some(report) = patch.report {
             self.report = report;
+        }
+        if let Some(dalal) = patch.dalal {
+            self.dalal = dalal;
+        }
+        if let Some(discount) = patch.discount {
+            self.discount = discount;
+        }
+        // Validate the resulting state: دلال is mutually exclusive with a
+        // referring doctor. Checked after applying both patches so a single
+        // edit that sets dalal AND clears the doctor is accepted.
+        if self.dalal && self.doctor_id.is_some() {
+            return Err(AppError::Validation(
+                "dalal cannot coexist with a referring doctor".into(),
+            ));
+        }
+        // مندوب + discount auto-clear (draft path): both are only valid with a
+        // real referring doctor. If the doctor was cleared or switched to
+        // house/dalal in this patch, drop them rather than erroring so a
+        // combined "clear doctor (+ set dalal)" edit is accepted cleanly. This
+        // is the draft-form contract: the new-visit flow can clear the doctor
+        // without separately remembering to clear the مندوب or the discount.
+        if self.doctor_id.is_none() {
+            self.mandoub_id = None;
+            self.discount = false;
         }
         self.updated_at = Utc::now();
         self.version += 1;
@@ -203,27 +292,86 @@ impl Visit {
         if self.deleted_at.is_some() {
             return Err(AppError::Validation("visit is deleted".into()));
         }
-        // Invariant 6: internal_pct iff doctor_id is None.
-        match (self.doctor_id, &snapshots.internal_pct) {
-            (Some(_), Some(_)) => {
+        // Invariant 6 (re-modelled): internal_pct marks HOUSE mode ONLY. A real
+        // referring doctor and دلال both leave it None; only house mode (no
+        // doctor AND not dalal) sets it.
+        let is_house = self.doctor_id.is_none() && !self.dalal;
+        match (is_house, &snapshots.internal_pct) {
+            (false, Some(_)) => {
                 return Err(AppError::Validation(
-                    "internal_pct must be null when doctor_id is set".into(),
+                    "internal_pct must be null when a doctor is set or the visit is dalal".into(),
                 ));
             }
-            (None, None) => {
+            (true, None) => {
                 return Err(AppError::Validation(
-                    "internal_pct required when doctor_id is null (house mode)".into(),
+                    "internal_pct required in house mode (no doctor, not dalal)".into(),
                 ));
             }
             _ => {}
         }
-        // Total-equals-sum (§7.2). The override is deliberately NOT part of this
-        // invariant: `total_amount_iqd` stays the BILLED total (price + dye +
-        // report); the override only records what was collected against it.
-        let expected = snapshots.price_iqd + snapshots.dye_cost_iqd + snapshots.report_cost_iqd;
+        // Report coherence: when report is off the amount is 0 and the
+        // pct/name snapshots are absent; when on, a pct must be present.
+        if self.report {
+            if snapshots.report_pct.is_none() {
+                return Err(AppError::Validation(
+                    "report_pct_snapshot required when report is on".into(),
+                ));
+            }
+        } else if snapshots.report_amount_iqd != 0
+            || snapshots.report_pct.is_some()
+            || snapshots.reporting_doctor_name.is_some()
+        {
+            return Err(AppError::Validation(
+                "report snapshots must be absent when report is off".into(),
+            ));
+        }
+        // مندوب coherence (mirror migration 021's locked CHECK): when set, a
+        // real referring doctor must be present, the snapshot cut is 500 or
+        // 1000, and the name snapshot is captured. When absent, both مندوب
+        // snapshots must be null.
+        if self.mandoub_id.is_some() {
+            if self.doctor_id.is_none() {
+                return Err(AppError::Validation(
+                    "mandoub requires a referring doctor".into(),
+                ));
+            }
+            if !matches!(snapshots.mandoub_cut_iqd, 500 | 1000) {
+                return Err(AppError::Validation(
+                    "mandoub_cut_snapshot must be 500 or 1000 when a mandoub is set".into(),
+                ));
+            }
+            if snapshots.mandoub_name.is_none() {
+                return Err(AppError::Validation(
+                    "mandoub_name_snapshot required when a mandoub is set".into(),
+                ));
+            }
+        } else if snapshots.mandoub_cut_iqd != 0 || snapshots.mandoub_name.is_some() {
+            return Err(AppError::Validation(
+                "mandoub snapshots must be absent when no mandoub is set".into(),
+            ));
+        }
+        // Discount coherence: a discount is only valid with a real referring
+        // doctor, and when on the money engine must have zeroed the doctor cut.
+        if self.discount {
+            if self.doctor_id.is_none() {
+                return Err(AppError::Validation(
+                    "discount requires a referring doctor".into(),
+                ));
+            }
+            if snapshots.doctor_cut_iqd != 0 {
+                return Err(AppError::Validation(
+                    "doctor_cut_snapshot must be 0 when discount is on".into(),
+                ));
+            }
+        }
+        // Total-equals-sum (§7.2). The patient total no longer includes report;
+        // report is a net-side carve-out. The override is deliberately NOT part
+        // of this invariant: `total_amount_iqd` stays the BILLED total (price +
+        // dye); the override only records what was collected against it.
+        let expected = snapshots.price_iqd + snapshots.dye_cost_iqd;
         if snapshots.total_amount_iqd != expected {
             return Err(AppError::Validation(
-                "total_amount_iqd_snapshot must equal price + dye + report".into(),
+                "total_amount_iqd_snapshot must equal price + dye".into(),
             ));
         }
         // A collected-amount override, when present, must be non-negative. Zero
@@ -308,9 +456,13 @@ mod tests {
         VisitSnapshots {
             price_iqd: price,
             dye_cost_iqd: 0,
-            report_cost_iqd: 0,
+            report_amount_iqd: 0,
+            report_pct: None,
+            reporting_doctor_name: None,
             doctor_cut_iqd: price * 40 / 100,
             operator_cut_iqd: 5_000,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             internal_pct: Some(40),
             total_amount_iqd: price,
             amount_paid_override_iqd: None,
@@ -328,14 +480,43 @@ mod tests {
         VisitSnapshots {
             price_iqd: price,
             dye_cost_iqd: 0,
-            report_cost_iqd: 0,
+            report_amount_iqd: 0,
+            report_pct: None,
+            reporting_doctor_name: None,
             doctor_cut_iqd: 12_500,
             operator_cut_iqd: 5_000,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
             internal_pct: None,
             total_amount_iqd: price,
             amount_paid_override_iqd: None,
             patient_name: "Pat".into(),
             doctor_name: Some(doctor_name.into()),
+            operator_name: "Op".into(),
+            check_type_name_ar: "اختبار".into(),
+            check_type_name_en: Some("Test".into()),
+            check_subtype_name_ar: None,
+            check_subtype_name_en: None,
+        }
+    }
+
+    /// A دلال snapshot: no doctor, no internal_pct, flat 10 cut.
+    fn snap_dalal(price: i64) -> VisitSnapshots {
+        VisitSnapshots {
+            price_iqd: price,
+            dye_cost_iqd: 0,
+            report_amount_iqd: 0,
+            report_pct: None,
+            reporting_doctor_name: None,
+            doctor_cut_iqd: 10,
+            operator_cut_iqd: 5_000,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            internal_pct: None,
+            total_amount_iqd: price,
+            amount_paid_override_iqd: None,
+            patient_name: "Pat".into(),
+            doctor_name: None,
             operator_name: "Op".into(),
             check_type_name_ar: "اختبار".into(),
             check_type_name_en: Some("Test".into()),
@@ -351,8 +532,11 @@ mod tests {
             check_type_id: Uuid::now_v7(),
             check_subtype_id: None,
             doctor_id: None,
+            mandoub_id: None,
             dye: false,
             report: false,
+            dalal: false,
+            discount: false,
             entity_id: "t".into(),
             origin_device_id: Some("dev".into()),
         }
@@ -494,7 +678,7 @@ mod tests {
     #[test]
     fn lock_accepts_amount_paid_override_including_zero() {
         // A receptionist override (incl. 0 = waived) is decoupled from the
-        // billed total invariant: total still equals price + dye + report.
+        // billed total invariant: total still equals price + dye.
         for paid in [Some(0_i64), Some(25_000), None] {
             let v = Visit::create_draft(draft_input()).unwrap();
             let mut snap = snap_house(50_000);
@@ -664,7 +848,305 @@ mod tests {
             .clone()
             .lock(Uuid::now_v7(), snap.clone(), Utc::now())
             .is_err());
-        snap.total_amount_iqd = snap.price_iqd + snap.dye_cost_iqd + snap.report_cost_iqd + 1;
+        // total wrong (over by 1; report is NOT part of the patient total).
+        snap.total_amount_iqd = snap.price_iqd + snap.dye_cost_iqd + 1;
         assert!(v.lock(Uuid::now_v7(), snap, Utc::now()).is_err());
+    }
+
+    #[test]
+    fn lock_dalal_visit_accepts_internal_pct_null() {
+        // دلال leaves internal_pct None even though doctor_id is None.
+        let mut input = draft_input();
+        input.dalal = true;
+        let v = Visit::create_draft(input).unwrap();
+        let locked = v
+            .lock(Uuid::now_v7(), snap_dalal(50_000), Utc::now())
+            .unwrap();
+        assert_eq!(locked.status, VisitStatus::Locked);
+        let s = locked.snapshots.unwrap();
+        assert_eq!(s.doctor_cut_iqd, 10);
+        assert!(s.internal_pct.is_none());
+    }
+
+    #[test]
+    fn lock_dalal_visit_rejects_internal_pct_set() {
+        let mut input = draft_input();
+        input.dalal = true;
+        let v = Visit::create_draft(input).unwrap();
+        let mut bad = snap_dalal(50_000);
+        bad.internal_pct = Some(40);
+        let err = v.lock(Uuid::now_v7(), bad, Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn create_draft_rejects_dalal_with_doctor() {
+        let mut input = draft_input();
+        input.dalal = true;
+        input.doctor_id = Some(Uuid::now_v7());
+        assert!(Visit::create_draft(input).is_err());
+    }
+
+    #[test]
+    fn edit_draft_rejects_setting_dalal_while_doctor_present() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        let v = Visit::create_draft(input).unwrap();
+        let err = v.edit_draft(VisitDraftPatch {
+            dalal: Some(true),
+            ..Default::default()
+        });
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn edit_draft_allows_dalal_when_doctor_cleared_in_same_patch() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        let v = Visit::create_draft(input).unwrap();
+        let edited = v
+            .edit_draft(VisitDraftPatch {
+                doctor_id: Some(None),
+                dalal: Some(true),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(edited.dalal);
+        assert!(edited.doctor_id.is_none());
+    }
+
+    #[test]
+    fn lock_rejects_report_on_without_report_pct_snapshot() {
+        let mut input = draft_input();
+        input.report = true;
+        let v = Visit::create_draft(input).unwrap();
+        // report on but no pct snapshot -> incoherent.
+        let snap = snap_house(50_000);
+        let err = v.lock(Uuid::now_v7(), snap, Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_rejects_report_off_with_report_amount_present() {
+        // report flag off but a non-zero amount/pct present -> incoherent.
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let mut snap = snap_house(50_000);
+        snap.report_amount_iqd = 6_000;
+        snap.report_pct = Some(20);
+        let err = v.lock(Uuid::now_v7(), snap, Utc::now());
+        assert!(err.is_err());
+    }
+
+    /// A doctor snapshot carrying a مندوب cut + name, for the locked-coherence
+    /// tests.
+    fn snap_doctor_with_mandoub(price: i64, cut: i64, mandoub: &str) -> VisitSnapshots {
+        let mut s = snap_doctor(price, "Dr");
+        s.mandoub_cut_iqd = cut;
+        s.mandoub_name = Some(mandoub.into());
+        s
+    }
+
+    #[test]
+    fn create_draft_rejects_mandoub_without_doctor() {
+        let mut input = draft_input();
+        input.mandoub_id = Some(Uuid::now_v7());
+        assert!(Visit::create_draft(input).is_err());
+    }
+
+    #[test]
+    fn create_draft_accepts_mandoub_with_doctor() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        input.mandoub_id = Some(Uuid::now_v7());
+        let v = Visit::create_draft(input).unwrap();
+        assert!(v.mandoub_id.is_some());
+    }
+
+    #[test]
+    fn edit_draft_auto_clears_mandoub_when_doctor_cleared() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        input.mandoub_id = Some(Uuid::now_v7());
+        let v = Visit::create_draft(input).unwrap();
+        // Clearing the doctor drops the مندوب rather than erroring.
+        let edited = v
+            .edit_draft(VisitDraftPatch {
+                doctor_id: Some(None),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(edited.doctor_id.is_none());
+        assert!(edited.mandoub_id.is_none());
+    }
+
+    #[test]
+    fn lock_mandoub_visit_snapshots_cut_and_name() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        input.mandoub_id = Some(Uuid::now_v7());
+        let v = Visit::create_draft(input).unwrap();
+        let locked = v
+            .lock(
+                Uuid::now_v7(),
+                snap_doctor_with_mandoub(50_000, 1_000, "Rep"),
+                Utc::now(),
+            )
+            .unwrap();
+        let s = locked.snapshots.unwrap();
+        assert_eq!(s.mandoub_cut_iqd, 1_000);
+        assert_eq!(s.mandoub_name.as_deref(), Some("Rep"));
+    }
+
+    #[test]
+    fn lock_mandoub_visit_rejects_cut_not_500_or_1000() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        input.mandoub_id = Some(Uuid::now_v7());
+        let v = Visit::create_draft(input).unwrap();
+        let err = v.lock(
+            Uuid::now_v7(),
+            snap_doctor_with_mandoub(50_000, 750, "Rep"),
+            Utc::now(),
+        );
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_mandoub_visit_rejects_missing_name_snapshot() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        input.mandoub_id = Some(Uuid::now_v7());
+        let v = Visit::create_draft(input).unwrap();
+        let mut snap = snap_doctor(50_000, "Dr");
+        snap.mandoub_cut_iqd = 500;
+        snap.mandoub_name = None;
+        let err = v.lock(Uuid::now_v7(), snap, Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn create_draft_rejects_discount_without_doctor() {
+        let mut input = draft_input();
+        input.discount = true;
+        assert!(Visit::create_draft(input).is_err());
+    }
+
+    #[test]
+    fn create_draft_accepts_discount_with_doctor() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        input.discount = true;
+        let v = Visit::create_draft(input).unwrap();
+        assert!(v.discount);
+    }
+
+    #[test]
+    fn edit_draft_auto_clears_discount_when_doctor_cleared() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        input.discount = true;
+        let v = Visit::create_draft(input).unwrap();
+        let edited = v
+            .edit_draft(VisitDraftPatch {
+                doctor_id: Some(None),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(edited.doctor_id.is_none());
+        assert!(!edited.discount);
+    }
+
+    #[test]
+    fn lock_discount_visit_requires_zero_doctor_cut() {
+        // A discount doctor visit whose snapshot still carries a non-zero doctor
+        // cut is incoherent: the money engine must have zeroed it.
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        input.discount = true;
+        let v = Visit::create_draft(input).unwrap();
+        // snap_doctor carries doctor_cut_iqd = 12_500 -> must be rejected.
+        let err = v.lock(Uuid::now_v7(), snap_doctor(50_000, "Dr"), Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_discount_visit_accepts_zero_doctor_cut() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        input.discount = true;
+        let v = Visit::create_draft(input).unwrap();
+        let mut snap = snap_doctor(50_000, "Dr");
+        snap.doctor_cut_iqd = 0;
+        let locked = v.lock(Uuid::now_v7(), snap, Utc::now()).unwrap();
+        let s = locked.snapshots.unwrap();
+        assert_eq!(s.doctor_cut_iqd, 0);
+    }
+
+    #[test]
+    fn lock_non_mandoub_visit_rejects_stray_mandoub_snapshots() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let mut snap = snap_house(50_000);
+        snap.mandoub_cut_iqd = 500;
+        snap.mandoub_name = Some("Rep".into());
+        let err = v.lock(Uuid::now_v7(), snap, Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_accepts_report_on_with_coherent_snapshots() {
+        let mut input = draft_input();
+        input.report = true;
+        let v = Visit::create_draft(input).unwrap();
+        let mut snap = snap_house(50_000);
+        snap.report_amount_iqd = 6_000;
+        snap.report_pct = Some(20);
+        snap.reporting_doctor_name = Some("Dr Report".into());
+        let locked = v.lock(Uuid::now_v7(), snap, Utc::now()).unwrap();
+        let s = locked.snapshots.unwrap();
+        // Report is NOT part of the patient total.
+        assert_eq!(s.total_amount_iqd, 50_000);
+        assert_eq!(s.report_amount_iqd, 6_000);
+    }
+
+    /// Pins the serialized JSON keys of `VisitSnapshots`. The frontend
+    /// `VisitSnapshotRecord` interface mirrors these names exactly; a rename
+    /// here (e.g. `mandoub_cut_iqd` -> `mandoub_cut_snapshot_iqd`) silently
+    /// turns the matching TS field into `undefined`, which surfaced as a `NaN`
+    /// clinic-net and a missing مندوب row in the visit detail page. This test
+    /// fails loudly on any wire-shape drift so the TS side can be kept in sync.
+    #[test]
+    fn visit_snapshots_json_keys_stable() {
+        let snap = snap_doctor_with_mandoub(50_000, 1_000, "Rep Zed");
+        let json = serde_json::to_value(&snap).unwrap();
+        let mut keys: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|s| s.as_str())
+            .collect();
+        keys.sort_unstable();
+        let mut expected = [
+            "price_iqd",
+            "dye_cost_iqd",
+            "report_amount_iqd",
+            "report_pct",
+            "reporting_doctor_name",
+            "doctor_cut_iqd",
+            "operator_cut_iqd",
+            "mandoub_cut_iqd",
+            "mandoub_name",
+            "internal_pct",
+            "total_amount_iqd",
+            "amount_paid_override_iqd",
+            "patient_name",
+            "doctor_name",
+            "operator_name",
+            "check_type_name_ar",
+            "check_type_name_en",
+            "check_subtype_name_ar",
+            "check_subtype_name_en",
+        ];
+        expected.sort_unstable();
+        assert_eq!(keys, expected);
     }
 }

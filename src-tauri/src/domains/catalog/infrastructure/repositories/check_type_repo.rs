@@ -28,13 +28,13 @@ impl CheckTypeRepo for SqliteCheckTypeRepo {
         sqlx::query(
             "INSERT INTO check_types (\
                 id, name_ar, name_en, has_subtypes, base_price_iqd, dye_supported, \
-                report_supported, sort_order, is_active, created_at, updated_at, deleted_at, \
+                sort_order, is_active, created_at, updated_at, deleted_at, \
                 version, dirty, last_synced_at, origin_device_id, entity_id\
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) \
+             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) \
              ON CONFLICT(id) DO UPDATE SET \
                name_ar = excluded.name_ar, name_en = excluded.name_en, \
                has_subtypes = excluded.has_subtypes, base_price_iqd = excluded.base_price_iqd, \
-               dye_supported = excluded.dye_supported, report_supported = excluded.report_supported, \
+               dye_supported = excluded.dye_supported, \
                sort_order = excluded.sort_order, is_active = excluded.is_active, \
                updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, \
                version = excluded.version, dirty = excluded.dirty, \
@@ -46,7 +46,6 @@ impl CheckTypeRepo for SqliteCheckTypeRepo {
         .bind(ct.has_subtypes as i64)
         .bind(ct.base_price_iqd)
         .bind(ct.dye_supported as i64)
-        .bind(ct.report_supported as i64)
         .bind(ct.sort_order)
         .bind(ct.is_active as i64)
         .bind(dt_to_str(ct.created_at))
@@ -145,7 +144,6 @@ struct CheckTypeRow {
     has_subtypes: i64,
     base_price_iqd: Option<i64>,
     dye_supported: i64,
-    report_supported: i64,
     sort_order: i64,
     is_active: i64,
     created_at: String,
@@ -167,7 +165,6 @@ impl CheckTypeRow {
             has_subtypes: self.has_subtypes != 0,
             base_price_iqd: self.base_price_iqd,
             dye_supported: self.dye_supported != 0,
-            report_supported: self.report_supported != 0,
             sort_order: self.sort_order,
             is_active: self.is_active != 0,
             created_at: parse_dt(&self.created_at)?,

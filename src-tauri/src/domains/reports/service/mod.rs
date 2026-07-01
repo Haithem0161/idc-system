@@ -17,9 +17,9 @@ use uuid::Uuid;
 use crate::domains::auth::domain::value_objects::UserRole;
 use crate::domains::reports::domain::entities::{
     CheckTypeDailyRow, DailyClose, DashboardKpis, DashboardTops, DateRange, DoctorDailyRow,
-    DoctorDrilldown, DoctorEarningsRow, OperatorDailyRow, OperatorDrilldown, OperatorEarningsRow,
-    OperatorShiftRow, TrendMatrix, VisitRow, VisitsReport, VisitsReportFilters,
-    VisitsReportGroupBy, VisitsReportTotals,
+    DoctorDrilldown, DoctorEarningsRow, MandoubDailyRow, MandoubDrilldown, MandoubEarningsRow,
+    OperatorDailyRow, OperatorDrilldown, OperatorEarningsRow, OperatorShiftRow, TrendMatrix,
+    VisitRow, VisitsReport, VisitsReportFilters, VisitsReportGroupBy, VisitsReportTotals,
 };
 use crate::domains::reports::domain::entities::{FrozenClose, FrozenCloseNewInput};
 use crate::domains::reports::domain::repositories::{FrozenCloseRepo, ReportsReadModel};
@@ -27,7 +27,7 @@ use crate::domains::reports::domain::services::input_hash::DailyCloseHashInput;
 use crate::domains::reports::domain::services::money_trend::{trend_cell, TrendInputs};
 use crate::domains::reports::domain::services::{
     baghdad_offset_seconds, compute_input_hash, local_day_utc_range, write_doctor_earnings_csv,
-    write_operator_earnings_csv, write_visits_csv,
+    write_mandoub_earnings_csv, write_operator_earnings_csv, write_visits_csv,
 };
 use crate::domains::sync::domain::entities::audit_entry::AuditCreateInput;
 use crate::domains::sync::domain::entities::{AuditEntry, OutboxOp};
@@ -94,6 +94,8 @@ pub struct FrozenClosePushPayload {
     pub total_discount_iqd: i64,
     pub total_doctor_cuts_iqd: i64,
     pub total_operator_cuts_iqd: i64,
+    pub total_report_iqd: i64,
+    pub total_mandoub_cuts_iqd: i64,
     pub total_inventory_consumption_value_iqd: i64,
     pub net_iqd: i64,
     pub locked_count: i64,
@@ -125,6 +127,8 @@ impl From<&FrozenClose> for FrozenClosePushPayload {
             total_discount_iqd: c.total_discount_iqd,
             total_doctor_cuts_iqd: c.total_doctor_cuts_iqd,
             total_operator_cuts_iqd: c.total_operator_cuts_iqd,
+            total_report_iqd: c.total_report_iqd,
+            total_mandoub_cuts_iqd: c.total_mandoub_cuts_iqd,
             total_inventory_consumption_value_iqd: c.total_inventory_consumption_value_iqd,
             net_iqd: c.net_iqd,
             locked_count: c.locked_count,
@@ -213,6 +217,8 @@ impl ReportsService {
             .revenue_iqd
             .saturating_sub(agg.doctor_cut_iqd)
             .saturating_sub(agg.operator_cut_iqd)
+            .saturating_sub(agg.report_iqd)
+            .saturating_sub(agg.mandoub_cut_iqd)
             .saturating_sub(inv_value);
 
         let today_offset_secs = baghdad_offset_seconds();
@@ -271,6 +277,8 @@ impl ReportsService {
             revenue_iqd: agg.revenue_iqd,
             doctor_cuts_iqd: agg.doctor_cut_iqd,
             operator_cuts_iqd: agg.operator_cut_iqd,
+            report_cuts_iqd: agg.report_iqd,
+            mandoub_cuts_iqd: agg.mandoub_cut_iqd,
             inventory_consumption_value_iqd: inv_value,
             net_iqd: net,
             trend_today_vs_yesterday: today_vs_yesterday,
@@ -308,11 +316,15 @@ impl ReportsService {
             .revenue_iqd
             .saturating_sub(current.doctor_cut_iqd)
             .saturating_sub(current.operator_cut_iqd)
+            .saturating_sub(current.report_iqd)
+            .saturating_sub(current.mandoub_cut_iqd)
             .saturating_sub(current_inv);
         let prior_net = prior
             .revenue_iqd
             .saturating_sub(prior.doctor_cut_iqd)
             .saturating_sub(prior.operator_cut_iqd)
+            .saturating_sub(prior.report_iqd)
+            .saturating_sub(prior.mandoub_cut_iqd)
             .saturating_sub(prior_inv);
         Ok(TrendMatrix {
             revenue: trend_cell(TrendInputs {
@@ -326,6 +338,14 @@ impl ReportsService {
             operator_cuts: trend_cell(TrendInputs {
                 current: current.operator_cut_iqd,
                 prior: prior.operator_cut_iqd,
+            }),
+            report_cuts: trend_cell(TrendInputs {
+                current: current.report_iqd,
+                prior: prior.report_iqd,
+            }),
+            mandoub_cuts: trend_cell(TrendInputs {
+                current: current.mandoub_cut_iqd,
+                prior: prior.mandoub_cut_iqd,
             }),
             inventory_value: trend_cell(TrendInputs {
                 current: current_inv,
@@ -543,6 +563,63 @@ impl ReportsService {
         })
     }
 
+    // ---- مندوب earnings ---------------------------------------------------
+
+    #[instrument(skip(self))]
+    pub async fn mandoub_earnings(
+        &self,
+        entity_id: &str,
+        range: DateRange,
+        include_voided: bool,
+    ) -> AppResult<Vec<MandoubEarningsRow>> {
+        let range = Self::clamp_range_or_error(range)?;
+        self.read
+            .aggregate_mandoub_earnings(entity_id, range.from_utc, range.to_utc, include_voided)
+            .await
+    }
+
+    #[instrument(skip(self))]
+    pub async fn mandoub_drilldown(
+        &self,
+        entity_id: &str,
+        mandoub_id: Uuid,
+        range: DateRange,
+        include_voided: bool,
+    ) -> AppResult<MandoubDrilldown> {
+        let range = Self::clamp_range_or_error(range)?;
+        let earnings = self
+            .read
+            .aggregate_mandoub_earnings(entity_id, range.from_utc, range.to_utc, include_voided)
+            .await?;
+        let me = earnings
+            .into_iter()
+            .find(|r| r.mandoub_id == mandoub_id)
+            .unwrap_or(MandoubEarningsRow {
+                mandoub_id,
+                name: String::new(),
+                visits: 0,
+                mandoub_cut_total_iqd: 0,
+                avg_cut_per_visit_iqd: 0,
+            });
+        let source = self
+            .read
+            .mandoub_source_visits(
+                entity_id,
+                mandoub_id,
+                range.from_utc,
+                range.to_utc,
+                include_voided,
+            )
+            .await?;
+        let totals = sum_visit_rows(&source);
+        Ok(MandoubDrilldown {
+            mandoub_id,
+            name: me.name,
+            attributed_visits: source,
+            totals,
+        })
+    }
+
     // ---- Daily Close ------------------------------------------------------
 
     /// Daily Close computation (§7.8, §7.9, §7.18, §7.19, §7.20).
@@ -570,6 +647,8 @@ impl ReportsService {
             self.read.daily_per_doctor(entity_id, from, to).await?;
         let per_operator: Vec<OperatorDailyRow> =
             self.read.daily_per_operator(entity_id, from, to).await?;
+        let per_mandoub: Vec<MandoubDailyRow> =
+            self.read.daily_per_mandoub(entity_id, from, to).await?;
         let per_check_type: Vec<CheckTypeDailyRow> =
             self.read.daily_per_check_type(entity_id, from, to).await?;
 
@@ -592,6 +671,8 @@ impl ReportsService {
             .collected_iqd
             .saturating_sub(agg_locked.doctor_cut_iqd)
             .saturating_sub(agg_locked.operator_cut_iqd)
+            .saturating_sub(agg_locked.report_iqd)
+            .saturating_sub(agg_locked.mandoub_cut_iqd)
             .saturating_sub(inv_value);
 
         let target_date_str = target_date.format("%Y-%m-%d").to_string();
@@ -618,6 +699,8 @@ impl ReportsService {
             total_discount_iqd,
             total_doctor_cuts_iqd: agg_locked.doctor_cut_iqd,
             total_operator_cuts_iqd: agg_locked.operator_cut_iqd,
+            total_report_iqd: agg_locked.report_iqd,
+            total_mandoub_cuts_iqd: agg_locked.mandoub_cut_iqd,
             total_inventory_consumption_value_iqd: inv_value,
             net_iqd,
             locked_count: agg_locked.visits,
@@ -625,6 +708,7 @@ impl ReportsService {
             voided_value_iqd: voided.value_iqd,
             per_doctor,
             per_operator,
+            per_mandoub,
             per_check_type,
             pending_sync,
             provisional: pending_sync > 0,
@@ -727,6 +811,8 @@ impl ReportsService {
                 total_discount_iqd: close.total_discount_iqd,
                 total_doctor_cuts_iqd: close.total_doctor_cuts_iqd,
                 total_operator_cuts_iqd: close.total_operator_cuts_iqd,
+                total_report_iqd: close.total_report_iqd,
+                total_mandoub_cuts_iqd: close.total_mandoub_cuts_iqd,
                 total_inventory_consumption_value_iqd: close.total_inventory_consumption_value_iqd,
                 net_iqd: close.net_iqd,
                 locked_count: close.locked_count,
@@ -890,6 +976,20 @@ impl ReportsService {
         write_operator_earnings_csv(&rows, path)
     }
 
+    #[instrument(skip(self))]
+    pub async fn export_mandoub_earnings_csv(
+        &self,
+        entity_id: &str,
+        range: DateRange,
+        include_voided: bool,
+        path: &Path,
+    ) -> AppResult<()> {
+        let rows = self
+            .mandoub_earnings(entity_id, range, include_voided)
+            .await?;
+        write_mandoub_earnings_csv(&rows, path)
+    }
+
     /// Render a plain-text PDF artifact (parity with phase-05 receipts).
     /// The contract is path-bound; a future swap to a true PDF crate is a
     /// one-line change.
@@ -914,6 +1014,8 @@ fn sum_visit_rows(rows: &[VisitRow]) -> VisitsReportTotals {
         t.revenue_iqd = t.revenue_iqd.saturating_add(r.price_iqd);
         t.doctor_cut_iqd = t.doctor_cut_iqd.saturating_add(r.doctor_cut_iqd);
         t.operator_cut_iqd = t.operator_cut_iqd.saturating_add(r.operator_cut_iqd);
+        t.report_iqd = t.report_iqd.saturating_add(r.report_amount_iqd);
+        t.mandoub_cut_iqd = t.mandoub_cut_iqd.saturating_add(r.mandoub_cut_iqd);
         t.net_iqd = t.net_iqd.saturating_add(r.net_iqd);
     }
     t
@@ -928,6 +1030,8 @@ fn sum_groups(
         t.revenue_iqd = t.revenue_iqd.saturating_add(g.revenue_iqd);
         t.doctor_cut_iqd = t.doctor_cut_iqd.saturating_add(g.doctor_cut_iqd);
         t.operator_cut_iqd = t.operator_cut_iqd.saturating_add(g.operator_cut_iqd);
+        t.report_iqd = t.report_iqd.saturating_add(g.report_iqd);
+        t.mandoub_cut_iqd = t.mandoub_cut_iqd.saturating_add(g.mandoub_cut_iqd);
         t.net_iqd = t.net_iqd.saturating_add(g.net_iqd);
     }
     t

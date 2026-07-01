@@ -64,6 +64,7 @@ describe("Phase-08 §1.2 AUDIT_ENTITIES", () => {
       "operators",
       "operator_specialties",
       "operator_shifts",
+      "mandoubs",
       "patients",
       "visits",
       "inventory_items",
@@ -74,8 +75,8 @@ describe("Phase-08 §1.2 AUDIT_ENTITIES", () => {
     ])
   })
 
-  it("has exactly 16 entries", () => {
-    expect(AUDIT_ENTITIES).toHaveLength(16)
+  it("has exactly 17 entries", () => {
+    expect(AUDIT_ENTITIES).toHaveLength(17)
   })
 
   it("includes audit_log so the vacuum self-row can drill down", () => {

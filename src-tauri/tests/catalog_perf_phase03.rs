@@ -52,7 +52,6 @@ fn flat_check_type(name: &str, price: i64) -> CheckType {
         has_subtypes: false,
         base_price_iqd: Some(price),
         dye_supported: false,
-        report_supported: false,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,

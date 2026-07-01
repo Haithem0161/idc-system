@@ -23,11 +23,11 @@ use uuid::Uuid;
 
 use crate::domains::auth::domain::value_objects::UserRole;
 use crate::domains::catalog::domain::entities::{
-    CheckSubtype, CheckType, Doctor, DoctorCheckPricing, InventoryConsumptionMap, Operator,
+    CheckSubtype, CheckType, Doctor, DoctorCheckPricing, InventoryConsumptionMap, Mandoub, Operator,
 };
 use crate::domains::catalog::domain::repositories::{
     CheckSubtypeRepo, CheckTypeRepo, DoctorPricingRepo, DoctorRepo, InventoryConsumptionRepo,
-    InventoryItemRepo, OperatorRepo, OperatorSpecialtyRepo,
+    InventoryItemRepo, MandoubRepo, OperatorRepo, OperatorSpecialtyRepo,
 };
 use crate::domains::patients::domain::entities::Patient;
 use crate::domains::patients::domain::repositories::PatientRepo;
@@ -58,10 +58,19 @@ pub struct CreateDraftInput {
     pub check_type_id: Uuid,
     pub check_subtype_id: Option<Uuid>,
     pub doctor_id: Option<Uuid>,
+    /// مندوب (representative) reference. Valid only with a referring doctor. The
+    /// 500/1000 cut is NOT chosen here -- it is passed at LOCK time.
+    pub mandoub_id: Option<Uuid>,
     #[serde(default)]
     pub dye: bool,
     #[serde(default)]
     pub report: bool,
+    #[serde(default)]
+    pub dalal: bool,
+    /// Discount: zero the referring doctor's cut for this visit. Valid only with
+    /// a real referring doctor.
+    #[serde(default)]
+    pub discount: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -73,8 +82,16 @@ pub struct UpdateDraftInput {
     pub patient_id: Option<Uuid>,
     pub check_subtype_id: Option<Option<Uuid>>,
     pub doctor_id: Option<Option<Uuid>>,
+    /// `Some(Some(id))` sets the مندوب, `Some(None)` clears it, `None` leaves it
+    /// unchanged. A مندوب is auto-cleared by the entity when the doctor ends up
+    /// None after the patch.
+    pub mandoub_id: Option<Option<Uuid>>,
     pub dye: Option<bool>,
     pub report: Option<bool>,
+    pub dalal: Option<bool>,
+    /// `Some(true)`/`Some(false)` sets the discount flag; `None` leaves it
+    /// unchanged. Auto-cleared by the entity when the doctor ends up None.
+    pub discount: Option<bool>,
 }
 
 /// Resolved snapshot bundle returned to UI from `pricing::resolve` and used
@@ -97,7 +114,6 @@ pub struct ChecksGridCard {
     pub name_en: Option<String>,
     pub has_subtypes: bool,
     pub dye_supported: bool,
-    pub report_supported: bool,
     pub todays_visits: i64,
 }
 
@@ -114,6 +130,7 @@ struct LockBundle {
     doctor: Option<Doctor>,
     doctor_pricing: Option<DoctorCheckPricing>,
     operator: Operator,
+    mandoub: Option<Mandoub>,
 }
 
 #[derive(Clone)]
@@ -128,6 +145,7 @@ pub struct VisitServiceConfig {
     pub doctor_pricing: Arc<dyn DoctorPricingRepo>,
     pub operators: Arc<dyn OperatorRepo>,
     pub operator_specialties: Arc<dyn OperatorSpecialtyRepo>,
+    pub mandoubs: Arc<dyn MandoubRepo>,
     pub consumption: Arc<dyn InventoryConsumptionRepo>,
     pub inventory_items: Arc<dyn InventoryItemRepo>,
     pub shifts: Arc<dyn OperatorShiftRepo>,
@@ -150,6 +168,7 @@ pub struct VisitService {
     doctor_pricing: Arc<dyn DoctorPricingRepo>,
     operators: Arc<dyn OperatorRepo>,
     operator_specialties: Arc<dyn OperatorSpecialtyRepo>,
+    mandoubs: Arc<dyn MandoubRepo>,
     consumption: Arc<dyn InventoryConsumptionRepo>,
     #[allow(dead_code)]
     inventory_items: Arc<dyn InventoryItemRepo>,
@@ -174,6 +193,7 @@ impl VisitService {
             doctor_pricing: cfg.doctor_pricing,
             operators: cfg.operators,
             operator_specialties: cfg.operator_specialties,
+            mandoubs: cfg.mandoubs,
             consumption: cfg.consumption,
             inventory_items: cfg.inventory_items,
             shifts: cfg.shifts,
@@ -307,7 +327,6 @@ impl VisitService {
                 name_en: ct.name_en,
                 has_subtypes: ct.has_subtypes,
                 dye_supported: ct.dye_supported,
-                report_supported: ct.report_supported,
                 todays_visits: todays,
             });
         }
@@ -360,10 +379,31 @@ impl VisitService {
                 "check type does not support dye".into(),
             ));
         }
-        if input.report && !ct.report_supported {
+        // A discount zeroes the referring doctor's cut, so it requires a real
+        // referring doctor. The entity also enforces this, but checking at the
+        // boundary gives a precise error before building the draft.
+        if input.discount && input.doctor_id.is_none() {
             return Err(AppError::Validation(
-                "check type does not support report".into(),
+                "discount requires a referring doctor".into(),
             ));
+        }
+        // A مندوب may only be referenced with a real referring doctor, and the
+        // referenced row must exist and not be soft-deleted (the frontend is
+        // untrusted). The entity also enforces the doctor-required invariant.
+        if let Some(mandoub_id) = input.mandoub_id {
+            if input.doctor_id.is_none() {
+                return Err(AppError::Validation(
+                    "mandoub requires a referring doctor".into(),
+                ));
+            }
+            let m = self
+                .mandoubs
+                .get_by_id(mandoub_id)
+                .await?
+                .ok_or_else(|| AppError::NotFound(format!("mandoub {mandoub_id}")))?;
+            if m.deleted_at.is_some() {
+                return Err(AppError::Validation("mandoub is deleted".into()));
+            }
         }
         let visit = Visit::create_draft(VisitCreateDraftInput {
             patient_id: input.patient_id,
@@ -371,8 +411,11 @@ impl VisitService {
             check_type_id: input.check_type_id,
             check_subtype_id: input.check_subtype_id,
             doctor_id: input.doctor_id,
+            mandoub_id: input.mandoub_id,
             dye: input.dye,
             report: input.report,
+            dalal: input.dalal,
+            discount: input.discount,
             entity_id: entity_id.to_string(),
             origin_device_id: Some(self.device_id.clone()),
         })?;
@@ -414,14 +457,30 @@ impl VisitService {
                 return Err(AppError::NotFound(format!("patient {new_patient_id}")));
             }
         }
+        // When the patch SETS a مندوب, the referenced row must exist and be
+        // live. The doctor-required invariant + auto-clear are enforced by the
+        // entity's `edit_draft` (a مندوب is dropped if the doctor ends None).
+        if let Some(Some(mandoub_id)) = input.mandoub_id {
+            let m = self
+                .mandoubs
+                .get_by_id(mandoub_id)
+                .await?
+                .ok_or_else(|| AppError::NotFound(format!("mandoub {mandoub_id}")))?;
+            if m.deleted_at.is_some() {
+                return Err(AppError::Validation("mandoub is deleted".into()));
+            }
+        }
         let updated = current.clone().edit_draft(VisitDraftPatch {
             patient_id: input.patient_id,
             check_subtype_id: input.check_subtype_id,
             doctor_id: input.doctor_id,
+            mandoub_id: input.mandoub_id,
             dye: input.dye,
             report: input.report,
+            dalal: input.dalal,
+            discount: input.discount,
         })?;
-        // Re-validate dye / report against parent.
+        // Re-validate dye against parent. Report is universally available now.
         let ct = self
             .check_types
             .get_by_id(updated.check_type_id)
@@ -430,11 +489,6 @@ impl VisitService {
         if updated.dye && !ct.dye_supported {
             return Err(AppError::Validation(
                 "check type does not support dye".into(),
-            ));
-        }
-        if updated.report && !ct.report_supported {
-            return Err(AppError::Validation(
-                "check type does not support report".into(),
             ));
         }
         let write = UpsertVisitWrite {
@@ -535,8 +589,11 @@ impl VisitService {
                 "snapshots can only be resolved on draft visits".into(),
             ));
         }
+        // Dryrun: no operator and no lock-time مندوب cut yet. The cut is 0; the
+        // snapshot surfaces the مندوب name (if any) for the form, and the actual
+        // 500/1000 cut lands only at lock.
         let bundle = self
-            .resolve_bundle(visit, &visit_operator_id_placeholder(), settings)
+            .resolve_bundle(visit, &visit_operator_id_placeholder(), 0, settings)
             .await?;
         Ok(ResolvedSnapshots {
             snapshots: bundle.0,
@@ -547,6 +604,7 @@ impl VisitService {
         &self,
         visit: Visit,
         operator_id: &Option<Uuid>,
+        mandoub_cut_iqd: i64,
         settings: MoneySettings,
     ) -> AppResult<(VisitSnapshots, LockBundle)> {
         let patient = self
@@ -589,6 +647,19 @@ impl VisitService {
         } else {
             None
         };
+        // مندوب: loaded for its name snapshot when the visit references one. The
+        // 500/1000 cut is supplied by the caller (lock-time), NOT read from the
+        // مندوب row (the row has no cut). It is pure passthrough into compute().
+        let mandoub = if let Some(mid) = visit.mandoub_id {
+            Some(
+                self.mandoubs
+                    .get_by_id(mid)
+                    .await?
+                    .ok_or_else(|| AppError::NotFound(format!("mandoub {mid}")))?,
+            )
+        } else {
+            None
+        };
         let resolved_operator = match operator_id {
             Some(op_id) => self
                 .operators
@@ -616,6 +687,15 @@ impl VisitService {
                 }
             }
         };
+        // The cut only applies when the visit actually references a مندوب; with
+        // no مندوب the passthrough cut is forced to 0 and the name stays None so
+        // the snapshot stays coherent regardless of what the caller passed.
+        let effective_mandoub_cut = if mandoub.is_some() {
+            mandoub_cut_iqd
+        } else {
+            0
+        };
+        let mandoub_name = mandoub.as_ref().map(|m| m.name.as_str());
         let snap = money_math::compute(&MoneyMathInputs {
             check_type: &check_type,
             check_subtype: check_subtype.as_ref(),
@@ -625,6 +705,10 @@ impl VisitService {
             patient_name: &patient.name,
             dye: visit.dye,
             report: visit.report,
+            dalal: visit.dalal,
+            discount: visit.discount,
+            mandoub_cut_iqd: effective_mandoub_cut,
+            mandoub_name,
             settings,
         })?;
         Ok((
@@ -637,6 +721,7 @@ impl VisitService {
                 doctor,
                 doctor_pricing,
                 operator: resolved_operator,
+                mandoub,
             },
         ))
     }
@@ -649,6 +734,7 @@ impl VisitService {
         visit_id: Uuid,
         operator_id: Uuid,
         amount_paid_override_iqd: Option<i64>,
+        mandoub_cut_iqd: Option<i64>,
         settings: MoneySettings,
         receipt_options: ReceiptRenderOptions,
     ) -> AppResult<LockResult> {
@@ -690,9 +776,30 @@ impl VisitService {
                 "selected operator is not qualified or no longer on shift".into(),
             ));
         }
+        // مندوب cut coherence at lock: a visit WITH a مندوب must lock with a
+        // 500/1000 cut; a visit WITHOUT one must not carry a cut. The entity's
+        // lock() re-checks the snapshot, but validating the lock arg here gives
+        // a precise error before the heavier money/render work.
+        let mandoub_cut = if current.mandoub_id.is_some() {
+            match mandoub_cut_iqd {
+                Some(c) if matches!(c, 500 | 1000) => c,
+                _ => {
+                    return Err(AppError::Validation(
+                        "a mandoub visit must lock with a cut of 500 or 1000".into(),
+                    ));
+                }
+            }
+        } else {
+            if mandoub_cut_iqd.is_some() {
+                return Err(AppError::Validation(
+                    "mandoub_cut supplied for a visit with no mandoub".into(),
+                ));
+            }
+            0
+        };
         // Resolve snapshots + bundle (catalog references).
         let (mut snap, bundle) = self
-            .resolve_bundle(current.clone(), &Some(operator_id), settings)
+            .resolve_bundle(current.clone(), &Some(operator_id), mandoub_cut, settings)
             .await?;
         // Overlay the collected-cash override onto the billed snapshot. This is
         // deliberately applied AFTER the money engine: it never touches price,

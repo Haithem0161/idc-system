@@ -250,7 +250,7 @@ fn draw_masthead(c: &mut Canvas, close: &DailyClose, clinic_name: Option<&str>) 
 fn draw_summary(c: &mut Canvas, close: &DailyClose) {
     section_title(c, "SUMMARY");
 
-    let rows: [(&str, String); 9] = [
+    let rows: [(&str, String); 11] = [
         ("Locked visits", close.locked_count.to_string()),
         (
             "Voided visits",
@@ -279,6 +279,14 @@ fn draw_summary(c: &mut Canvas, close: &DailyClose) {
         (
             "Operator cuts",
             format!("{} IQD", fmt_iqd(close.total_operator_cuts_iqd)),
+        ),
+        (
+            "Reporting doctor",
+            format!("{} IQD", fmt_iqd(close.total_report_iqd)),
+        ),
+        (
+            "Mandoub cuts",
+            format!("{} IQD", fmt_iqd(close.total_mandoub_cuts_iqd)),
         ),
         (
             "Inventory consumption",
@@ -594,6 +602,8 @@ mod tests {
             total_discount_iqd: 0,
             total_doctor_cuts_iqd: 1_500,
             total_operator_cuts_iqd: 4_000,
+            total_report_iqd: 0,
+            total_mandoub_cuts_iqd: 0,
             total_inventory_consumption_value_iqd: 0,
             net_iqd: 44_500,
             locked_count: 2,
@@ -614,6 +624,7 @@ mod tests {
                 operator_cut_iqd: 4_000,
                 hours_on_shift_milli: 263_400_000,
             }],
+            per_mandoub: vec![],
             per_check_type: vec![CheckTypeDailyRow {
                 check_type_id: Uuid::nil(),
                 name_ar: "اشعة".into(),

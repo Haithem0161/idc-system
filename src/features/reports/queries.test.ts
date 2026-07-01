@@ -25,6 +25,8 @@ import type {
   DashboardTopsRecord,
   DoctorDrilldownRecord,
   DoctorEarningsRecord,
+  MandoubDrilldownRecord,
+  MandoubEarningsRecord,
   OperatorDrilldownRecord,
   OperatorEarningsRecord,
   ReportsRangeArgs,
@@ -42,8 +44,11 @@ import {
   useDoctorEarnings,
   useExportDailyClosePdf,
   useExportDoctorsCsv,
+  useExportMandoubEarningsCsv,
   useExportOperatorsCsv,
   useExportVisitsCsv,
+  useMandoubDrilldown,
+  useMandoubEarnings,
   useOperatorDrilldown,
   useOperatorEarnings,
   useVisitsReport,
@@ -69,6 +74,7 @@ function makeWrapper(): {
 const UUID_DOCTOR = "0190f3a0-f1c0-7000-8000-0000000a0001"
 const UUID_OPERATOR = "0190f3a0-f1c0-7000-8000-0000000a0002"
 const UUID_CHECK_TYPE = "0190f3a0-f1c0-7000-8000-0000000a0003"
+const UUID_MANDOUB = "0190f3a0-f1c0-7000-8000-0000000a0004"
 const RANGE: ReportsRangeArgs = {
   from_utc: "2026-05-01T00:00:00Z",
   to_utc: "2026-05-13T00:00:00Z",
@@ -89,6 +95,8 @@ function trendMatrix(): TrendMatrixRecord {
     revenue: trendCell(),
     doctor_cuts: trendCell(),
     operator_cuts: trendCell(),
+    report_cuts: trendCell(),
+    mandoub_cuts: trendCell(),
     inventory_value: trendCell(),
     net: trendCell(),
   }
@@ -101,6 +109,8 @@ function kpis(over: Partial<DashboardKpisRecord> = {}): DashboardKpisRecord {
     revenue_iqd: 200_000,
     doctor_cuts_iqd: 60_000,
     operator_cuts_iqd: 20_000,
+    report_cuts_iqd: 0,
+    mandoub_cuts_iqd: 0,
     inventory_consumption_value_iqd: 4_000,
     net_iqd: 116_000,
     trend_today_vs_yesterday: trendMatrix(),
@@ -178,6 +188,8 @@ function visitsRows(): VisitsReportRecord {
         price_iqd: 50_000,
         doctor_cut_iqd: 15_000,
         operator_cut_iqd: 4_000,
+        mandoub_cut_iqd: 0,
+        report_amount_iqd: 0,
         total_iqd: 50_000,
         amount_paid_override_iqd: null,
         net_iqd: 31_000,
@@ -188,6 +200,8 @@ function visitsRows(): VisitsReportRecord {
       revenue_iqd: 50_000,
       doctor_cut_iqd: 15_000,
       operator_cut_iqd: 4_000,
+      report_iqd: 0,
+      mandoub_cut_iqd: 0,
       net_iqd: 31_000,
     },
   }
@@ -204,6 +218,8 @@ function visitsGroups(): VisitsReportRecord {
         revenue_iqd: 250_000,
         doctor_cut_iqd: 75_000,
         operator_cut_iqd: 20_000,
+        report_iqd: 0,
+        mandoub_cut_iqd: 0,
         net_iqd: 155_000,
       },
     ],
@@ -212,6 +228,8 @@ function visitsGroups(): VisitsReportRecord {
       revenue_iqd: 250_000,
       doctor_cut_iqd: 75_000,
       operator_cut_iqd: 20_000,
+      report_iqd: 0,
+      mandoub_cut_iqd: 0,
       net_iqd: 155_000,
     },
   }
@@ -227,6 +245,8 @@ function dailyClose(over: Partial<DailyCloseRecord> = {}): DailyCloseRecord {
     total_discount_iqd: 0,
     total_doctor_cuts_iqd: 45_000,
     total_operator_cuts_iqd: 12_000,
+    total_mandoub_cuts_iqd: 0,
+    total_report_iqd: 6_000,
     total_inventory_consumption_value_iqd: 3_000,
     net_iqd: 90_000,
     locked_count: 3,
@@ -234,6 +254,7 @@ function dailyClose(over: Partial<DailyCloseRecord> = {}): DailyCloseRecord {
     voided_value_iqd: 50_000,
     per_doctor: [],
     per_operator: [],
+    per_mandoub: [],
     per_check_type: [],
     pending_sync: 0,
     provisional: false,
@@ -268,6 +289,8 @@ function doctorDrilldown(): DoctorDrilldownRecord {
       revenue_iqd: 150_000,
       doctor_cut_iqd: 45_000,
       operator_cut_iqd: 12_000,
+      report_iqd: 0,
+      mandoub_cut_iqd: 0,
       net_iqd: 93_000,
     },
   }
@@ -284,9 +307,41 @@ function operatorDrilldown(): OperatorDrilldownRecord {
       revenue_iqd: 0,
       doctor_cut_iqd: 0,
       operator_cut_iqd: 0,
+      report_iqd: 0,
+      mandoub_cut_iqd: 0,
       net_iqd: 0,
     },
     total_hours_milli: 0,
+  }
+}
+
+function mandoubEarnings(
+  over: Partial<MandoubEarningsRecord> = {}
+): MandoubEarningsRecord {
+  return {
+    mandoub_id: UUID_MANDOUB,
+    name: "Rep One",
+    visits: 4,
+    mandoub_cut_total_iqd: 3_000,
+    avg_cut_per_visit_iqd: 750,
+    ...over,
+  }
+}
+
+function mandoubDrilldown(): MandoubDrilldownRecord {
+  return {
+    mandoub_id: UUID_MANDOUB,
+    name: "Rep One",
+    attributed_visits: [],
+    totals: {
+      visits: 0,
+      revenue_iqd: 0,
+      doctor_cut_iqd: 0,
+      operator_cut_iqd: 0,
+      report_iqd: 0,
+      mandoub_cut_iqd: 0,
+      net_iqd: 0,
+    },
   }
 }
 
@@ -494,6 +549,43 @@ describe.each(directions)(
       })
     })
 
+    it("useMandoubEarnings dispatches reports_mandoub_earnings", async () => {
+      mockOnce([mandoubEarnings()])
+      const { wrapper } = makeWrapper()
+      const { result } = renderHook(() => useMandoubEarnings(RANGE), {
+        wrapper,
+      })
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      expect(invoke).toHaveBeenCalledWith("reports_mandoub_earnings", {
+        args: RANGE,
+      })
+      expect(result.current.data?.[0]?.mandoub_cut_total_iqd).toBeGreaterThan(0)
+    })
+
+    it("useMandoubDrilldown is disabled when mandoubId is null", () => {
+      const { wrapper } = makeWrapper()
+      renderHook(() => useMandoubDrilldown(null, RANGE), { wrapper })
+      expect(invoke).not.toHaveBeenCalled()
+    })
+
+    it("useMandoubDrilldown dispatches with mandoub_id when present", async () => {
+      mockOnce(mandoubDrilldown())
+      const { wrapper } = makeWrapper()
+      const { result } = renderHook(
+        () => useMandoubDrilldown(UUID_MANDOUB, RANGE),
+        { wrapper }
+      )
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      expect(invoke).toHaveBeenCalledWith("reports_mandoub_drilldown", {
+        args: {
+          mandoub_id: UUID_MANDOUB,
+          from_utc: RANGE.from_utc,
+          to_utc: RANGE.to_utc,
+          include_voided: undefined,
+        },
+      })
+    })
+
     it("useDailyClose dispatches when a date is provided", async () => {
       mockOnce(dailyClose())
       const { wrapper } = makeWrapper()
@@ -581,6 +673,25 @@ describe.each(directions)(
           from_utc: RANGE.from_utc,
           to_utc: RANGE.to_utc,
           path: "/exports/operators.csv",
+        },
+      })
+    })
+
+    it("useExportMandoubEarningsCsv mutation calls reports_export_mandoub_earnings_csv with range + path", async () => {
+      mockOnce({ path: "/exports/mandoubs.csv" })
+      const { wrapper } = makeWrapper()
+      const { result } = renderHook(() => useExportMandoubEarningsCsv(), { wrapper })
+      result.current.mutate({
+        from_utc: RANGE.from_utc,
+        to_utc: RANGE.to_utc,
+        path: "/exports/mandoubs.csv",
+      })
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      expect(invoke).toHaveBeenCalledWith("reports_export_mandoub_earnings_csv", {
+        args: {
+          from_utc: RANGE.from_utc,
+          to_utc: RANGE.to_utc,
+          path: "/exports/mandoubs.csv",
         },
       })
     })

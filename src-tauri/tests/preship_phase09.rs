@@ -187,7 +187,6 @@ async fn seed_operator_with_specialty(
         has_subtypes: false,
         base_price_iqd: Some(25_000),
         dye_supported: false,
-        report_supported: false,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),

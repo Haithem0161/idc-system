@@ -80,6 +80,26 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "017_daily_close_collected_discount.sql",
         include_str!("../../migrations/017_daily_close_collected_discount.sql"),
     ),
+    (
+        "018_report_percentage.sql",
+        include_str!("../../migrations/018_report_percentage.sql"),
+    ),
+    (
+        "019_daily_close_report_payable.sql",
+        include_str!("../../migrations/019_daily_close_report_payable.sql"),
+    ),
+    (
+        "020_mandoub_catalog.sql",
+        include_str!("../../migrations/020_mandoub_catalog.sql"),
+    ),
+    (
+        "021_visits_mandoub.sql",
+        include_str!("../../migrations/021_visits_mandoub.sql"),
+    ),
+    (
+        "022_visits_discount.sql",
+        include_str!("../../migrations/022_visits_discount.sql"),
+    ),
 ];
 
 /// The local sync schema version: the count of embedded migrations. Sent to the
@@ -271,12 +291,23 @@ mod tests {
                 .unwrap();
         assert!(vcount >= 1);
 
-        // Seed populated 10 setting keys
+        // Seed populated the v1 setting rows. Migration 002 seeds 10 keys;
+        // migration 018 adds `report_pct` and `reporting_doctor_name` (+2) and
+        // tombstones `report_cost_iqd` (the row is soft-deleted, not removed),
+        // leaving 12 physical rows.
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM settings")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(n, 10);
+        assert_eq!(n, 12);
+        // The retired flat-cost key is tombstoned (deleted_at set), and the new
+        // percentage key is live.
+        let (live,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM settings WHERE deleted_at IS NULL")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(live, 11);
 
         // Migration 012 added the 5 optional patient demographics columns
         // (and re-running run() above must not have errored on duplicate
@@ -289,6 +320,87 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(demo_cols, 5);
+    }
+
+    /// Apply only the first `n` embedded migrations (each in its own tx, like
+    /// `run`), recording them in `_migrations` so a later `run` resumes from
+    /// there. Lets a test stand up a pre-018 schema and seed legacy rows.
+    async fn apply_prefix(pool: &SqlitePool, n: usize) {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        for (name, sql) in MIGRATIONS.iter().take(n) {
+            let mut tx = pool.begin().await.unwrap();
+            for statement in split_statements(sql) {
+                sqlx::query(&statement).execute(&mut *tx).await.unwrap();
+            }
+            sqlx::query("INSERT INTO _migrations (name, applied_at) VALUES (?, ?)")
+                .bind(name)
+                .bind("2026-01-01T00:00:00Z")
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+        }
+    }
+
+    /// Migration 018 must TRANSFORM already-locked visits frozen under the old
+    /// flat-surcharge model (`total = price + dye + report_cost`) into the new
+    /// carve-out model (`total = price + dye`, report as a net-side amount).
+    /// Regression test for the bootstrap failure where the new total/coherence
+    /// CHECK rejected a real DB that already had locked report visits.
+    #[tokio::test]
+    async fn migration_018_rebases_legacy_locked_report_visits() {
+        let pool = init_pool_in_memory().await.unwrap();
+        // Stand up the schema as it was BEFORE 018 (001..=017).
+        apply_prefix(&pool, 17).await;
+
+        // Minimal FK parents for a locked visit.
+        let ts = "2026-01-02T00:00:00Z";
+        sqlx::query(
+            "INSERT INTO users(id,email,name,password_hash,role,is_active,created_at,updated_at,version,dirty,entity_id) \
+             VALUES ('u1','r@x.io','R','x','receptionist',1,?,?,1,0,'t')",
+        ).bind(ts).bind(ts).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO patients(id,name,created_at,updated_at,version,dirty,entity_id) VALUES ('p1','Pat',?,?,1,0,'t')")
+            .bind(ts).bind(ts).execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO check_types(id,name_ar,has_subtypes,base_price_iqd,dye_supported,report_supported,sort_order,is_active,created_at,updated_at,version,dirty,entity_id) \
+             VALUES ('c1','x',0,50000,1,1,0,1,?,?,1,0,'t')",
+        ).bind(ts).bind(ts).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO operators(id,name,base_cut_per_check_iqd,is_active,created_at,updated_at,version,dirty,entity_id) VALUES ('o1','Op',4000,1,?,?,1,0,'t')")
+            .bind(ts).bind(ts).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO doctors(id,name,is_active,created_at,updated_at,version,dirty,entity_id) VALUES ('d1','Dr',1,?,?,1,0,'t')")
+            .bind(ts).bind(ts).execute(&pool).await.unwrap();
+
+        // A doctor-mode LOCKED visit with report ON, frozen the OLD way:
+        // total = price(50000) + dye(2000) + report_cost(15000) = 67000.
+        sqlx::query(
+            "INSERT INTO visits(id,patient_id,status,receptionist_user_id,check_type_id,doctor_id,operator_id,dye,report,locked_at,\
+               price_snapshot_iqd,dye_cost_snapshot_iqd,report_cost_snapshot_iqd,doctor_cut_snapshot_iqd,operator_cut_snapshot_iqd,\
+               internal_pct_snapshot,total_amount_iqd_snapshot,patient_name_snapshot,doctor_name_snapshot,operator_name_snapshot,\
+               check_type_name_ar_snapshot,created_at,updated_at,version,dirty,entity_id) \
+             VALUES ('v1','p1','locked','u1','c1','d1','o1',1,1,?, 50000,2000,15000,12000,4000,NULL,67000,'Pat','Dr','Op','x',?,?,1,1,'t')",
+        ).bind(ts).bind(ts).bind(ts).execute(&pool).await.unwrap();
+
+        // Now run the rest (018 + 019). This MUST NOT fail on the CHECK.
+        run(&pool).await.unwrap();
+
+        // The legacy locked row was rebased: total = price + dye (report removed),
+        // the historical report amount preserved, pct made non-null (0), dalal 0.
+        let (total, amt, pct, dalal): (i64, i64, Option<i64>, i64) = sqlx::query_as(
+            "SELECT total_amount_iqd_snapshot, report_amount_snapshot_iqd, report_pct_snapshot, dalal \
+             FROM visits WHERE id = 'v1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(total, 52000, "total rebased to price + dye");
+        assert_eq!(amt, 15000, "legacy report amount preserved");
+        assert_eq!(pct, Some(0), "report=1 requires non-null pct");
+        assert_eq!(dalal, 0);
     }
 
     #[test]

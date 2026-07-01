@@ -52,6 +52,8 @@ function matrix(overrides: Partial<TrendMatrixRecord> = {}): TrendMatrixRecord {
     revenue: cell(),
     doctor_cuts: cell({ delta_permille: -50 }),
     operator_cuts: cell({ delta_permille: 0 }),
+    report_cuts: cell({ delta_permille: 0 }),
+    mandoub_cuts: cell({ delta_permille: 0 }),
     inventory_value: cell({ delta_permille: 25 }),
     net: cell({ delta_permille: -10 }),
     ...overrides,

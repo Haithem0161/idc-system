@@ -28,9 +28,11 @@ import {
   useSettings,
 } from "@/features/settings/queries"
 import { invoke } from "@/lib/ipc"
+import { cn } from "@/lib/utils"
 import { formatIpcError } from "@/lib/errors"
 import { useCheckSubtypes } from "@/features/catalog/queries"
 import { DoctorCombobox } from "@/components/catalog/doctor-combobox"
+import { MandoubCombobox } from "@/components/catalog/mandoub-combobox"
 import {
   selectActiveTab,
   useVisitTabsStore,
@@ -71,10 +73,12 @@ export default function NewVisitTabbedPage () {
   )
 
   // --- Running total -------------------------------------------------------
-  // Mirror the canonical Rust money_math: total = price + dye_cost + report.
+  // Mirror the canonical Rust money_math: the patient total = price + dye.
   // The price is the authoritative effective price from `pricing_effective`
   // (subtype/base + doctor override), so the displayed total is byte-identical
-  // to what Finish will charge. Dye/report surcharges come from settings.
+  // to what Finish will charge. The dye cost comes from settings. The report is
+  // NOT charged to the patient: it is an internal share paid to the reporting
+  // doctor out of net, surfaced separately below the patient total.
   const activeForm = activeTab?.form
   const needsSubtype = Boolean(checkType?.has_subtypes)
   const subtypeChosen = !needsSubtype || Boolean(activeForm?.subtypeId)
@@ -82,10 +86,6 @@ export default function NewVisitTabbedPage () {
   const { data: settings } = useSettings()
   const dyeCostIqd = settingValueAsNumber(
     getSettingByKey(settings, "dye_cost_iqd"),
-    0,
-  )
-  const reportCostIqd = settingValueAsNumber(
-    getSettingByKey(settings, "report_cost_iqd"),
     0,
   )
 
@@ -112,8 +112,6 @@ export default function NewVisitTabbedPage () {
 
   const priceIqd = effectivePrice ?? localSubtypePrice
   const dyeApplied = Boolean(activeForm?.dye) && Boolean(checkType?.dye_supported)
-  const reportApplied =
-    Boolean(activeForm?.report) && Boolean(checkType?.report_supported)
 
   const totalLines = useMemo<RunningTotalLine[]>(() => {
     if (priceIqd == null) return []
@@ -123,27 +121,11 @@ export default function NewVisitTabbedPage () {
     if (dyeApplied) {
       lines.push({ label: t("reception.new_visit.dye"), amountIqd: dyeCostIqd })
     }
-    if (reportApplied) {
-      lines.push({
-        label: t("reception.new_visit.report"),
-        amountIqd: reportCostIqd,
-      })
-    }
     return lines
-  }, [
-    priceIqd,
-    localizedCheckName,
-    dyeApplied,
-    reportApplied,
-    dyeCostIqd,
-    reportCostIqd,
-    t,
-  ])
+  }, [priceIqd, localizedCheckName, dyeApplied, dyeCostIqd, t])
 
-  const totalIqd =
-    (priceIqd ?? 0) +
-    (dyeApplied ? dyeCostIqd : 0) +
-    (reportApplied ? reportCostIqd : 0)
+
+  const totalIqd = (priceIqd ?? 0) + (dyeApplied ? dyeCostIqd : 0)
   const hasPrice = priceIqd != null
   // Pending only when we have nothing to show yet but a fetch is in flight.
   const estimating = priceFetching && priceIqd == null && subtypeChosen
@@ -204,14 +186,29 @@ export default function NewVisitTabbedPage () {
     if (!tab.form.patientId) return // can't persist without a patient
     setSaveStatus("saving")
     try {
+      // doctor_id and dalal are mutually exclusive: dalal is a doctor
+      // substitute, so when it is on we never send a doctor id.
+      // A representative only rides on a visit that carries a real referring
+      // doctor (never house, never dalal). Mirror the same gate the UI uses so
+      // the draft never sends a mandoub the engine would reject.
+      const referringDoctorId = tab.form.dalal ? null : tab.form.doctorId
+      const mandoubId =
+        referringDoctorId != null ? tab.form.mandoubId : null
+      // The discount, like the mandoub, only rides a visit with a real referring
+      // doctor. Gate it the same way so the draft never sends a discount the
+      // engine would reject (the entity would auto-clear it anyway).
+      const discount = referringDoctorId != null ? tab.form.discount : false
       if (!tab.draftVisitId) {
         const visit = await visitCreate.mutateAsync({
           patient_id: tab.form.patientId,
           check_type_id: tab.checkTypeId,
           check_subtype_id: tab.form.subtypeId,
-          doctor_id: tab.form.doctorId,
+          doctor_id: referringDoctorId,
+          dalal: tab.form.dalal,
+          mandoub_id: mandoubId,
           dye: checkType?.dye_supported ? tab.form.dye : false,
-          report: checkType?.report_supported ? tab.form.report : false,
+          report: tab.form.report,
+          discount,
         })
         attachDraft(tab.tabId, visit.id)
       } else {
@@ -223,9 +220,12 @@ export default function NewVisitTabbedPage () {
           // draft keeps its current patient until a new one is committed.
           patient_id: tab.form.patientId ?? undefined,
           check_subtype_id: tab.form.subtypeId,
-          doctor_id: tab.form.doctorId,
+          doctor_id: referringDoctorId,
+          dalal: tab.form.dalal,
+          mandoub_id: mandoubId,
           dye: checkType?.dye_supported ? tab.form.dye : false,
-          report: checkType?.report_supported ? tab.form.report : false,
+          report: tab.form.report,
+          discount,
         })
       }
       setSaveStatus("saved")
@@ -317,11 +317,17 @@ export default function NewVisitTabbedPage () {
       tab.form.overrideEnabled && tab.form.amountPaidOverrideIqd !== ""
         ? tab.form.amountPaidOverrideIqd
         : null
+    // The representative cut is sent only when the draft actually carries a
+    // mandoub (which itself requires a real referring doctor). It is a net-side
+    // carve-out -- never part of the patient's billed total.
+    const hasMandoub =
+      tab.form.mandoubId != null && !tab.form.dalal && tab.form.doctorId != null
     try {
       const result = await visitLock.mutateAsync({
         visit_id: tab.draftVisitId,
         operator_id: operatorId,
         amount_paid_override_iqd: override,
+        ...(hasMandoub ? { mandoub_cut: tab.form.mandoubCut } : {}),
       })
       setInfo(t("reception.new_visit.errors.locked"))
       setOperatorPickerOpen(false)
@@ -419,9 +425,83 @@ export default function NewVisitTabbedPage () {
           <FieldLabel label={t("reception.new_visit.doctor")}>
             <DoctorCombobox
               value={form.doctorId ?? null}
-              onChange={(doctorId) => patchForm({ doctorId })}
+              onChange={(doctorId) =>
+                // Switching/clearing the doctor invalidates any bound mandoub
+                // AND the discount: both only exist alongside a real referring
+                // doctor.
+                patchForm({
+                  doctorId,
+                  dalal: false,
+                  ...(doctorId == null
+                    ? { mandoubId: null, mandoubCut: 500, discount: false }
+                    : {}),
+                })
+              }
+              dalal={form.dalal}
+              onDalalChange={(dalal) =>
+                // Dalal is a doctor substitute (house-side): it can never carry
+                // a representative or a discount, so selecting it clears both.
+                patchForm({
+                  dalal,
+                  doctorId: dalal ? null : form.doctorId,
+                  ...(dalal
+                    ? { mandoubId: null, mandoubCut: 500, discount: false }
+                    : {}),
+                })
+              }
             />
           </FieldLabel>
+
+          {/* The representative selector only appears with a real referring
+              doctor (not house, not dalal). It is optional, and the cut is a
+              net-side carve-out never added to the patient total. */}
+          {form.doctorId != null && !form.dalal ? (
+            <FieldLabel label={t("reception.new_visit.mandoub")}>
+              <div className="space-y-2.5">
+                <MandoubCombobox
+                  value={form.mandoubId}
+                  onChange={(mandoubId) =>
+                    patchForm({
+                      mandoubId,
+                      // Reset the cut to the default when clearing the mandoub.
+                      ...(mandoubId == null ? { mandoubCut: 500 } : {}),
+                    })
+                  }
+                />
+                {form.mandoubId != null ? (
+                  <div
+                    role="radiogroup"
+                    aria-label={t("reception.new_visit.mandoub_cut_label")}
+                    className="inline-flex rounded-md border border-line bg-paper-2 p-0.5"
+                  >
+                    {([500, 1000] as const).map((cut) => {
+                      const selected = form.mandoubCut === cut
+                      return (
+                        <button
+                          key={cut}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          onClick={() => patchForm({ mandoubCut: cut })}
+                          data-testid={`mandoub-cut-${cut}`}
+                          className={cn(
+                            "rounded-[5px] px-3.5 py-1.5 font-mono text-[12px] font-semibold tabular-nums transition-colors",
+                            selected
+                              ? "bg-surface text-ink shadow-[0_1px_2px_rgba(10,18,48,0.06)]"
+                              : "text-ink-3 hover:text-ink-2",
+                          )}
+                        >
+                          {cut === 500
+                            ? t("reception.new_visit.mandoub_cut_500")
+                            : t("reception.new_visit.mandoub_cut_1000")}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            </FieldLabel>
+          ) : null}
 
           <div className="flex flex-wrap gap-3">
             <FeatureToggle
@@ -435,9 +515,17 @@ export default function NewVisitTabbedPage () {
               label={t("reception.new_visit.report")}
               pressed={form.report}
               onPressedChange={(p) => patchForm({ report: p })}
-              disabled={!checkType?.report_supported}
-              disabledHint={t("reception.new_visit.report_unsupported")}
             />
+            {/* The discount zeroes the referring doctor's cut. It only makes
+                sense with a real referring doctor (not house, not dalal), so it
+                appears only in that mode -- next to dye and report. */}
+            {form.doctorId != null && !form.dalal ? (
+              <FeatureToggle
+                label={t("reception.new_visit.discount")}
+                pressed={form.discount}
+                onPressedChange={(p) => patchForm({ discount: p })}
+              />
+            ) : null}
           </div>
         </div>
 

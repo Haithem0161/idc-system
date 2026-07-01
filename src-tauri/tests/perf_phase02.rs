@@ -149,16 +149,18 @@ async fn perf_users_list_at_10_under_5ms_p99() {
 #[tokio::test]
 async fn perf_settings_list_at_10_under_5ms_p99() {
     let pool = fresh_pool().await;
-    // Migration 002 seeds 10 keys under "unscoped".
+    // Migration 002 seeds 10 keys under "unscoped"; migration 018 nets +1
+    // live key (report_pct + reporting_doctor_name added, report_cost_iqd
+    // tombstoned) -> 11 live rows.
     let repo = SqliteSettingRepo::new(pool.clone());
-    assert_eq!(repo.list("unscoped").await.unwrap().len(), 10);
+    assert_eq!(repo.list("unscoped").await.unwrap().len(), 11);
 
     let mut samples = Vec::with_capacity(200);
     for _ in 0..200 {
         let t0 = Instant::now();
         let rows = repo.list("unscoped").await.unwrap();
         let elapsed = t0.elapsed().as_micros();
-        assert_eq!(rows.len(), 10);
+        assert_eq!(rows.len(), 11);
         samples.push(elapsed);
     }
     let p99_us = p99(samples);

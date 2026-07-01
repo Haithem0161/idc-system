@@ -7,6 +7,7 @@ import type {
   DoctorSyncRecord,
   InventoryAdjustmentSyncRecord,
   InventoryItemSyncRecord,
+  MandoubSyncRecord,
   OperatorShiftSyncRecord,
   OperatorSpecialtySyncRecord,
   OperatorSyncRecord,
@@ -34,6 +35,7 @@ export interface SyncEntityStore {
   upsertDoctor (row: DoctorSyncRecord): Promise<{ applied: boolean }>
   upsertDoctorPricing (row: DoctorPricingSyncRecord): Promise<{ applied: boolean }>
   upsertOperator (row: OperatorSyncRecord): Promise<{ applied: boolean }>
+  upsertMandoub (row: MandoubSyncRecord): Promise<{ applied: boolean }>
   upsertOperatorSpecialty (row: OperatorSpecialtySyncRecord): Promise<{ applied: boolean }>
   upsertInventoryItem (row: InventoryItemSyncRecord): Promise<{ applied: boolean }>
   upsertConsumption (row: ConsumptionSyncRecord): Promise<{ applied: boolean }>

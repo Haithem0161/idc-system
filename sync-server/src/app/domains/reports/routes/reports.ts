@@ -59,6 +59,8 @@ export const TotalsSchema = Type.Object({
   revenue_iqd: Type.Integer(),
   doctor_cut_iqd: Type.Integer(),
   operator_cut_iqd: Type.Integer(),
+  report_iqd: Type.Integer(),
+  mandoub_cut_iqd: Type.Integer(),
   net_iqd: Type.Integer(),
 })
 
@@ -78,6 +80,8 @@ export const RowSchema = Type.Object({
   price_iqd: Type.Integer(),
   doctor_cut_iqd: Type.Integer(),
   operator_cut_iqd: Type.Integer(),
+  report_iqd: Type.Integer(),
+  mandoub_cut_iqd: Type.Integer(),
   net_iqd: Type.Integer(),
 })
 
@@ -88,6 +92,8 @@ export const GroupSchema = Type.Object({
   revenue_iqd: Type.Integer(),
   doctor_cut_iqd: Type.Integer(),
   operator_cut_iqd: Type.Integer(),
+  report_iqd: Type.Integer(),
+  mandoub_cut_iqd: Type.Integer(),
   net_iqd: Type.Integer(),
 })
 
@@ -122,6 +128,8 @@ export const DailyCloseResponseSchema = Type.Object({
   total_revenue_iqd: Type.Integer(),
   total_doctor_cuts_iqd: Type.Integer(),
   total_operator_cuts_iqd: Type.Integer(),
+  total_report_iqd: Type.Integer(),
+  total_mandoub_cuts_iqd: Type.Integer(),
   total_inventory_consumption_value_iqd: Type.Integer(),
   net_iqd: Type.Integer(),
   locked_count: Type.Integer(),
@@ -141,6 +149,12 @@ export const DailyCloseResponseSchema = Type.Object({
     dye_visits: Type.Integer(),
     operator_cut_iqd: Type.Integer(),
     hours_on_shift_milli: Type.Integer(),
+  })),
+  per_mandoub: Type.Array(Type.Object({
+    mandoub_id: Type.String(),
+    name: Type.String(),
+    visits: Type.Integer(),
+    mandoub_cut_iqd: Type.Integer(),
   })),
   per_check_type: Type.Array(Type.Object({
     check_type_id: Type.String(),

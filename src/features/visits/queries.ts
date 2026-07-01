@@ -111,8 +111,11 @@ export function useVisitCreateDraft () {
           check_type_id: input.check_type_id,
           check_subtype_id: input.check_subtype_id ?? null,
           doctor_id: input.doctor_id ?? null,
+          dalal: input.dalal ?? false,
+          mandoub_id: input.mandoub_id ?? null,
           dye: input.dye ?? false,
           report: input.report ?? false,
+          discount: input.discount ?? false,
         },
       }),
     // Invalidate on settle (success AND error): a failed mutation is exactly
@@ -134,8 +137,11 @@ export function useVisitUpdateDraft () {
           patient_id: input.patient_id,
           check_subtype_id: input.check_subtype_id,
           doctor_id: input.doctor_id,
+          dalal: input.dalal,
+          mandoub_id: input.mandoub_id,
           dye: input.dye,
           report: input.report,
+          discount: input.discount,
         },
       }),
     onSettled: () => {
@@ -164,6 +170,9 @@ export function useVisitLock () {
           visit_id: input.visit_id,
           operator_id: input.operator_id,
           amount_paid_override_iqd: input.amount_paid_override_iqd ?? null,
+          // Only carry the representative cut when one was actually chosen; the
+          // Rust side only applies it when the draft has a mandoub bound.
+          ...(input.mandoub_cut !== undefined ? { mandoub_cut: input.mandoub_cut } : {}),
         },
       }),
     // Locking consumes inventory server-side (consume-on-lock), so the
@@ -197,13 +206,14 @@ export function useVisitVoid () {
 //
 // The reception new-visit panel shows a live, itemized running total. The
 // patient-facing total the lock workflow will persist is exactly
-//   total = effective_price + dye_cost + report_cost
+//   total = effective_price + dye_cost
 // where `effective_price` is the subtype price (or check-type base) with the
 // selected doctor's price override applied. We read the effective price from
 // the authoritative Rust resolver (`pricing_effective`) so the displayed total
 // is byte-identical to what Finish charges -- no client-side re-derivation of
-// the override, no drift. Dye/report costs come from settings. Both are
-// already cached by other screens; this hook just composes them.
+// the override, no drift. The dye cost comes from settings. The report is NOT
+// part of the patient total: it is an internal reporting-doctor share paid out
+// of net, surfaced separately and not billed to the patient.
 
 export const pricingKeys = {
   effective: (
@@ -225,8 +235,8 @@ export interface PricingPreviewArgs {
 /**
  * Resolve the authoritative effective patient price for the current draft
  * selection (subtype/base price + doctor override). Returns the IQD price as a
- * number. The dye/report surcharges are layered on in the panel from settings,
- * mirroring the Rust `money_math` total = price + dye + report.
+ * number. The dye cost is layered on in the panel from settings, mirroring the
+ * Rust `money_math` patient total = price + dye (the report is internal-only).
  */
 export function usePricingEffective (input: PricingPreviewArgs) {
   const { checkTypeId, subtypeId, doctorId, ready } = input

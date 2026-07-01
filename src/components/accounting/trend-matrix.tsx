@@ -31,6 +31,16 @@ export function TrendMatrix ({ title, matrix, arabicNumerals }: TrendMatrixProps
       fallback: "Operator cuts",
     },
     {
+      key: "report_cuts",
+      labelKey: "accounting.kpi.report_cuts",
+      fallback: "Report cuts",
+    },
+    {
+      key: "mandoub_cuts",
+      labelKey: "accounting.kpi.mandoub_cuts",
+      fallback: "Representative cuts",
+    },
+    {
       key: "inventory_value",
       labelKey: "accounting.kpi.inventory_value",
       fallback: "Inventory value",

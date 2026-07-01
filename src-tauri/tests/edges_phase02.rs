@@ -107,7 +107,9 @@ async fn time_migration_seed_uses_rfc3339_format() {
     let pool = fresh_pool().await;
     let repo = SqliteSettingRepo::new(pool.clone());
     let rows = repo.list("unscoped").await.unwrap();
-    assert_eq!(rows.len(), 10, "seeded rows readable post-DEF-004 fix");
+    // 10 v1 keys, minus the report_cost_iqd tombstoned by migration 018, plus
+    // report_pct and reporting_doctor_name = 11 live rows.
+    assert_eq!(rows.len(), 11, "seeded rows readable post-DEF-004 fix");
 }
 
 // =========================================================================
@@ -515,8 +517,11 @@ async fn integrity_migration_002_is_idempotent_on_fresh_db() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    // Seed only inserts once thanks to OR IGNORE + the PK on settings.id.
-    assert_eq!(n, 10);
+    // Seed only inserts once thanks to OR IGNORE + the PK on settings.id. The
+    // count is 12 physical rows: 10 v1 keys plus the report_pct and
+    // reporting_doctor_name added by migration 018 (the retired report_cost_iqd
+    // row is tombstoned, not removed).
+    assert_eq!(n, 12);
 }
 
 #[tokio::test]

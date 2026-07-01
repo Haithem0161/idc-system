@@ -303,9 +303,10 @@ async fn p02_g36_settings_seed_default_values_match_phase02_section_1_table() {
         assert_eq!(row.value, expected, "seed default for `{key}`");
     }
 
-    // The phase-02 §1 settings seed defaults.
+    // The phase-02 §1 settings seed defaults (report_cost_iqd was retired by
+    // migration 018 in favour of a report_pct percentage seeded at 20).
     assert_value(&repo, "dye_cost_iqd", SettingValue::Int(10_000)).await;
-    assert_value(&repo, "report_cost_iqd", SettingValue::Int(10_000)).await;
+    assert_value(&repo, "report_pct", SettingValue::Int(20)).await;
     assert_value(&repo, "internal_doctor_pct", SettingValue::Int(30)).await;
     assert_value(&repo, "idle_lock_minutes", SettingValue::Int(10)).await;
     assert_value(&repo, "arabic_numerals", SettingValue::Bool(false)).await;

@@ -7,6 +7,7 @@ pub mod doctor;
 pub mod doctor_pricing;
 pub mod inventory_consumption;
 pub mod inventory_item;
+pub mod mandoub;
 pub mod operator;
 pub mod operator_specialty;
 
@@ -16,5 +17,6 @@ pub use doctor::Doctor;
 pub use doctor_pricing::DoctorCheckPricing;
 pub use inventory_consumption::InventoryConsumptionMap;
 pub use inventory_item::InventoryItem;
+pub use mandoub::Mandoub;
 pub use operator::Operator;
 pub use operator_specialty::OperatorSpecialty;

@@ -27,10 +27,26 @@ describe("VisitCreateDraftSchema", () => {
     check_type_id: "01913d3a-7c70-7c00-a000-000000000002",
   }
 
-  it("parses minimal payload with default dye and report flags", () => {
+  it("parses minimal payload with default dye, report and dalal flags", () => {
     const parsed = VisitCreateDraftSchema.parse(base)
     expect(parsed.dye).toBe(false)
     expect(parsed.report).toBe(false)
+    expect(parsed.dalal).toBe(false)
+  })
+
+  it("accepts dalal mode without a doctor", () => {
+    const parsed = VisitCreateDraftSchema.parse({ ...base, dalal: true })
+    expect(parsed.dalal).toBe(true)
+  })
+
+  it("rejects dalal combined with a referring doctor", () => {
+    expect(() =>
+      VisitCreateDraftSchema.parse({
+        ...base,
+        dalal: true,
+        doctor_id: "01913d3a-7c70-7c00-a000-000000000099",
+      })
+    ).toThrow(/doctor_and_dalal_exclusive/)
   })
 
   it("allows nullable check_subtype_id and doctor_id", () => {
@@ -60,6 +76,35 @@ describe("VisitCreateDraftSchema", () => {
       VisitCreateDraftSchema.parse({ ...base, dye: "yes" })
     ).toThrow()
   })
+
+  it("accepts a mandoub alongside a referring doctor", () => {
+    const parsed = VisitCreateDraftSchema.parse({
+      ...base,
+      doctor_id: "01913d3a-7c70-7c00-a000-000000000099",
+      mandoub_id: "01913d3a-7c70-7c00-a000-0000000000aa",
+    })
+    expect(parsed.mandoub_id).toBe("01913d3a-7c70-7c00-a000-0000000000aa")
+  })
+
+  it("rejects a mandoub without a referring doctor (house)", () => {
+    expect(() =>
+      VisitCreateDraftSchema.parse({
+        ...base,
+        doctor_id: null,
+        mandoub_id: "01913d3a-7c70-7c00-a000-0000000000aa",
+      })
+    ).toThrow(/mandoub_requires_doctor/)
+  })
+
+  it("rejects a mandoub combined with dalal mode", () => {
+    expect(() =>
+      VisitCreateDraftSchema.parse({
+        ...base,
+        dalal: true,
+        mandoub_id: "01913d3a-7c70-7c00-a000-0000000000aa",
+      })
+    ).toThrow(/mandoub_requires_doctor/)
+  })
 })
 
 describe("VisitUpdateDraftSchema", () => {
@@ -84,6 +129,31 @@ describe("VisitUpdateDraftSchema", () => {
   it("rejects missing visit_id", () => {
     expect(() => VisitUpdateDraftSchema.parse({ dye: true })).toThrow()
   })
+
+  it("rejects dalal combined with a referring doctor", () => {
+    expect(() =>
+      VisitUpdateDraftSchema.parse({
+        visit_id,
+        dalal: true,
+        doctor_id: "01913d3a-7c70-7c00-a000-000000000099",
+      })
+    ).toThrow(/doctor_and_dalal_exclusive/)
+  })
+
+  it("accepts clearing a mandoub with an explicit null", () => {
+    const parsed = VisitUpdateDraftSchema.parse({ visit_id, mandoub_id: null })
+    expect(parsed.mandoub_id).toBeNull()
+  })
+
+  it("rejects a mandoub patched without a referring doctor", () => {
+    expect(() =>
+      VisitUpdateDraftSchema.parse({
+        visit_id,
+        doctor_id: null,
+        mandoub_id: "01913d3a-7c70-7c00-a000-0000000000aa",
+      })
+    ).toThrow(/mandoub_requires_doctor/)
+  })
 })
 
 describe("VisitLockSchema", () => {
@@ -104,6 +174,17 @@ describe("VisitLockSchema", () => {
   it("rejects non-UUID operator_id", () => {
     expect(() =>
       VisitLockSchema.parse({ visit_id, operator_id: "x" })
+    ).toThrow()
+  })
+
+  it.each([500, 1000] as const)("accepts a mandoub_cut of %i", (cut) => {
+    const parsed = VisitLockSchema.parse({ visit_id, operator_id, mandoub_cut: cut })
+    expect(parsed.mandoub_cut).toBe(cut)
+  })
+
+  it("rejects a mandoub_cut that is not 500 or 1000", () => {
+    expect(() =>
+      VisitLockSchema.parse({ visit_id, operator_id, mandoub_cut: 750 })
     ).toThrow()
   })
 })

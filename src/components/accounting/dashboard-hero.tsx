@@ -51,6 +51,20 @@ export function DashboardHero ({ kpis }: { kpis: DashboardKpisRecord }) {
       href: "/accounting/explore/operators",
     },
     {
+      key: "report_cuts",
+      labelKey: "accounting.kpi.report_cuts",
+      fallback: "Report cuts",
+      amount: kpis.report_cuts_iqd,
+      href: "/accounting/explore/visits",
+    },
+    {
+      key: "mandoub_cuts",
+      labelKey: "accounting.kpi.mandoub_cuts",
+      fallback: "Representative cuts",
+      amount: kpis.mandoub_cuts_iqd,
+      href: "/accounting/explore/mandoubs",
+    },
+    {
       key: "inventory_value",
       labelKey: "accounting.kpi.inventory_value",
       fallback: "Inventory value",
@@ -68,7 +82,7 @@ export function DashboardHero ({ kpis }: { kpis: DashboardKpisRecord }) {
   ]
 
   return (
-    <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2 lg:grid-cols-5">
+    <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
       {tiles.map((tile) => {
         const delta = trend[tile.key].delta_permille
         return (

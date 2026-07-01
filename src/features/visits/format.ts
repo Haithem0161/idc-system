@@ -52,6 +52,9 @@ export function formatVisitTotal (
   return opts.arabicNumerals ? toArabicDigits(ascii) : ascii
 }
 
+/** Flat doctor-substitute cut applied when the "dalal" option is chosen. */
+export const DALAL_DOCTOR_CUT_IQD = 10
+
 export interface MoneyMathInputs {
   base_price_iqd: number
   subtype_price_iqd?: number | null
@@ -65,34 +68,49 @@ export interface MoneyMathInputs {
   dye_supported: boolean
   dye_cost_iqd: number
   report: boolean
-  report_supported: boolean
-  report_cost_iqd: number
+  /**
+   * Percentage of the post-doctor-cut price paid to the internal reporting
+   * doctor. Applied only when `report` is true. NOT charged to the patient.
+   */
+  report_pct: number
   internal_doctor_pct: number
+  /**
+   * Doctor-substitute mode: a flat 10 IQD doctor cut, mutually exclusive with
+   * a referring doctor (`doctor_pricing`). When true, the house internal_pct
+   * path is skipped.
+   */
+  dalal: boolean
 }
 
 export interface MoneyMathSnapshot {
   price_iqd: number
   dye_cost_iqd: number
-  report_cost_iqd: number
   doctor_cut_iqd: number
   operator_cut_iqd: number
   internal_pct: number | null
-  total_amount_iqd: number
+  /**
+   * Internal reporting-doctor share, carved out of the clinic net. Zero when
+   * `report` is off. NEVER part of `patient_total_iqd`.
+   */
+  report_amount_iqd: number
+  /** What the patient actually pays: price + dye. Excludes the report. */
+  patient_total_iqd: number
 }
 
 /**
  * Pure TS port of the Rust `money_math::compute`. Throws when invariants
  * the Rust side enforces are violated (e.g. dye flagged but check type
  * does not support dye). Always returns integer IQD amounts.
+ *
+ * Patient total = price + dye. The report is an internal figure: a percentage
+ * of the post-doctor-cut price paid to the reporting doctor out of net, never
+ * added to what the patient pays.
  */
 export function computeRunningTotal (
   inputs: MoneyMathInputs
 ): MoneyMathSnapshot {
   if (inputs.dye && !inputs.dye_supported) {
     throw new Error("computeRunningTotal: check type does not support dye")
-  }
-  if (inputs.report && !inputs.report_supported) {
-    throw new Error("computeRunningTotal: check type does not support report")
   }
   const base =
     inputs.subtype_price_iqd != null
@@ -106,10 +124,13 @@ export function computeRunningTotal (
       ? inputs.doctor_pricing.price_override_iqd
       : base
   const dyeCost = inputs.dye ? inputs.dye_cost_iqd : 0
-  const reportCost = inputs.report ? inputs.report_cost_iqd : 0
   let doctorCut: number
   let internalPct: number | null
-  if (inputs.doctor_pricing == null) {
+  if (inputs.dalal) {
+    // Doctor-substitute mode: flat cut, no house percentage.
+    doctorCut = DALAL_DOCTOR_CUT_IQD
+    internalPct = null
+  } else if (inputs.doctor_pricing == null) {
     if (inputs.internal_doctor_pct < 0 || inputs.internal_doctor_pct > 100) {
       throw new Error(
         "computeRunningTotal: internal_doctor_pct must be in 0..=100"
@@ -132,14 +153,20 @@ export function computeRunningTotal (
     doctorCut = Math.max(0, inputs.doctor_pricing.cut_value)
     internalPct = null
   }
-  const total = price + dyeCost + reportCost
+  if (inputs.report_pct < 0 || inputs.report_pct > 100) {
+    throw new Error("computeRunningTotal: report_pct must be in 0..=100")
+  }
+  const reportAmount = inputs.report
+    ? Math.floor(((price - doctorCut) * inputs.report_pct) / 100)
+    : 0
+  const patientTotal = price + dyeCost
   return {
     price_iqd: price,
     dye_cost_iqd: dyeCost,
-    report_cost_iqd: reportCost,
     doctor_cut_iqd: doctorCut,
     operator_cut_iqd: inputs.operator_base_cut_iqd,
     internal_pct: internalPct,
-    total_amount_iqd: total,
+    report_amount_iqd: reportAmount,
+    patient_total_iqd: patientTotal,
   }
 }

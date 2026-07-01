@@ -198,6 +198,22 @@ export type CommandMap = {
     result: OperatorSpecialtyRecord
   }
   operator_specialties_soft_delete: { args: { args: { id: string } }; result: null }
+  // Catalog: mandoubs (representatives)
+  mandoubs_list: {
+    args: { args: { include_inactive?: boolean; query?: string } }
+    result: MandoubRecord[]
+  }
+  mandoubs_get: {
+    args: { args: { id: string } }
+    result: { mandoub: MandoubRecord }
+  }
+  mandoubs_create: { args: { args: MandoubCreateArgs }; result: MandoubRecord }
+  mandoubs_update: { args: { args: MandoubUpdateArgs }; result: MandoubRecord }
+  mandoubs_set_active: {
+    args: { args: { id: string; is_active: boolean } }
+    result: MandoubRecord
+  }
+  mandoubs_soft_delete: { args: { args: { id: string } }; result: null }
   // Catalog: inventory items
   inventory_catalog_list: {
     args: { args: { include_inactive?: boolean; query?: string } }
@@ -373,6 +389,14 @@ export type CommandMap = {
         doctor_id?: string | null
         dye?: boolean
         report?: boolean
+        // Doctor-substitute mode. Mutually exclusive with doctor_id.
+        dalal?: boolean
+        // Discount: zero the referring doctor's cut for this visit. Only valid
+        // alongside a real referring doctor.
+        discount?: boolean
+        // Optional referring representative (mandoub). Only valid alongside a
+        // real referring doctor; the chosen cut is captured at lock time.
+        mandoub_id?: string | null
       }
     }
     result: VisitRecord
@@ -386,6 +410,12 @@ export type CommandMap = {
         doctor_id?: string | null
         dye?: boolean
         report?: boolean
+        // Doctor-substitute mode. Mutually exclusive with doctor_id.
+        dalal?: boolean
+        // Discount: zero the referring doctor's cut. See create-draft note.
+        discount?: boolean
+        // Optional referring representative (mandoub). See create-draft note.
+        mandoub_id?: string | null
       }
     }
     result: VisitRecord
@@ -407,6 +437,9 @@ export type CommandMap = {
         // total (patient could not pay in full). Omit/null = paid in full; 0 is
         // a valid collected amount (waived).
         amount_paid_override_iqd?: number | null
+        // The chosen representative (mandoub) cut, in IQD: 500 or 1000. A
+        // net-side carve-out captured only when the draft carries a mandoub.
+        mandoub_cut?: number
       }
     }
     result: LockResultRecord
@@ -490,6 +523,14 @@ export type CommandMap = {
     args: { args: ReportsOperatorDrilldownArgs }
     result: OperatorDrilldownRecord
   }
+  reports_mandoub_earnings: {
+    args: { args: ReportsRangeArgs }
+    result: MandoubEarningsRecord[]
+  }
+  reports_mandoub_drilldown: {
+    args: { args: ReportsMandoubDrilldownArgs }
+    result: MandoubDrilldownRecord
+  }
   reports_daily_close: {
     args: { args: { date: string } }
     result: DailyCloseRecord
@@ -519,6 +560,10 @@ export type CommandMap = {
     result: { path: string }
   }
   reports_export_operators_csv: {
+    args: { args: { from_utc: string; to_utc: string; include_voided?: boolean; path: string } }
+    result: { path: string }
+  }
+  reports_export_mandoub_earnings_csv: {
     args: { args: { from_utc: string; to_utc: string; include_voided?: boolean; path: string } }
     result: { path: string }
   }
@@ -553,7 +598,6 @@ export interface CheckTypeRecord {
   has_subtypes: boolean
   base_price_iqd: number | null
   dye_supported: boolean
-  report_supported: boolean
   sort_order: number
   is_active: boolean
   created_at: string
@@ -569,7 +613,6 @@ export interface CheckTypeCreateArgs {
   has_subtypes: boolean
   base_price_iqd?: number | null
   dye_supported?: boolean
-  report_supported?: boolean
   sort_order?: number
 }
 
@@ -579,7 +622,6 @@ export interface CheckTypeUpdateArgs {
   name_en?: string | null
   base_price_iqd?: number | null
   dye_supported?: boolean
-  report_supported?: boolean
   sort_order?: number
   is_active?: boolean
 }
@@ -713,6 +755,36 @@ export interface OperatorSpecialtyRecord {
   created_at: string
   updated_at: string
   version: number
+}
+
+/**
+ * A referring representative (مندوب / mandoub). Unlike a doctor or operator,
+ * a mandoub carries NO cut field of its own: the 500 / 1000 IQD cut is chosen
+ * per-visit at lock time and snapshotted onto the visit.
+ */
+export interface MandoubRecord {
+  id: string
+  name: string
+  phone: string | null
+  notes: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  version: number
+  entity_id: string
+}
+
+export interface MandoubCreateArgs {
+  name: string
+  phone?: string | null
+  notes?: string | null
+}
+
+export interface MandoubUpdateArgs {
+  id: string
+  name?: string
+  phone?: string | null
+  notes?: string | null
 }
 
 export interface InventoryItemRecord {
@@ -918,16 +990,27 @@ export interface ChecksGridCardRecord {
   name_en: string | null
   has_subtypes: boolean
   dye_supported: boolean
-  report_supported: boolean
   todays_visits: number
 }
 
 export interface VisitSnapshotRecord {
   price_iqd: number
   dye_cost_iqd: number
-  report_cost_iqd: number
+  /** Internal reporting-doctor share (carved from net, NOT charged to the patient). */
+  report_amount_iqd: number
+  /** Percentage applied to (price - doctor cut). Null when no report was carried. */
+  report_pct: number | null
+  /** Name of the internal reporting doctor at lock time, if a report was carried. */
+  reporting_doctor_name: string | null
   doctor_cut_iqd: number
   operator_cut_iqd: number
+  /**
+   * Representative (mandoub) cut carved from net at lock time. Zero when the
+   * visit carries no مندوب. Serialized from the Rust `VisitSnapshots.mandoub_cut_iqd`.
+   */
+  mandoub_cut_iqd: number
+  /** Name of the referring representative at lock time, null when none. */
+  mandoub_name: string | null
   internal_pct: number | null
   total_amount_iqd: number
   /** Cash actually collected when overridden (null = paid the billed total). */
@@ -950,8 +1033,15 @@ export interface VisitRecord {
   check_subtype_id: string | null
   doctor_id: string | null
   operator_id: string | null
+  /** Referring representative (mandoub) for this visit, if any. */
+  mandoub_id: string | null
   dye: boolean
   report: boolean
+  /** Doctor-substitute "dalal" mode: flat 10 IQD cut, mutually exclusive with doctor_id. */
+  dalal: boolean
+  /** Discount: the referring doctor's cut was zeroed for this visit. Only set
+   *  with a real referring doctor. */
+  discount: boolean
   locked_at: string | null
   voided_at: string | null
   voided_by_user_id: string | null
@@ -1116,6 +1206,13 @@ export interface ReportsOperatorDrilldownArgs {
   include_voided?: boolean
 }
 
+export interface ReportsMandoubDrilldownArgs {
+  mandoub_id: string
+  from_utc: string
+  to_utc: string
+  include_voided?: boolean
+}
+
 export interface TrendCellRecord {
   current_iqd: number
   prior_iqd: number
@@ -1127,6 +1224,8 @@ export interface TrendMatrixRecord {
   revenue: TrendCellRecord
   doctor_cuts: TrendCellRecord
   operator_cuts: TrendCellRecord
+  report_cuts: TrendCellRecord
+  mandoub_cuts: TrendCellRecord
   inventory_value: TrendCellRecord
   net: TrendCellRecord
 }
@@ -1137,6 +1236,10 @@ export interface DashboardKpisRecord {
   revenue_iqd: number
   doctor_cuts_iqd: number
   operator_cuts_iqd: number
+  /** Reporting-doctor share carved from net across the range. */
+  report_cuts_iqd: number
+  /** Representative (mandoub) cuts carved from net across the range. */
+  mandoub_cuts_iqd: number
   inventory_consumption_value_iqd: number
   net_iqd: number
   trend_today_vs_yesterday: TrendMatrixRecord
@@ -1166,11 +1269,18 @@ export interface VisitReportRowRecord {
   price_iqd: number
   doctor_cut_iqd: number
   operator_cut_iqd: number
-  /** Billed total for the visit (price + dye + report). */
+  /** Representative (mandoub) cut carved from net for this visit, if any. */
+  mandoub_cut_iqd: number
+  /** Internal reporting-doctor share (carved from net, NOT charged to the patient). */
+  report_amount_iqd: number
+  /** Billed total for the visit (price + dye). The report is not charged here. */
   total_iqd: number
   /** Cash collected when overridden (null = paid the billed total; 0 = waived). */
   amount_paid_override_iqd: number | null
-  /** Net against collected cash: collected - doctor cut - operator cut. */
+  /**
+   * Net against collected cash: collected - doctor cut - operator cut - report
+   * amount. (Daily-close totals additionally subtract inventory consumption.)
+   */
   net_iqd: number
 }
 
@@ -1179,6 +1289,10 @@ export interface VisitsReportTotalsRecord {
   revenue_iqd: number
   doctor_cut_iqd: number
   operator_cut_iqd: number
+  /** Internal reporting-doctor share carved from net across these visits. */
+  report_iqd: number
+  /** Representative (mandoub) cut carved from net across these visits. */
+  mandoub_cut_iqd: number
   net_iqd: number
 }
 
@@ -1189,6 +1303,10 @@ export interface VisitsReportGroupRecord {
   revenue_iqd: number
   doctor_cut_iqd: number
   operator_cut_iqd: number
+  /** Internal reporting-doctor share carved from net for this group. */
+  report_iqd: number
+  /** Representative (mandoub) cut carved from net for this group. */
+  mandoub_cut_iqd: number
   net_iqd: number
 }
 
@@ -1256,6 +1374,26 @@ export interface OperatorDrilldownRecord {
   total_hours_milli: number
 }
 
+/** One representative's aggregated earnings over the window (mirrors operator). */
+export interface MandoubEarningsRecord {
+  mandoub_id: string
+  name: string
+  visits: number
+  mandoub_cut_total_iqd: number
+  avg_cut_per_visit_iqd: number
+}
+
+export interface MandoubDrilldownRecord {
+  mandoub_id: string
+  name: string
+  /** Visits that carried this representative. Serialized from the Rust
+   * `MandoubDrilldown.attributed_visits` (operator-style naming). */
+  attributed_visits: VisitReportRowRecord[]
+  /** Aggregate totals across the attributed visits. The representative cut
+   * total lives at `totals.mandoub_cut_iqd`. */
+  totals: VisitsReportTotalsRecord
+}
+
 export interface DoctorDailyRowRecord {
   doctor_id: string | null
   name: string
@@ -1283,11 +1421,18 @@ export interface CheckTypeDailyRecord {
   operator_cut_iqd: number
 }
 
+export interface MandoubDailyRowRecord {
+  mandoub_id: string
+  name: string
+  visits: number
+  mandoub_cut_iqd: number
+}
+
 export interface DailyCloseRecord {
   tenant_id: string
   target_date: string
   tz_offset: string
-  /** Billed revenue (price + dye + report) over locked visits. */
+  /** Billed revenue (price + dye) over locked visits. */
   total_revenue_iqd: number
   /** Cash actually collected (override-where-set, else billed). */
   total_collected_iqd: number
@@ -1295,6 +1440,10 @@ export interface DailyCloseRecord {
   total_discount_iqd: number
   total_doctor_cuts_iqd: number
   total_operator_cuts_iqd: number
+  /** Total representative (mandoub) cuts carved from net over locked visits. */
+  total_mandoub_cuts_iqd: number
+  /** Total reporting-doctor share carved from net over locked visits. */
+  total_report_iqd: number
   total_inventory_consumption_value_iqd: number
   net_iqd: number
   locked_count: number
@@ -1302,6 +1451,7 @@ export interface DailyCloseRecord {
   voided_value_iqd: number
   per_doctor: DoctorDailyRowRecord[]
   per_operator: OperatorDailyRowRecord[]
+  per_mandoub: MandoubDailyRowRecord[]
   per_check_type: CheckTypeDailyRecord[]
   pending_sync: number
   provisional: boolean
@@ -1320,6 +1470,7 @@ export interface FrozenCloseRecord {
   total_discount_iqd: number
   total_doctor_cuts_iqd: number
   total_operator_cuts_iqd: number
+  total_report_iqd: number
   total_inventory_consumption_value_iqd: number
   net_iqd: number
   locked_count: number
@@ -1397,6 +1548,7 @@ export type AuditEntityLiteral =
   | "operators"
   | "operator_specialties"
   | "operator_shifts"
+  | "mandoubs"
   | "patients"
   | "visits"
   | "inventory_items"

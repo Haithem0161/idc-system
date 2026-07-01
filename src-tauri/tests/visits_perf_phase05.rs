@@ -30,7 +30,7 @@ use app_lib::domains::catalog::domain::repositories::{
 use app_lib::domains::catalog::domain::value_objects::CutKind;
 use app_lib::domains::catalog::infrastructure::{
     SqliteCheckSubtypeRepo, SqliteCheckTypeRepo, SqliteDoctorPricingRepo, SqliteDoctorRepo,
-    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
+    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteMandoubRepo, SqliteOperatorRepo,
     SqliteOperatorSpecialtyRepo,
 };
 use app_lib::domains::patients::domain::entities::{Patient, PatientNewInput};
@@ -134,7 +134,6 @@ async fn rig() -> Rig {
         has_subtypes: false,
         base_price_iqd: Some(50_000),
         dye_supported: true,
-        report_supported: false,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
@@ -251,6 +250,7 @@ async fn rig() -> Rig {
         doctor_pricing: dp_repo,
         operators: op_repo,
         operator_specialties: os_repo,
+        mandoubs: Arc::new(SqliteMandoubRepo::new(pool.clone())),
         consumption: cons_repo,
         inventory_items: item_repo,
         shifts: shift_repo,
@@ -277,7 +277,8 @@ async fn rig() -> Rig {
 fn money() -> MoneySettings {
     MoneySettings {
         dye_cost_iqd: 2_000,
-        report_cost_iqd: 3_000,
+        report_pct: 20,
+        reporting_doctor_name: String::new(),
         internal_doctor_pct: 40,
     }
 }
@@ -310,8 +311,11 @@ async fn perf_create_draft_under_50ms() {
                     check_type_id: r.check_type.id,
                     check_subtype_id: None,
                     doctor_id: None,
+                    mandoub_id: None,
                     dye: false,
                     report: false,
+                    dalal: false,
+                    discount: false,
                 },
             )
             .await
@@ -345,8 +349,11 @@ async fn perf_lock_typical_case_under_200ms() {
                     check_type_id: r.check_type.id,
                     check_subtype_id: None,
                     doctor_id: Some(r.doctor.id),
+                    mandoub_id: None,
                     dye: false,
                     report: false,
+                    dalal: false,
+                    discount: false,
                 },
             )
             .await
@@ -358,6 +365,7 @@ async fn perf_lock_typical_case_under_200ms() {
                 UserRole::Receptionist,
                 draft.id,
                 r.operator.id,
+                None,
                 None,
                 money(),
                 ReceiptRenderOptions::default(),
@@ -384,8 +392,11 @@ async fn perf_pricing_resolve_under_30ms() {
                 check_type_id: r.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(r.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -458,8 +469,11 @@ async fn perf_list_today_by_check_50_rows_under_30ms() {
                     check_type_id: r.check_type.id,
                     check_subtype_id: None,
                     doctor_id: None,
+                    mandoub_id: None,
                     dye: false,
                     report: false,
+                    dalal: false,
+                    discount: false,
                 },
             )
             .await
@@ -471,6 +485,7 @@ async fn perf_list_today_by_check_50_rows_under_30ms() {
                 UserRole::Receptionist,
                 draft.id,
                 r.operator.id,
+                None,
                 None,
                 money(),
                 ReceiptRenderOptions::default(),

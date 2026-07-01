@@ -9,9 +9,9 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::domains::reports::domain::entities::{
-    CheckTypeDailyRow, DoctorDailyRow, DoctorEarningsRow, DoctorPerCheckRow, OperatorDailyRow,
-    OperatorEarningsRow, OperatorShiftRow, VisitRow, VisitsReportFilters, VisitsReportGroup,
-    VisitsReportGroupBy,
+    CheckTypeDailyRow, DoctorDailyRow, DoctorEarningsRow, DoctorPerCheckRow, MandoubDailyRow,
+    MandoubEarningsRow, OperatorDailyRow, OperatorEarningsRow, OperatorShiftRow, VisitRow,
+    VisitsReportFilters, VisitsReportGroup, VisitsReportGroupBy,
 };
 use crate::domains::reports::domain::repositories::{
     ReportsReadModel, VisitsAggregate, VoidedAggregate,
@@ -67,6 +67,8 @@ const VISIT_ROW_SELECT: &str = "v.id AS visit_id, \
     COALESCE(v.price_snapshot_iqd, 0) AS price, \
     COALESCE(v.doctor_cut_snapshot_iqd, 0) AS doc_cut, \
     COALESCE(v.operator_cut_snapshot_iqd, 0) AS op_cut, \
+    COALESCE(v.report_amount_snapshot_iqd, 0) AS report_amt, \
+    COALESCE(v.mandoub_cut_snapshot_iqd, 0) AS mandoub_amt, \
     COALESCE(v.total_amount_iqd_snapshot, 0) AS total_iqd, \
     v.amount_paid_override_iqd AS amount_paid_override_iqd";
 
@@ -101,6 +103,8 @@ struct VisitRowRaw {
     price: i64,
     doc_cut: i64,
     op_cut: i64,
+    report_amt: i64,
+    mandoub_amt: i64,
     total_iqd: i64,
     amount_paid_override_iqd: Option<i64>,
 }
@@ -110,8 +114,11 @@ impl VisitRowRaw {
         let price = self.price;
         let dc = self.doc_cut;
         let oc = self.op_cut;
+        let report_amt = self.report_amt;
+        let mandoub_amt = self.mandoub_amt;
         // Net is against cash actually collected: the override when present,
-        // otherwise the billed total.
+        // otherwise the billed total. The report carve-out owed to the
+        // reporting doctor is then subtracted, then the مندوب carve-out.
         let collected = self.amount_paid_override_iqd.unwrap_or(self.total_iqd);
         Ok(VisitRow {
             visit_id: parse_uuid(&self.visit_id)?,
@@ -129,9 +136,15 @@ impl VisitRowRaw {
             price_iqd: price,
             doctor_cut_iqd: dc,
             operator_cut_iqd: oc,
+            report_amount_iqd: report_amt,
+            mandoub_cut_iqd: mandoub_amt,
             total_iqd: self.total_iqd,
             amount_paid_override_iqd: self.amount_paid_override_iqd,
-            net_iqd: collected.saturating_sub(dc).saturating_sub(oc),
+            net_iqd: collected
+                .saturating_sub(dc)
+                .saturating_sub(oc)
+                .saturating_sub(report_amt)
+                .saturating_sub(mandoub_amt),
         })
     }
 }
@@ -159,14 +172,16 @@ impl ReportsReadModel for SqliteReportsReadModel {
                 COALESCE(SUM(COALESCE(amount_paid_override_iqd, total_amount_iqd_snapshot)), 0) \
                     AS collected, \
                 COALESCE(SUM(doctor_cut_snapshot_iqd), 0) AS dc, \
-                COALESCE(SUM(operator_cut_snapshot_iqd), 0) AS oc \
+                COALESCE(SUM(operator_cut_snapshot_iqd), 0) AS oc, \
+                COALESCE(SUM(report_amount_snapshot_iqd), 0) AS report, \
+                COALESCE(SUM(mandoub_cut_snapshot_iqd), 0) AS mc \
              FROM visits v \
              WHERE v.entity_id = ? AND v.deleted_at IS NULL \
                AND {status} \
                AND v.locked_at >= ? AND v.locked_at < ?",
             status = status_clause(include_voided)
         );
-        let row: (i64, i64, i64, i64, i64) = sqlx::query_as(&sql)
+        let row: (i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(&sql)
             .bind(entity_id)
             .bind(dt_str(from))
             .bind(dt_str(to))
@@ -178,6 +193,8 @@ impl ReportsReadModel for SqliteReportsReadModel {
             collected_iqd: row.2,
             doctor_cut_iqd: row.3,
             operator_cut_iqd: row.4,
+            report_iqd: row.5,
+            mandoub_cut_iqd: row.6,
         })
     }
 
@@ -234,14 +251,17 @@ impl ReportsReadModel for SqliteReportsReadModel {
                     COALESCE(SUM(COALESCE(amount_paid_override_iqd, total_amount_iqd_snapshot)), 0) \
                         AS collected, \
                     COALESCE(SUM(doctor_cut_snapshot_iqd), 0) AS dc, \
-                    COALESCE(SUM(operator_cut_snapshot_iqd), 0) AS oc \
+                    COALESCE(SUM(operator_cut_snapshot_iqd), 0) AS oc, \
+                    COALESCE(SUM(report_amount_snapshot_iqd), 0) AS report, \
+                    COALESCE(SUM(mandoub_cut_snapshot_iqd), 0) AS mc \
              FROM visits v \
              {where_block} \
              GROUP BY {group_expr} \
              ORDER BY revenue DESC, group_label ASC"
         );
         let (_, binds) = build_where_binds(filters);
-        let mut q = sqlx::query_as::<_, (String, Option<String>, i64, i64, i64, i64, i64)>(&sql);
+        let mut q =
+            sqlx::query_as::<_, (String, Option<String>, i64, i64, i64, i64, i64, i64, i64)>(&sql);
         for b in &binds {
             q = q.bind(b);
         }
@@ -249,14 +269,20 @@ impl ReportsReadModel for SqliteReportsReadModel {
         Ok(rows
             .into_iter()
             .map(
-                |(k, label, visits, revenue, collected, dc, oc)| VisitsReportGroup {
+                |(k, label, visits, revenue, collected, dc, oc, report, mc)| VisitsReportGroup {
                     key: k.clone(),
                     label: label.unwrap_or(k),
                     visits,
                     revenue_iqd: revenue,
                     doctor_cut_iqd: dc,
                     operator_cut_iqd: oc,
-                    net_iqd: collected.saturating_sub(dc).saturating_sub(oc),
+                    report_iqd: report,
+                    mandoub_cut_iqd: mc,
+                    net_iqd: collected
+                        .saturating_sub(dc)
+                        .saturating_sub(oc)
+                        .saturating_sub(report)
+                        .saturating_sub(mc),
                 },
             )
             .collect())
@@ -504,6 +530,82 @@ impl ReportsReadModel for SqliteReportsReadModel {
         Ok(out)
     }
 
+    async fn aggregate_mandoub_earnings(
+        &self,
+        entity_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        include_voided: bool,
+    ) -> AppResult<Vec<MandoubEarningsRow>> {
+        // Per-مندوب aggregate. Mirrors the operator earnings aggregate without
+        // the shift-hours/dye dimensions: a مندوب earns a flat per-visit cut.
+        // Only visits carrying a مندوب contribute (mandoub_id IS NOT NULL);
+        // uses `visits_locked_mandoub_idx`.
+        let sql = format!(
+            "SELECT v.mandoub_id, \
+                    COALESCE(v.mandoub_name_snapshot, m.name, '') AS name, \
+                    COUNT(*) AS visits, \
+                    COALESCE(SUM(v.mandoub_cut_snapshot_iqd), 0) AS mc_total \
+             FROM visits v \
+             LEFT JOIN mandoubs m ON m.id = v.mandoub_id \
+             WHERE v.entity_id = ? AND v.deleted_at IS NULL \
+               AND v.mandoub_id IS NOT NULL \
+               AND {status} \
+               AND v.locked_at >= ? AND v.locked_at < ? \
+             GROUP BY v.mandoub_id \
+             ORDER BY mc_total DESC, name ASC",
+            status = status_clause(include_voided)
+        );
+        let rows: Vec<(String, String, i64, i64)> = sqlx::query_as(&sql)
+            .bind(entity_id)
+            .bind(dt_str(from))
+            .bind(dt_str(to))
+            .fetch_all(&self.pool)
+            .await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for (mandoub_id, name, visits, mc_total) in rows {
+            let id = parse_uuid(&mandoub_id)?;
+            let avg = if visits > 0 { mc_total / visits } else { 0 };
+            out.push(MandoubEarningsRow {
+                mandoub_id: id,
+                name,
+                visits,
+                mandoub_cut_total_iqd: mc_total,
+                avg_cut_per_visit_iqd: avg,
+            });
+        }
+        Ok(out)
+    }
+
+    async fn mandoub_source_visits(
+        &self,
+        entity_id: &str,
+        mandoub_id: Uuid,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        include_voided: bool,
+    ) -> AppResult<Vec<VisitRow>> {
+        let sql = format!(
+            "SELECT {VISIT_ROW_SELECT} \
+             {VISIT_ROW_JOINS} \
+             WHERE v.entity_id = ? AND v.deleted_at IS NULL \
+               AND {status} \
+               AND v.locked_at >= ? AND v.locked_at < ? \
+               AND v.mandoub_id = ? \
+             ORDER BY v.locked_at DESC, v.id DESC \
+             LIMIT 500",
+            status = status_clause(include_voided)
+        );
+        let rows: Vec<VisitRowRaw> = sqlx::query_as(&sql)
+            .bind(entity_id)
+            .bind(dt_str(from))
+            .bind(dt_str(to))
+            .bind(mandoub_id.to_string())
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter().map(VisitRowRaw::into_domain).collect()
+    }
+
     async fn operator_shifts_window(
         &self,
         entity_id: &str,
@@ -672,6 +774,41 @@ impl ReportsReadModel for SqliteReportsReadModel {
                     dye_visits: dye,
                     operator_cut_iqd: oc,
                     hours_on_shift_milli: hours_milli as i64,
+                })
+            })
+            .collect()
+    }
+
+    async fn daily_per_mandoub(
+        &self,
+        entity_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> AppResult<Vec<MandoubDailyRow>> {
+        let sql = "SELECT v.mandoub_id, \
+                          COALESCE(v.mandoub_name_snapshot, m.name, '') AS name, \
+                          COUNT(*) AS visits, \
+                          COALESCE(SUM(v.mandoub_cut_snapshot_iqd), 0) AS mc \
+                   FROM visits v \
+                   LEFT JOIN mandoubs m ON m.id = v.mandoub_id \
+                   WHERE v.entity_id = ? AND v.deleted_at IS NULL AND v.status = 'locked' \
+                     AND v.mandoub_id IS NOT NULL \
+                     AND v.locked_at >= ? AND v.locked_at < ? \
+                   GROUP BY v.mandoub_id \
+                   ORDER BY mc DESC";
+        let rows: Vec<(String, String, i64, i64)> = sqlx::query_as(sql)
+            .bind(entity_id)
+            .bind(dt_str(from))
+            .bind(dt_str(to))
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|(mandoub_id, name, visits, mc)| {
+                Ok(MandoubDailyRow {
+                    mandoub_id: parse_uuid(&mandoub_id)?,
+                    name,
+                    visits,
+                    mandoub_cut_iqd: mc,
                 })
             })
             .collect()

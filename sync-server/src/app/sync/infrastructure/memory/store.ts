@@ -50,7 +50,6 @@ export interface CheckTypeSyncRecord {
   has_subtypes: boolean
   base_price_iqd: number | null
   dye_supported: boolean
-  report_supported: boolean
   sort_order: number
   is_active: boolean
   entity_id: string
@@ -113,6 +112,22 @@ export interface OperatorSyncRecord {
   name: string
   phone: string | null
   base_cut_per_check_iqd: number
+  is_active: boolean
+  notes: string | null
+  entity_id: string
+  version: number
+  updated_at: string
+  deleted_at: string | null
+  origin_device_id: string | null
+}
+
+// مندوب (representative). Mirrors OperatorSyncRecord MINUS the stored cut: the
+// per-visit cut (500 or 1000 IQD) is chosen on the visit, not on this row.
+// LWW (client migration 020).
+export interface MandoubSyncRecord {
+  id: string
+  name: string
+  phone: string | null
   is_active: boolean
   notes: string | null
   entity_id: string
@@ -207,17 +222,26 @@ export interface VisitSyncRecord {
   check_subtype_id: string | null
   doctor_id: string | null
   operator_id: string | null
+  mandoub_id: string | null
   dye: boolean
   report: boolean
+  dalal: boolean
+  /** Discount mode: zeroes the referring doctor's cut for this visit. Draft-
+   *  editable like `dalal`; valid only with a real referring doctor. */
+  discount: boolean
   locked_at: string | null
   voided_at: string | null
   voided_by_user_id: string | null
   void_reason: string | null
   price_snapshot_iqd: number | null
   dye_cost_snapshot_iqd: number | null
-  report_cost_snapshot_iqd: number | null
+  report_amount_snapshot_iqd: number | null
+  report_pct_snapshot: number | null
+  reporting_doctor_name_snapshot: string | null
   doctor_cut_snapshot_iqd: number | null
   operator_cut_snapshot_iqd: number | null
+  mandoub_cut_snapshot_iqd: number | null
+  mandoub_name_snapshot: string | null
   internal_pct_snapshot: number | null
   total_amount_iqd_snapshot: number | null
   amount_paid_override_iqd: number | null
@@ -270,6 +294,13 @@ export interface DailyCloseSyncRecord {
   total_discount_iqd: number
   total_doctor_cuts_iqd: number
   total_operator_cuts_iqd: number
+  // Optional: absent from pre-migration-019 client payloads (coerced to 0 on
+  // apply). Required on the persisted Prisma model (@default(0)).
+  total_report_iqd?: number
+  // Optional: absent from pre-migration-021 client payloads (coerced to 0 on
+  // apply). Required on the persisted Prisma model (@default(0)). Net-side
+  // carve-out subtracted from net_iqd AFTER the report.
+  total_mandoub_cuts_iqd?: number
   total_inventory_consumption_value_iqd: number
   net_iqd: number
   locked_count: number
@@ -314,6 +345,7 @@ export class MemorySyncStore implements
   readonly doctors = new Map<string, DoctorSyncRecord>()
   readonly doctorPricings = new Map<string, DoctorPricingSyncRecord>()
   readonly operators = new Map<string, OperatorSyncRecord>()
+  readonly mandoubs = new Map<string, MandoubSyncRecord>()
   readonly operatorSpecialties = new Map<string, OperatorSpecialtySyncRecord>()
   readonly inventoryItems = new Map<string, InventoryItemSyncRecord>()
   readonly consumptionMap = new Map<string, ConsumptionSyncRecord>()
@@ -402,6 +434,10 @@ export class MemorySyncStore implements
     return upsertLWW(this.operators, row)
   }
 
+  async upsertMandoub (row: MandoubSyncRecord): Promise<{ applied: boolean }> {
+    return upsertLWW(this.mandoubs, row)
+  }
+
   async upsertOperatorSpecialty (
     row: OperatorSpecialtySyncRecord
   ): Promise<{ applied: boolean }> {
@@ -484,11 +520,17 @@ export class MemorySyncStore implements
     if (!existing) return null
     const snapshotKeys: (keyof VisitSyncRecord)[] = [
       'status',
+      'dalal',
+      'discount',
       'price_snapshot_iqd',
       'dye_cost_snapshot_iqd',
-      'report_cost_snapshot_iqd',
+      'report_amount_snapshot_iqd',
+      'report_pct_snapshot',
+      'reporting_doctor_name_snapshot',
       'doctor_cut_snapshot_iqd',
       'operator_cut_snapshot_iqd',
+      'mandoub_cut_snapshot_iqd',
+      'mandoub_name_snapshot',
       'internal_pct_snapshot',
       'total_amount_iqd_snapshot',
       'amount_paid_override_iqd',
@@ -635,6 +677,7 @@ export class MemorySyncStore implements
       ...mapCatalogChanges('doctors', this.doctors, tenantId),
       ...mapCatalogChanges('doctor_check_pricing', this.doctorPricings, tenantId),
       ...mapCatalogChanges('operators', this.operators, tenantId),
+      ...mapCatalogChanges('mandoubs', this.mandoubs, tenantId),
       ...mapCatalogChanges('operator_specialties', this.operatorSpecialties, tenantId),
       ...mapCatalogChanges('inventory_items', this.inventoryItems, tenantId),
       ...mapCatalogChanges(

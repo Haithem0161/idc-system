@@ -20,6 +20,9 @@ import type {
   InventoryItemCreateArgs,
   InventoryItemRecord,
   InventoryItemUpdateArgs,
+  MandoubCreateArgs,
+  MandoubRecord,
+  MandoubUpdateArgs,
   OperatorCreateArgs,
   OperatorRecord,
   OperatorSpecialtyRecord,
@@ -35,6 +38,8 @@ export const catalogKeys = {
   doctorDuplicates: ["catalog", "doctors", "duplicates"] as const,
   operators: ["catalog", "operators"] as const,
   operator: (id: string) => ["catalog", "operators", id] as const,
+  mandoubs: ["catalog", "mandoubs"] as const,
+  mandoub: (id: string) => ["catalog", "mandoubs", id] as const,
   inventoryItems: ["catalog", "inventory"] as const,
   inventoryItem: (id: string) => ["catalog", "inventory", id] as const,
   consumptionByType: (id: string) => ["catalog", "consumption", "type", id] as const,
@@ -319,6 +324,64 @@ export function useOperatorSpecialtySoftDelete () {
     onSuccess: (_, vars) => {
       void qc.invalidateQueries({ queryKey: catalogKeys.operator(vars.operator_id) })
     },
+  })
+}
+
+// ---- mandoubs (representatives) -----------------------------------------
+
+export function useMandoubs (params: { include_inactive?: boolean; query?: string } = {}) {
+  return useQuery({
+    queryKey: [...catalogKeys.mandoubs, params] as const,
+    enabled: isTauri(),
+    queryFn: () => invoke("mandoubs_list", { args: params }),
+  })
+}
+
+export function useMandoub (id: string | null) {
+  return useQuery({
+    queryKey: id ? catalogKeys.mandoub(id) : ["catalog", "mandoubs", "none"],
+    enabled: !!id && isTauri(),
+    queryFn: async (): Promise<{ mandoub: MandoubRecord }> =>
+      invoke("mandoubs_get", { args: { id: id! } }),
+  })
+}
+
+export function useMandoubCreate () {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: MandoubCreateArgs) => invoke("mandoubs_create", { args: input }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: catalogKeys.mandoubs }),
+  })
+}
+
+export function useMandoubUpdate () {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: MandoubUpdateArgs) => invoke("mandoubs_update", { args: input }),
+    onSuccess: (data: MandoubRecord) => {
+      void qc.invalidateQueries({ queryKey: catalogKeys.mandoubs })
+      void qc.invalidateQueries({ queryKey: catalogKeys.mandoub(data.id) })
+    },
+  })
+}
+
+export function useMandoubSetActive () {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { id: string; is_active: boolean }) =>
+      invoke("mandoubs_set_active", { args: input }),
+    onSuccess: (data: MandoubRecord) => {
+      void qc.invalidateQueries({ queryKey: catalogKeys.mandoubs })
+      void qc.invalidateQueries({ queryKey: catalogKeys.mandoub(data.id) })
+    },
+  })
+}
+
+export function useMandoubSoftDelete () {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => invoke("mandoubs_soft_delete", { args: { id } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: catalogKeys.mandoubs }),
   })
 }
 

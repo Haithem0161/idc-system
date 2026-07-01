@@ -16,7 +16,7 @@ use super::entities::*;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VisitsAggregate {
     pub visits: i64,
-    /// Billed revenue: SUM(total_amount_iqd_snapshot) = price + dye + report.
+    /// Billed revenue: SUM(total_amount_iqd_snapshot) = price + dye.
     pub revenue_iqd: i64,
     /// Cash actually collected: SUM(COALESCE(amount_paid_override_iqd,
     /// total_amount_iqd_snapshot)). Equals `revenue_iqd` when no visit was
@@ -24,6 +24,13 @@ pub struct VisitsAggregate {
     pub collected_iqd: i64,
     pub doctor_cut_iqd: i64,
     pub operator_cut_iqd: i64,
+    /// Report carve-out owed to the reporting doctor:
+    /// SUM(report_amount_snapshot_iqd). Subtracted from every net derived here.
+    pub report_iqd: i64,
+    /// مندوب carve-out owed to representatives:
+    /// SUM(mandoub_cut_snapshot_iqd). Subtracted from every net derived here,
+    /// after the report carve-out.
+    pub mandoub_cut_iqd: i64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -92,6 +99,26 @@ pub trait ReportsReadModel: Send + Sync {
         include_voided: bool,
     ) -> AppResult<Vec<OperatorEarningsRow>>;
 
+    /// Per-مندوب earnings aggregate over `[from, to)`. Only visits carrying a
+    /// مندوب (mandoub_id IS NOT NULL) contribute. Uses `visits_locked_mandoub_idx`.
+    async fn aggregate_mandoub_earnings(
+        &self,
+        entity_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        include_voided: bool,
+    ) -> AppResult<Vec<MandoubEarningsRow>>;
+
+    /// Visit rows attributed to one مندوب (backs the مندوب drilldown).
+    async fn mandoub_source_visits(
+        &self,
+        entity_id: &str,
+        mandoub_id: Uuid,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        include_voided: bool,
+    ) -> AppResult<Vec<VisitRow>>;
+
     async fn operator_shifts_window(
         &self,
         entity_id: &str,
@@ -123,6 +150,13 @@ pub trait ReportsReadModel: Send + Sync {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> AppResult<Vec<OperatorDailyRow>>;
+
+    async fn daily_per_mandoub(
+        &self,
+        entity_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> AppResult<Vec<MandoubDailyRow>>;
 
     async fn daily_per_check_type(
         &self,

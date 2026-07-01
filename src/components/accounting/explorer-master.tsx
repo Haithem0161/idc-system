@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router"
-import { Search, Activity, Stethoscope, Users, Boxes } from "lucide-react"
+import { Search, Activity, Stethoscope, Users, Contact, Boxes } from "lucide-react"
 
 import {
   EXPLORER_ENTITIES,
@@ -13,6 +13,7 @@ const ENTITY_ICONS: Record<ExplorerEntity, typeof Activity> = {
   visits: Activity,
   doctors: Stethoscope,
   operators: Users,
+  mandoubs: Contact,
   checks: Boxes,
 }
 
@@ -20,6 +21,7 @@ const ENTITY_LABEL_KEYS: Record<ExplorerEntity, { key: string; fallback: string 
   visits: { key: "accounting.explorer.entity.visits", fallback: "Visits" },
   doctors: { key: "accounting.explorer.entity.doctors", fallback: "Doctors" },
   operators: { key: "accounting.explorer.entity.operators", fallback: "Operators" },
+  mandoubs: { key: "accounting.explorer.entity.mandoubs", fallback: "Representatives" },
   checks: { key: "accounting.explorer.entity.checks", fallback: "Checks" },
 }
 

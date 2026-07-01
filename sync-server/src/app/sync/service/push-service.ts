@@ -15,6 +15,7 @@ import type {
   DoctorSyncRecord,
   InventoryAdjustmentSyncRecord,
   InventoryItemSyncRecord,
+  MandoubSyncRecord,
   OperatorShiftSyncRecord,
   OperatorSpecialtySyncRecord,
   OperatorSyncRecord,
@@ -230,6 +231,23 @@ export class SyncPushService {
             )
           }
           await this.store.upsertOperator(row)
+          break
+        }
+        case 'mandoubs': {
+          this.requireSuperadmin(actor, 'mandoubs push')
+          const row = decodeJsonPayload<MandoubSyncRecord>(op.payload_b64, op.op_id)
+          assertTenantMatches(row.entity_id, tenantId, op.op_id)
+          if (row.name.trim().length === 0) {
+            throw new DomainError(
+              'VALIDATION_ERROR',
+              'mandoub name required',
+              422,
+              { op_id: op.op_id }
+            )
+          }
+          // مندوب is a name + phone + notes record with no stored cut (the
+          // per-visit cut is chosen on the visit). LWW.
+          await this.store.upsertMandoub(row)
           break
         }
         case 'operator_specialties': {

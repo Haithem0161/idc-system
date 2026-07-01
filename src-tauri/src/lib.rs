@@ -42,17 +42,18 @@ use crate::domains::catalog::commands::{
     doctors_with_phone, inventory_catalog_create, inventory_catalog_get, inventory_catalog_list,
     inventory_catalog_soft_delete, inventory_catalog_update, inventory_consumption_create,
     inventory_consumption_list_by_type, inventory_consumption_soft_delete,
-    inventory_consumption_update, operator_specialties_soft_delete, operator_specialties_upsert,
-    operators_create, operators_get, operators_list, operators_set_active, operators_soft_delete,
-    operators_update, pricing_effective,
+    inventory_consumption_update, mandoubs_create, mandoubs_get, mandoubs_list,
+    mandoubs_set_active, mandoubs_soft_delete, mandoubs_update, operator_specialties_soft_delete,
+    operator_specialties_upsert, operators_create, operators_get, operators_list,
+    operators_set_active, operators_soft_delete, operators_update, pricing_effective,
 };
 use crate::domains::catalog::domain::repositories::{
     CheckSubtypeRepo, CheckTypeRepo, DoctorPricingRepo, DoctorRepo, InventoryConsumptionRepo,
-    InventoryItemRepo, OperatorRepo, OperatorSpecialtyRepo,
+    InventoryItemRepo, MandoubRepo, OperatorRepo, OperatorSpecialtyRepo,
 };
 use crate::domains::catalog::infrastructure::{
     SqliteCheckSubtypeRepo, SqliteCheckTypeRepo, SqliteDoctorPricingRepo, SqliteDoctorRepo,
-    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
+    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteMandoubRepo, SqliteOperatorRepo,
     SqliteOperatorSpecialtyRepo,
 };
 use crate::domains::catalog::service::CatalogServicesConfig;
@@ -74,8 +75,9 @@ use crate::domains::patients::PatientService;
 use crate::domains::reports::commands::{
     reports_daily_close, reports_dashboard_kpis, reports_dashboard_tops, reports_doctor_drilldown,
     reports_doctor_earnings, reports_export_daily_close_pdf, reports_export_doctors_csv,
-    reports_export_operators_csv, reports_export_visits_csv, reports_frozen_close_for_date,
-    reports_list_daily_closes, reports_operator_drilldown, reports_operator_earnings,
+    reports_export_mandoub_earnings_csv, reports_export_operators_csv, reports_export_visits_csv,
+    reports_frozen_close_for_date, reports_list_daily_closes, reports_mandoub_drilldown,
+    reports_mandoub_earnings, reports_operator_drilldown, reports_operator_earnings,
     reports_reopen_daily_close, reports_sign_daily_close, reports_visits,
 };
 use crate::domains::reports::domain::repositories::{FrozenCloseRepo, ReportsReadModel};
@@ -233,6 +235,13 @@ pub fn run() {
             // catalog: operator specialties
             operator_specialties_upsert,
             operator_specialties_soft_delete,
+            // catalog: mandoubs
+            mandoubs_list,
+            mandoubs_get,
+            mandoubs_create,
+            mandoubs_update,
+            mandoubs_set_active,
+            mandoubs_soft_delete,
             // catalog: inventory items
             inventory_catalog_list,
             inventory_catalog_get,
@@ -295,6 +304,9 @@ pub fn run() {
             reports_doctor_drilldown,
             reports_operator_earnings,
             reports_operator_drilldown,
+            reports_mandoub_earnings,
+            reports_mandoub_drilldown,
+            reports_export_mandoub_earnings_csv,
             reports_daily_close,
             reports_sign_daily_close,
             reports_reopen_daily_close,
@@ -362,6 +374,7 @@ async fn bootstrap(
     let operator_repo: Arc<dyn OperatorRepo> = Arc::new(SqliteOperatorRepo::new(pool.clone()));
     let operator_specialty_repo: Arc<dyn OperatorSpecialtyRepo> =
         Arc::new(SqliteOperatorSpecialtyRepo::new(pool.clone()));
+    let mandoub_repo: Arc<dyn MandoubRepo> = Arc::new(SqliteMandoubRepo::new(pool.clone()));
     let inventory_item_repo: Arc<dyn InventoryItemRepo> =
         Arc::new(SqliteInventoryItemRepo::new(pool.clone()));
     let consumption_repo: Arc<dyn InventoryConsumptionRepo> =
@@ -421,6 +434,7 @@ async fn bootstrap(
         doctor_pricing_repo,
         operator_repo: operator_repo.clone(),
         operator_specialty_repo,
+        mandoub_repo: mandoub_repo.clone(),
         inventory_item_repo,
         consumption_repo,
         audit_repo: audit_repo.clone(),
@@ -510,6 +524,7 @@ async fn bootstrap(
         doctor_pricing: catalog_services.doctor_pricing_repo.clone(),
         operators: operator_repo.clone(),
         operator_specialties: catalog_services.operator_specialty_repo.clone(),
+        mandoubs: mandoub_repo.clone(),
         consumption: catalog_services.consumption_repo.clone(),
         inventory_items: catalog_services.inventory_item_repo.clone(),
         shifts: shift_repo,

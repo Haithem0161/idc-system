@@ -28,7 +28,6 @@ export default function CheckTypesListPage () {
     has_subtypes: false,
     base_price_iqd: 0,
     dye_supported: false,
-    report_supported: false,
     sort_order: 0,
   })
   const [error, setError] = useState<string | null>(null)
@@ -37,7 +36,7 @@ export default function CheckTypesListPage () {
   const total = list.data?.length ?? 0
 
   const reset = () => {
-    setForm({ name_ar: "", name_en: "", has_subtypes: false, base_price_iqd: 0, dye_supported: false, report_supported: false, sort_order: 0 })
+    setForm({ name_ar: "", name_en: "", has_subtypes: false, base_price_iqd: 0, dye_supported: false, sort_order: 0 })
     setError(null)
     setCreating(false)
   }
@@ -149,15 +148,6 @@ export default function CheckTypesListPage () {
                 />
                 <span>{t("admin.check_types.dye_supported", { defaultValue: "Supports dye" })}</span>
               </label>
-              <label className="inline-flex items-center gap-2 text-[12px] font-medium text-ink-2">
-                <input
-                  type="checkbox"
-                  checked={form.report_supported}
-                  onChange={(e) => setForm((f) => ({ ...f, report_supported: e.target.checked }))}
-                  className="h-4 w-4 accent-ink"
-                />
-                <span>{t("admin.check_types.report_supported", { defaultValue: "Generates report" })}</span>
-              </label>
             </div>
             <ErrorBanner message={error} />
             <div className="flex justify-end gap-2">
@@ -198,10 +188,7 @@ export default function CheckTypesListPage () {
                   {ct.base_price_iqd != null ? ct.base_price_iqd.toLocaleString() : "—"}
                 </td>
                 <td className="text-[12px] text-ink-3">
-                  {[ct.dye_supported ? t("admin.check_types.dye", { defaultValue: "Dye" }) : null,
-                    ct.report_supported ? t("admin.check_types.report", { defaultValue: "Report" }) : null]
-                    .filter(Boolean)
-                    .join(" · ") || "—"}
+                  {ct.dye_supported ? t("admin.check_types.dye", { defaultValue: "Dye" }) : "—"}
                 </td>
                 <td className="text-end">
                   <Link

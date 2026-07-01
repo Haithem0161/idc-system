@@ -68,14 +68,22 @@ pub struct VisitRow {
     pub price_iqd: i64,
     pub doctor_cut_iqd: i64,
     pub operator_cut_iqd: i64,
-    /// Billed total for the visit (price + dye + report).
+    /// Report carve-out owed to the internal reporting doctor for this visit.
+    /// Zero when the visit carries no report. Subtracted from net.
+    pub report_amount_iqd: i64,
+    /// مندوب (mandoub) carve-out owed to the referring representative for this
+    /// visit. Zero when the visit carries no مندوب. Subtracted from net AFTER
+    /// the report carve-out; does not change doctor/operator cuts or report.
+    pub mandoub_cut_iqd: i64,
+    /// Billed total for the visit (price + dye).
     pub total_iqd: i64,
     /// Cash actually collected when the receptionist overrode the billed total
     /// (`None` = paid the billed `total_iqd`). Drives the "overridden" marker in
     /// accounting; `Some(0)` means waived.
     pub amount_paid_override_iqd: Option<i64>,
-    /// Net against COLLECTED cash: collected - doctor_cut - operator_cut, where
-    /// collected = `amount_paid_override_iqd` when set, else `total_iqd`.
+    /// Net against COLLECTED cash: collected - doctor_cut - operator_cut -
+    /// report_amount, where collected = `amount_paid_override_iqd` when set,
+    /// else `total_iqd`.
     pub net_iqd: i64,
 }
 
@@ -86,6 +94,12 @@ pub struct VisitsReportTotals {
     pub revenue_iqd: i64,
     pub doctor_cut_iqd: i64,
     pub operator_cut_iqd: i64,
+    /// Report carve-out owed to the reporting doctor across the rows.
+    /// Subtracted from `net_iqd`.
+    pub report_iqd: i64,
+    /// مندوب carve-out owed to representatives across the rows.
+    /// Subtracted from `net_iqd`.
+    pub mandoub_cut_iqd: i64,
     pub net_iqd: i64,
 }
 
@@ -98,6 +112,12 @@ pub struct VisitsReportGroup {
     pub revenue_iqd: i64,
     pub doctor_cut_iqd: i64,
     pub operator_cut_iqd: i64,
+    /// Report carve-out owed to the reporting doctor across the group.
+    /// Subtracted from `net_iqd`.
+    pub report_iqd: i64,
+    /// مندوب carve-out owed to representatives across the group.
+    /// Subtracted from `net_iqd`.
+    pub mandoub_cut_iqd: i64,
     pub net_iqd: i64,
 }
 
@@ -123,6 +143,10 @@ pub struct DashboardKpis {
     pub revenue_iqd: i64,
     pub doctor_cuts_iqd: i64,
     pub operator_cuts_iqd: i64,
+    /// Reporting-doctor share carved from net across the range.
+    pub report_cuts_iqd: i64,
+    /// Representative (مندوب) cuts carved from net across the range.
+    pub mandoub_cuts_iqd: i64,
     pub inventory_consumption_value_iqd: i64,
     pub net_iqd: i64,
     pub trend_today_vs_yesterday: TrendMatrix,
@@ -135,6 +159,8 @@ pub struct TrendMatrix {
     pub revenue: TrendCell,
     pub doctor_cuts: TrendCell,
     pub operator_cuts: TrendCell,
+    pub report_cuts: TrendCell,
+    pub mandoub_cuts: TrendCell,
     pub inventory_value: TrendCell,
     pub net: TrendCell,
 }
@@ -221,13 +247,33 @@ pub struct OperatorShiftRow {
     pub cut_earned_iqd: i64,
 }
 
+/// مندوب (representative) earnings row. Mirrors `OperatorEarningsRow` but has no
+/// shift-hours dimension: a مندوب is paid a flat per-visit cut (500 or 1000).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MandoubEarningsRow {
+    pub mandoub_id: Uuid,
+    pub name: String,
+    pub visits: i64,
+    pub mandoub_cut_total_iqd: i64,
+    pub avg_cut_per_visit_iqd: i64,
+}
+
+/// مندوب drilldown (§7.30, mirror of `OperatorDrilldown` minus shift hours).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MandoubDrilldown {
+    pub mandoub_id: Uuid,
+    pub name: String,
+    pub attributed_visits: Vec<VisitRow>,
+    pub totals: VisitsReportTotals,
+}
+
 /// Daily close artifact (§7.9).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DailyClose {
     pub tenant_id: String,
     pub target_date: NaiveDate,
     pub tz_offset: String,
-    /// Billed revenue: SUM of locked visit totals (price + dye + report).
+    /// Billed revenue: SUM of locked visit totals (price + dye).
     pub total_revenue_iqd: i64,
     /// Cash actually collected: SUM of override-where-set, else billed total.
     pub total_collected_iqd: i64,
@@ -235,15 +281,23 @@ pub struct DailyClose {
     pub total_discount_iqd: i64,
     pub total_doctor_cuts_iqd: i64,
     pub total_operator_cuts_iqd: i64,
+    /// Report carve-out owed to the reporting doctor across the day.
+    /// Subtracted from net.
+    pub total_report_iqd: i64,
+    /// مندوب carve-out owed to representatives across the day.
+    /// Subtracted from net AFTER the report carve-out.
+    pub total_mandoub_cuts_iqd: i64,
     pub total_inventory_consumption_value_iqd: i64,
     /// Net against COLLECTED cash: collected - doctor cuts - operator cuts -
-    /// inventory value.
+    /// report - مندوب cuts - inventory value.
     pub net_iqd: i64,
     pub locked_count: i64,
     pub voided_count: i64,
     pub voided_value_iqd: i64,
     pub per_doctor: Vec<DoctorDailyRow>,
     pub per_operator: Vec<OperatorDailyRow>,
+    /// Per-representative breakdown of the مندوب carve-out for the day.
+    pub per_mandoub: Vec<MandoubDailyRow>,
     pub per_check_type: Vec<CheckTypeDailyRow>,
     pub pending_sync: i64,
     pub provisional: bool,
@@ -268,6 +322,14 @@ pub struct OperatorDailyRow {
     pub dye_visits: i64,
     pub operator_cut_iqd: i64,
     pub hours_on_shift_milli: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MandoubDailyRow {
+    pub mandoub_id: Uuid,
+    pub name: String,
+    pub visits: i64,
+    pub mandoub_cut_iqd: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -307,6 +369,12 @@ pub struct FrozenClose {
     pub total_discount_iqd: i64,
     pub total_doctor_cuts_iqd: i64,
     pub total_operator_cuts_iqd: i64,
+    /// Reporting-doctor payable for the day. Subtracted from `net_iqd`; stored
+    /// as its own line so a reopened/historical frozen close itemizes it.
+    pub total_report_iqd: i64,
+    /// مندوب (representative) payable for the day. Subtracted from `net_iqd`;
+    /// stored as its own line so a reopened/historical frozen close itemizes it.
+    pub total_mandoub_cuts_iqd: i64,
     pub total_inventory_consumption_value_iqd: i64,
     pub net_iqd: i64,
     pub locked_count: i64,
@@ -341,6 +409,8 @@ pub struct FrozenCloseNewInput {
     pub total_discount_iqd: i64,
     pub total_doctor_cuts_iqd: i64,
     pub total_operator_cuts_iqd: i64,
+    pub total_report_iqd: i64,
+    pub total_mandoub_cuts_iqd: i64,
     pub total_inventory_consumption_value_iqd: i64,
     pub net_iqd: i64,
     pub locked_count: i64,
@@ -377,6 +447,8 @@ impl FrozenClose {
             total_discount_iqd: input.total_discount_iqd,
             total_doctor_cuts_iqd: input.total_doctor_cuts_iqd,
             total_operator_cuts_iqd: input.total_operator_cuts_iqd,
+            total_report_iqd: input.total_report_iqd,
+            total_mandoub_cuts_iqd: input.total_mandoub_cuts_iqd,
             total_inventory_consumption_value_iqd: input.total_inventory_consumption_value_iqd,
             net_iqd: input.net_iqd,
             locked_count: input.locked_count,
@@ -438,6 +510,8 @@ mod frozen_close_tests {
             total_discount_iqd: 0,
             total_doctor_cuts_iqd: 1_500,
             total_operator_cuts_iqd: 4_000,
+            total_report_iqd: 0,
+            total_mandoub_cuts_iqd: 0,
             total_inventory_consumption_value_iqd: 0,
             net_iqd: 44_500,
             locked_count: 2,

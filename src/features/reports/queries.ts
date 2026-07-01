@@ -9,6 +9,8 @@ import {
   type DoctorDrilldownRecord,
   type DoctorEarningsRecord,
   type FrozenCloseRecord,
+  type MandoubDrilldownRecord,
+  type MandoubEarningsRecord,
   type OperatorDrilldownRecord,
   type OperatorEarningsRecord,
   type ReportsRangeArgs,
@@ -27,6 +29,9 @@ export const reportsKeys = {
   operators: (range: ReportsRangeArgs) => [...reportsKeys.all, "operators", range] as const,
   operator: (id: string, range: ReportsRangeArgs) =>
     [...reportsKeys.all, "operator", id, range] as const,
+  mandoubs: (range: ReportsRangeArgs) => [...reportsKeys.all, "mandoubs", range] as const,
+  mandoub: (id: string, range: ReportsRangeArgs) =>
+    [...reportsKeys.all, "mandoub", id, range] as const,
   dailyClose: (date: string) => [...reportsKeys.all, "dailyClose", date] as const,
   frozenClose: (date: string) => [...reportsKeys.all, "frozenClose", date] as const,
   frozenList: (from: string, to: string) =>
@@ -109,6 +114,35 @@ export function useOperatorDrilldown (
       invoke("reports_operator_drilldown", {
         args: {
           operator_id: operatorId!,
+          from_utc: range.from_utc,
+          to_utc: range.to_utc,
+          include_voided: range.include_voided,
+        },
+      }),
+    staleTime: 30_000,
+  })
+}
+
+export function useMandoubEarnings (range: ReportsRangeArgs) {
+  return useQuery<MandoubEarningsRecord[]>({
+    queryKey: reportsKeys.mandoubs(range),
+    enabled: isTauri(),
+    queryFn: () => invoke("reports_mandoub_earnings", { args: range }),
+    staleTime: 30_000,
+  })
+}
+
+export function useMandoubDrilldown (
+  mandoubId: string | null,
+  range: ReportsRangeArgs
+) {
+  return useQuery<MandoubDrilldownRecord>({
+    queryKey: reportsKeys.mandoub(mandoubId ?? "", range),
+    enabled: isTauri() && Boolean(mandoubId),
+    queryFn: () =>
+      invoke("reports_mandoub_drilldown", {
+        args: {
+          mandoub_id: mandoubId!,
           from_utc: range.from_utc,
           to_utc: range.to_utc,
           include_voided: range.include_voided,
@@ -212,6 +246,16 @@ export function useExportOperatorsCsv () {
     { from_utc: string; to_utc: string; include_voided?: boolean; path: string }
   >({
     mutationFn: (input) => invoke("reports_export_operators_csv", { args: input }),
+  })
+}
+
+export function useExportMandoubEarningsCsv () {
+  return useMutation<
+    { path: string },
+    Error,
+    { from_utc: string; to_utc: string; include_voided?: boolean; path: string }
+  >({
+    mutationFn: (input) => invoke("reports_export_mandoub_earnings_csv", { args: input }),
   })
 }
 

@@ -57,7 +57,11 @@
       "dye": "Dye",
       "dye_unsupported": "Dye is not supported for this check.",
       "report": "Report",
-      "report_unsupported": "Report is not supported for this check.",
+      "discount": "Discount",
+      "report_internal": "Reporting doctor share ({{pct}}%)",
+      "internal_section": "Internal (not charged to patient)",
+      "dalal": "Dalal",
+      "dalal_hint": "Flat 10 IQD",
       "total_label": "Running total",
       "total": "Total",
       "estimating": "Estimating…",
@@ -98,7 +102,21 @@
       "doctor_field_specialty": "Specialty",
       "doctor_name_dup": "A doctor with this name already exists.",
       "doctor_phone_dup": "Another doctor already uses this phone.",
-      "doctor_create_submit": "Create doctor"
+      "doctor_create_submit": "Create doctor",
+      "mandoub": "Representative",
+      "mandoub_placeholder": "Search or add a representative",
+      "mandoub_none": "None",
+      "mandoub_none_hint": "No representative",
+      "mandoub_no_results": "No matching representatives.",
+      "mandoub_create": "Add \"{{name}}\"",
+      "mandoub_create_title": "New representative",
+      "mandoub_create_submit": "Create representative",
+      "mandoub_field_name": "Name",
+      "mandoub_field_phone": "Phone",
+      "mandoub_field_notes": "Notes",
+      "mandoub_cut_label": "Representative cut",
+      "mandoub_cut_500": "500 IQD",
+      "mandoub_cut_1000": "1000 IQD"
     },
     "tabs": {
       "new_visit": "New visit",
@@ -114,35 +132,43 @@
     "visit_detail": {
       "title": "Visit",
       "back_to_workspace": "Back to workspace",
-      "tabs": {
-        "details": "Details",
-        "audit": "Audit",
-        "receipts": "Receipts"
-      },
+      "currency_suffix": "IQD",
+      "draft_no_snapshot": "This visit is still a draft. Lock it to capture the priced breakdown.",
+      "voided_reason": "Reason: {{reason}}",
       "status_pill": {
         "draft": "Draft",
         "locked": "Locked",
         "voided": "Voided"
       },
+      "kpi": {
+        "billed": "Billed",
+        "collected": "Collected",
+        "net": "Clinic net"
+      },
+      "section": {
+        "visit": "Visit",
+        "money": "Money breakdown"
+      },
       "snapshot": {
         "patient": "Patient",
         "doctor": "Doctor",
         "operator": "Operator",
+        "mandoub": "Representative",
         "check": "Check",
-        "subtype": "Subtype",
         "price": "Price",
-        "dye": "Dye cost",
-        "report": "Report cost",
+        "dye": "Dye",
+        "report_flag": "Report",
+        "discount_flag": "Discount",
+        "report": "Reporting doctor share",
         "doctor_cut": "Doctor cut",
-        "internal_pct": "Internal %",
         "operator_cut": "Operator cut",
-        "total": "Total"
+        "mandoub_cut": "Representative cut",
+        "total": "Total billed",
+        "collected": "Collected",
+        "net": "Clinic net"
       },
       "actions": {
-        "void": "Void visit",
-        "reprint": "Reprint",
-        "open_pdf": "Open PDF",
-        "open_thermal": "Open thermal text"
+        "void": "Void visit"
       },
       "void_modal": {
         "title": "Void this visit",
@@ -151,18 +177,6 @@
         "reason_placeholder": "Why is this visit being voided?",
         "submit": "Void",
         "cancel": "Cancel"
-      },
-      "receipts": {
-        "empty": "Receipts will appear here after locking the visit.",
-        "a5_label": "A5 receipt",
-        "thermal_label": "Thermal receipt"
-      },
-      "audit_empty": "No audit entries yet.",
-      "reprinted": "Receipts re-rendered.",
-      "receipt_preview": {
-        "title": "Receipt preview",
-        "close": "Close",
-        "print": "Print"
       }
     },
     "crumb": {

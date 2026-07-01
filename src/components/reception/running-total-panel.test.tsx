@@ -9,8 +9,8 @@
 //   (a) hasPrice=false renders the em-dash placeholder, NO line items.
 //   (b) hasPrice=true renders one row per line + the bold total testid.
 //   (c) The total equals what is passed (panel does not re-derive money;
-//       the page composes price + dye + report from the authoritative
-//       pricing_effective + settings).
+//       the page composes the patient total = price + dye from the
+//       authoritative pricing_effective + settings).
 //   (d) The configured currency symbol is shown next to the total.
 //   (e) arabic_numerals=true renders Arabic-Indic digits in the total.
 //   (f) `estimating` surfaces the pending hint; absent otherwise.
@@ -78,10 +78,11 @@ function wrapper (): (props: { children: ReactNode }) => ReturnType<typeof creat
     createElement(QueryClientProvider, { client }, children)
 }
 
+// Patient-facing lines only: price + dye. The reporting-doctor share is an
+// internal carve-out, never part of the patient total, so it is NOT a line here.
 const LINES: RunningTotalLine[] = [
   { label: "CT Scan", amountIqd: 75000, emphasis: true },
   { label: "Dye", amountIqd: 10000 },
-  { label: "Report", amountIqd: 10000 },
 ]
 
 describe.each(directions)("RunningTotalPanel (dir=%s)", (dir) => {
@@ -105,20 +106,20 @@ describe.each(directions)("RunningTotalPanel (dir=%s)", (dir) => {
 
   it("renders one row per line and the total when priced", async () => {
     render(
-      <RunningTotalPanel lines={LINES} totalIqd={95000} hasPrice />,
+      <RunningTotalPanel lines={LINES} totalIqd={85000} hasPrice />,
       { wrapper: wrapper() }
     )
     const list = await screen.findByTestId("running-total-lines")
-    expect(list.querySelectorAll("li")).toHaveLength(3)
+    expect(list.querySelectorAll("li")).toHaveLength(2)
     await waitFor(() =>
-      expect(screen.getByTestId("running-total").textContent).toBe("95,000")
+      expect(screen.getByTestId("running-total").textContent).toBe("85,000")
     )
   })
 
   it("shows the configured currency symbol next to the total", async () => {
     mockSettings({ currency: "IQD" })
     render(
-      <RunningTotalPanel lines={LINES} totalIqd={95000} hasPrice />,
+      <RunningTotalPanel lines={LINES} totalIqd={85000} hasPrice />,
       { wrapper: wrapper() }
     )
     await screen.findByText("IQD")
@@ -127,11 +128,11 @@ describe.each(directions)("RunningTotalPanel (dir=%s)", (dir) => {
   it("renders Arabic-Indic digits in the total when enabled", async () => {
     mockSettings({ arabic: true })
     render(
-      <RunningTotalPanel lines={LINES} totalIqd={95000} hasPrice />,
+      <RunningTotalPanel lines={LINES} totalIqd={85000} hasPrice />,
       { wrapper: wrapper() }
     )
     await waitFor(() =>
-      expect(screen.getByTestId("running-total").textContent).toBe("٩٥,٠٠٠")
+      expect(screen.getByTestId("running-total").textContent).toBe("٨٥,٠٠٠")
     )
   })
 

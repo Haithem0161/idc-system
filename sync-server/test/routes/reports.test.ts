@@ -77,7 +77,7 @@ function lockedVisitPayload (
     void_reason: null,
     price_snapshot_iqd: 50000,
     dye_cost_snapshot_iqd: 0,
-    report_cost_snapshot_iqd: 0,
+    report_amount_snapshot_iqd: 0,
     doctor_cut_snapshot_iqd: doctorCut,
     operator_cut_snapshot_iqd: 5000,
     internal_pct_snapshot: doctorId == null ? 40 : null,

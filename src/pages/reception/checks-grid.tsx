@@ -88,11 +88,6 @@ export default function ChecksGridPage () {
                       {t("reception.new_visit.dye")}
                     </span>
                   ) : null}
-                  {card.report_supported ? (
-                    <span className="status-pill is-info">
-                      {t("reception.new_visit.report")}
-                    </span>
-                  ) : null}
                   {card.has_subtypes ? (
                     <span className="status-pill is-success">
                       {t("reception.checks_grid.has_subtypes")}

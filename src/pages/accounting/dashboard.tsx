@@ -110,8 +110,8 @@ export default function AccountingDashboardPage () {
       {kpis.data ? (
         <DashboardHero kpis={kpis.data} />
       ) : (
-        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2 lg:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => (
+        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+          {Array.from({ length: 7 }).map((_, i) => (
             <div key={i} className="h-[112px] animate-pulse bg-paper-2" />
           ))}
         </div>

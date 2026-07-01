@@ -166,7 +166,6 @@ model CheckType {
   hasSubtypes     Boolean   @map("has_subtypes")
   basePriceIqd    Int?      @map("base_price_iqd")
   dyeSupported    Boolean   @default(false) @map("dye_supported")
-  reportSupported Boolean   @default(false) @map("report_supported")
   sortOrder       Int       @default(0) @map("sort_order")
   isActive        Boolean   @default(true) @map("is_active")
   createdAt       DateTime  @map("created_at") @db.Timestamptz
@@ -296,6 +295,33 @@ model Operator {
 
   @@index([entityId, isActive])
   @@map("operators")
+}
+
+// مندوب (mandoub / representative). Mirrors `operators` MINUS the stored cut:
+// the per-visit cut (500 or 1000 IQD) is chosen on the visit, not on this row.
+// Referenced by a visit only when a real referring doctor is selected; the cut
+// is a net-side carve-out. Conflict policy: LAST-WRITE-WINS (client migration
+// 020).
+model Mandoub {
+  id              String    @id
+  name            String
+  phone           String?
+  isActive        Boolean   @default(true) @map("is_active")
+  notes           String?
+  createdAt       DateTime  @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+  version         Int       @default(0)
+  lastSyncedAt    DateTime? @map("last_synced_at") @db.Timestamptz
+  pulledAt        DateTime? @map("pulled_at") @db.Timestamptz
+  originDeviceId  String?   @map("origin_device_id")
+  entityId        String    @map("entity_id")
+
+  visits Visit[]
+
+  @@index([entityId, isActive])
+  @@index([entityId, name])
+  @@map("mandoubs")
 }
 
 model OperatorSpecialty {
@@ -434,17 +460,24 @@ model Visit {
   checkSubtypeId                  String?      @map("check_subtype_id")
   doctorId                        String?      @map("doctor_id")
   operatorId                      String?      @map("operator_id")
+  mandoubId                       String?      @map("mandoub_id")
   dye                             Boolean      @default(false)
   report                          Boolean      @default(false)
+  dalal                           Boolean      @default(false)
+  discount                        Boolean      @default(false)
   lockedAt                        DateTime?    @map("locked_at") @db.Timestamptz
   voidedAt                        DateTime?    @map("voided_at") @db.Timestamptz
   voidedByUserId                  String?      @map("voided_by_user_id")
   voidReason                      String?      @map("void_reason")
   priceSnapshotIqd                Int?         @map("price_snapshot_iqd")
   dyeCostSnapshotIqd              Int?         @map("dye_cost_snapshot_iqd")
-  reportCostSnapshotIqd           Int?         @map("report_cost_snapshot_iqd")
+  reportAmountSnapshotIqd         Int?         @map("report_amount_snapshot_iqd")
+  reportPctSnapshot               Int?         @map("report_pct_snapshot")
+  reportingDoctorNameSnapshot     String?      @map("reporting_doctor_name_snapshot")
   doctorCutSnapshotIqd            Int?         @map("doctor_cut_snapshot_iqd")
   operatorCutSnapshotIqd          Int?         @map("operator_cut_snapshot_iqd")
+  mandoubCutSnapshotIqd           Int?         @map("mandoub_cut_snapshot_iqd")
+  mandoubNameSnapshot             String?      @map("mandoub_name_snapshot")
   internalPctSnapshot             Int?         @map("internal_pct_snapshot")
   totalAmountIqdSnapshot          Int?         @map("total_amount_iqd_snapshot")
   // Cash actually collected when the receptionist overrode the billed total
@@ -474,6 +507,7 @@ model Visit {
   checkSubtype         CheckSubtype?          @relation(fields: [checkSubtypeId], references: [id])
   doctor               Doctor?                @relation(fields: [doctorId], references: [id])
   operator             Operator?              @relation(fields: [operatorId], references: [id])
+  mandoub              Mandoub?               @relation(fields: [mandoubId], references: [id])
   inventoryAdjustments InventoryAdjustment[]
 
   @@index([entityId, status, lockedAt])
@@ -481,6 +515,7 @@ model Visit {
   @@index([entityId, checkTypeId, status])
   @@index([entityId, doctorId, lockedAt])
   @@index([entityId, operatorId, lockedAt])
+  @@index([entityId, mandoubId, lockedAt])
   @@map("visits")
 }
 
@@ -555,6 +590,13 @@ model DailyClose {
   totalDiscountIqd                  Int       @default(0) @map("total_discount_iqd")
   totalDoctorCutsIqd                Int       @default(0) @map("total_doctor_cuts_iqd")
   totalOperatorCutsIqd              Int       @default(0) @map("total_operator_cuts_iqd")
+  // Reporting-doctor payable for the day (client migration 019). Subtracted
+  // from net_iqd; stored as its own line so a frozen close itemizes it.
+  totalReportIqd                    Int       @default(0) @map("total_report_iqd")
+  // مندوب (representative) payable for the day (client migration 021). A
+  // net-side carve-out subtracted from net_iqd AFTER the report; itemized as
+  // its own line so a frozen close shows it.
+  totalMandoubCutsIqd               Int       @default(0) @map("total_mandoub_cuts_iqd")
   totalInventoryConsumptionValueIqd Int       @default(0) @map("total_inventory_consumption_value_iqd")
   netIqd                            Int       @default(0) @map("net_iqd")
   lockedCount                       Int       @default(0) @map("locked_count")

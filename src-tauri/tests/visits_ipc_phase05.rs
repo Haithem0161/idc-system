@@ -31,7 +31,7 @@ use app_lib::domains::catalog::domain::repositories::{
 use app_lib::domains::catalog::domain::value_objects::CutKind;
 use app_lib::domains::catalog::infrastructure::{
     SqliteCheckSubtypeRepo, SqliteCheckTypeRepo, SqliteDoctorPricingRepo, SqliteDoctorRepo,
-    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
+    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteMandoubRepo, SqliteOperatorRepo,
     SqliteOperatorSpecialtyRepo,
 };
 use app_lib::domains::patients::domain::entities::{Patient, PatientNewInput};
@@ -138,7 +138,6 @@ async fn rig() -> Rig {
         has_subtypes: false,
         base_price_iqd: Some(50_000),
         dye_supported: true,
-        report_supported: false,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
@@ -255,6 +254,7 @@ async fn rig() -> Rig {
         doctor_pricing: dp_repo,
         operators: op_repo,
         operator_specialties: os_repo,
+        mandoubs: Arc::new(SqliteMandoubRepo::new(pool.clone())),
         consumption: cons_repo,
         inventory_items: item_repo,
         shifts: shift_repo,
@@ -281,7 +281,8 @@ async fn rig() -> Rig {
 fn money() -> MoneySettings {
     MoneySettings {
         dye_cost_iqd: 2_000,
-        report_cost_iqd: 3_000,
+        report_pct: 20,
+        reporting_doctor_name: String::new(),
         internal_doctor_pct: 40,
     }
 }
@@ -358,8 +359,11 @@ async fn create_draft(r: &Rig) -> Uuid {
                 check_type_id: r.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(r.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -390,6 +394,7 @@ async fn visits_lock_returns_visit_and_artifacts_block() {
             id,
             r.operator.id,
             None,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )
@@ -405,7 +410,9 @@ async fn visits_lock_returns_visit_and_artifacts_block() {
     for k in [
         "price_iqd",
         "dye_cost_iqd",
-        "report_cost_iqd",
+        "report_amount_iqd",
+        "report_pct",
+        "reporting_doctor_name",
         "doctor_cut_iqd",
         "operator_cut_iqd",
         "total_amount_iqd",
@@ -430,6 +437,7 @@ async fn visits_void_returns_status_voided_with_void_reason_trimmed() {
             UserRole::Receptionist,
             id,
             r.operator.id,
+            None,
             None,
             money(),
             ReceiptRenderOptions::default(),
@@ -470,6 +478,7 @@ async fn visits_discard_on_locked_returns_validation_envelope() {
             UserRole::Receptionist,
             id,
             r.operator.id,
+            None,
             None,
             money(),
             ReceiptRenderOptions::default(),
@@ -528,6 +537,7 @@ async fn visits_lock_with_wrong_role_returns_validation_envelope() {
             id,
             r.operator.id,
             None,
+            None,
             money(),
             ReceiptRenderOptions::default(),
         )
@@ -562,7 +572,6 @@ async fn visits_checks_grid_returns_array_of_cards_with_today_count() {
         "name_ar",
         "has_subtypes",
         "dye_supported",
-        "report_supported",
         "todays_visits",
     ] {
         assert!(row.get(k).is_some(), "missing key {k}");
@@ -595,6 +604,7 @@ async fn visits_list_workspace_returns_array_with_correct_status_filter() {
             UserRole::Receptionist,
             id,
             r.operator.id,
+            None,
             None,
             money(),
             ReceiptRenderOptions::default(),

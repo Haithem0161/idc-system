@@ -14,8 +14,12 @@ import { cn } from "@/lib/utils"
 interface Props {
   /** The bound doctor id, or null for the Internal (no referring doctor) row. */
   value: string | null
-  /** Bind a doctor id (or null for Internal). */
+  /** Bind a doctor id (or null for Internal). Also clears dalal mode. */
   onChange: (doctorId: string | null) => void
+  /** True when the doctor-substitute "dalal" option is selected. */
+  dalal: boolean
+  /** Select dalal mode. Implementations clear any bound doctor id. */
+  onDalalChange: (dalal: boolean) => void
 }
 
 /**
@@ -29,11 +33,16 @@ interface Props {
  * Internal == the old "House": doctor_id is null and the clinic keeps the full
  * cut. Clearing the field returns to Internal.
  *
+ * A built-in "دلال" (dalal) row sits just under Internal: it is a
+ * doctor-substitute that applies a flat 10 IQD cut. It is not a real doctor
+ * row, is mutually exclusive with a referring doctor, and is tracked by the
+ * `dalal` flag rather than a doctor id.
+ *
  * QoL: rich rows (name + specialty), recently-active doctors float to the top,
  * inactive doctors are hidden, a duplicate-name guard and a phone-uniqueness
  * warning fire on inline create.
  */
-export function DoctorCombobox ({ value, onChange }: Props) {
+export function DoctorCombobox ({ value, onChange, dalal, onDalalChange }: Props) {
   const { t } = useTranslation()
   const listId = useId()
   const [open, setOpen] = useState(false)
@@ -61,16 +70,17 @@ export function DoctorCombobox ({ value, onChange }: Props) {
   const options = searchResults ?? []
   const trimmed = text.trim()
 
-  // The Internal row is always the first selectable row.
+  // The Internal row is always the first selectable row, dalal the second.
   const exactMatch = options.some(
     (d) => d.name.trim().toLowerCase() === trimmed.toLowerCase(),
   )
   const showCreate = trimmed.length > 0 && !exactMatch
-  // Selectable rows: [Internal, ...doctors, (create)].
-  const rowCount = 1 + options.length + (showCreate ? 1 : 0)
+  // Selectable rows: [Internal, Dalal, ...doctors, (create)].
+  const rowCount = 2 + options.length + (showCreate ? 1 : 0)
   const internalIndex = 0
-  const firstDoctorIndex = 1
-  const createIndex = showCreate ? 1 + options.length : -1
+  const dalalIndex = 1
+  const firstDoctorIndex = 2
+  const createIndex = showCreate ? 2 + options.length : -1
 
   // Close on outside click.
   useEffect(() => {
@@ -85,16 +95,30 @@ export function DoctorCombobox ({ value, onChange }: Props) {
     return () => document.removeEventListener("pointerdown", onDocPointer)
   }, [open])
 
-  const displayValue = open ? text : (selected?.name ?? t("reception.new_visit.internal"))
+  const displayValue = open
+    ? text
+    : dalal
+      ? t("reception.new_visit.dalal")
+      : (selected?.name ?? t("reception.new_visit.internal"))
 
   const selectDoctor = (d: DoctorRecord) => {
+    onDalalChange(false)
     onChange(d.id)
     setText("")
     setOpen(false)
     setCreating(false)
   }
   const selectInternal = () => {
+    onDalalChange(false)
     onChange(null)
+    setText("")
+    setOpen(false)
+    setCreating(false)
+  }
+  const selectDalal = () => {
+    // Dalal is a doctor-substitute: clear any bound doctor id.
+    onChange(null)
+    onDalalChange(true)
     setText("")
     setOpen(false)
     setCreating(false)
@@ -103,6 +127,10 @@ export function DoctorCombobox ({ value, onChange }: Props) {
   const commitActive = () => {
     if (active === internalIndex) {
       selectInternal()
+      return
+    }
+    if (active === dalalIndex) {
+      selectDalal()
       return
     }
     const optIdx = active - firstDoctorIndex
@@ -185,13 +213,39 @@ export function DoctorCombobox ({ value, onChange }: Props) {
             )}
           >
             <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-paper-2 text-[10px] font-semibold text-ink-3">
-              {value === null ? <Check className="h-3 w-3" strokeWidth={2.5} /> : null}
+              {value === null && !dalal ? <Check className="h-3 w-3" strokeWidth={2.5} /> : null}
             </span>
             <span className="min-w-0 flex-1 truncate font-medium">
               {t("reception.new_visit.internal")}
             </span>
             <span className="shrink-0 text-[11px] text-ink-4">
               {t("reception.new_visit.internal_hint")}
+            </span>
+          </li>
+
+          <li
+            id={`${listId}-opt-${dalalIndex}`}
+            role="option"
+            aria-selected={active === dalalIndex}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              if (blurTimer.current) window.clearTimeout(blurTimer.current)
+              selectDalal()
+            }}
+            onMouseEnter={() => setActive(dalalIndex)}
+            className={cn(
+              "flex cursor-pointer items-center gap-2.5 px-3 py-2 text-[13px]",
+              active === dalalIndex ? "bg-paper-2 text-ink" : "text-ink-2",
+            )}
+          >
+            <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-paper-2 text-[10px] font-semibold text-ink-3">
+              {dalal ? <Check className="h-3 w-3" strokeWidth={2.5} /> : null}
+            </span>
+            <span className="min-w-0 flex-1 truncate font-medium">
+              {t("reception.new_visit.dalal")}
+            </span>
+            <span className="shrink-0 text-[11px] text-ink-4">
+              {t("reception.new_visit.dalal_hint")}
             </span>
           </li>
 

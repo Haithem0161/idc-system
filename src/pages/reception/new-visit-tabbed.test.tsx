@@ -6,8 +6,8 @@
 //   (b) With an active tab, the form renders bound to the tab's form
 //       state. The check-type subtitle uses the localised name.
 //   (c) Dye + Report are rendered as `role="switch"` pill buttons
-//       (FeatureToggle), and respect dye_supported / report_supported
-//       (rendered with aria-disabled).
+//       (FeatureToggle). Dye respects dye_supported (rendered with
+//       aria-disabled); report applies to every check type.
 //   (d) Pressing the Dye toggle flips the tab form state.
 //   (e) The `Finish` button is disabled until a patient is entered
 //       (and a subtype, when the check has subtypes).
@@ -73,6 +73,8 @@ const CHECK_ID = "01923af0-7c1a-7000-8001-cccccccccccc"
 const PATIENT_ID = "01923af0-7c1a-7000-8002-aaaaaaaaaaaa"
 const VISIT_ID = "01923af0-7c1a-7000-8003-aaaaaaaaaaaa"
 const OPERATOR_ID = "01923af0-7c1a-7000-8004-aaaaaaaaaaaa"
+const DOCTOR_ID = "01923af0-7c1a-7000-8005-aaaaaaaaaaaa"
+const MANDOUB_ID = "01923af0-7c1a-7000-8006-aaaaaaaaaaaa"
 const ENTITY_ID = "tenant"
 
 interface InvokeResponses {
@@ -84,6 +86,7 @@ interface InvokeResponses {
   visits_qualified_operators?: unknown
   visits_lock?: unknown
   doctors_list?: unknown
+  mandoubs_list?: unknown
   check_subtypes_list?: unknown
 }
 
@@ -118,7 +121,6 @@ function defaultResponses (
         name_en: "Echocardiogram",
         has_subtypes: false,
         dye_supported: true,
-        report_supported: true,
         todays_visits: 0,
       },
     ],
@@ -170,6 +172,7 @@ function defaultResponses (
       visit: { id: VISIT_ID },
     },
     doctors_list: [],
+    mandoubs_list: [],
     check_subtypes_list: [],
     ...override,
   }
@@ -226,7 +229,6 @@ describe("NewVisitTabbedPage", () => {
             name_en: "X-Ray",
             has_subtypes: false,
             dye_supported: false,
-            report_supported: true,
             todays_visits: 0,
           },
         ],
@@ -378,6 +380,76 @@ describe("NewVisitTabbedPage", () => {
           visit_id: VISIT_ID,
           operator_id: OPERATOR_ID,
           amount_paid_override_iqd: 0,
+        },
+      })
+    })
+  })
+
+  it("hides the representative selector when no referring doctor is set", async () => {
+    installInvokeRouter(defaultResponses())
+    useVisitTabsStore.getState().openTab(CHECK_ID)
+    render(<NewVisitTabbedPage />, { wrapper })
+    await waitFor(() => screen.getByTestId("finish-btn"))
+    // No doctor -> house mode -> the mandoub combobox is not rendered.
+    expect(screen.queryByTestId("mandoub-input")).toBeNull()
+  })
+
+  it("shows the representative selector and cut choice once a doctor + mandoub are bound", async () => {
+    installInvokeRouter(defaultResponses())
+    const tabId = useVisitTabsStore.getState().openTab(CHECK_ID)
+    useVisitTabsStore.getState().updateTabForm(tabId, {
+      doctorId: DOCTOR_ID,
+      mandoubId: MANDOUB_ID,
+      mandoubCut: 500,
+    })
+    render(<NewVisitTabbedPage />, { wrapper })
+    // With a referring doctor the selector appears; with a mandoub bound the
+    // 500/1000 cut radios appear too.
+    await waitFor(() => expect(screen.getByTestId("mandoub-input")).toBeTruthy())
+    expect(screen.getByTestId("mandoub-cut-500")).toBeTruthy()
+    expect(screen.getByTestId("mandoub-cut-1000")).toBeTruthy()
+
+    // Switching the cut updates the tab form state.
+    fireEvent.click(screen.getByTestId("mandoub-cut-1000"))
+    expect(
+      useVisitTabsStore.getState().tabs.find((t) => t.tabId === tabId)?.form.mandoubCut,
+    ).toBe(1000)
+  })
+
+  it("locks with the chosen mandoub_cut when the draft carries a representative", async () => {
+    installInvokeRouter(defaultResponses())
+    const tabId = useVisitTabsStore.getState().openTab(CHECK_ID)
+    useVisitTabsStore.getState().updateTabForm(tabId, {
+      patientId: PATIENT_ID,
+      patientName: "Salma A.",
+      doctorId: DOCTOR_ID,
+      mandoubId: MANDOUB_ID,
+      mandoubCut: 1000,
+    })
+    useVisitTabsStore.getState().attachDraft(tabId, VISIT_ID)
+    render(<NewVisitTabbedPage />, { wrapper })
+
+    let finish: HTMLButtonElement
+    await waitFor(() => {
+      finish = screen.getByTestId("finish-btn") as HTMLButtonElement
+      expect(finish.disabled).toBe(false)
+    })
+    await act(async () => {
+      fireEvent.click(finish!)
+    })
+    await waitFor(() => expect(screen.getByText("Neda")).toBeTruthy())
+    const confirmBtn = screen
+      .getAllByRole("button")
+      .find((b) => b.textContent && /Finish visit/.test(b.textContent))
+    fireEvent.click(confirmBtn!)
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("visits_lock", {
+        args: {
+          visit_id: VISIT_ID,
+          operator_id: OPERATOR_ID,
+          amount_paid_override_iqd: null,
+          mandoub_cut: 1000,
         },
       })
     })

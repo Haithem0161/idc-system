@@ -752,8 +752,8 @@ async fn insert_users(pool: &SqlitePool, ps: &[Persona], at: DateTime<Utc>) -> R
 async fn insert_check_types(pool: &SqlitePool, cts: &[CheckType], at: DateTime<Utc>) -> R<()> {
     for (i, c) in cts.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO check_types (id, name_ar, name_en, has_subtypes, base_price_iqd, dye_supported, report_supported, sort_order, is_active, created_at, updated_at, version, dirty, entity_id) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1, 0, ?)",
+            "INSERT INTO check_types (id, name_ar, name_en, has_subtypes, base_price_iqd, dye_supported, sort_order, is_active, created_at, updated_at, version, dirty, entity_id) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1, 0, ?)",
         )
         .bind(&c.id)
         .bind(c.name_ar)
@@ -761,7 +761,6 @@ async fn insert_check_types(pool: &SqlitePool, cts: &[CheckType], at: DateTime<U
         .bind(c.has_subtypes as i32)
         .bind(c.base_price_iqd)
         .bind(c.dye as i32)
-        .bind(c.report as i32)
         .bind(i as i32)
         .bind(rfc(at))
         .bind(rfc(at))
@@ -994,7 +993,7 @@ impl<'a> AuditWriter<'a> {
 struct Money {
     price: i64,
     dye_cost: i64,
-    report_cost: i64,
+    report_amount: i64,
     doctor_cut: i64,
     internal_pct: Option<i64>,
     operator_cut: i64,
@@ -1012,7 +1011,7 @@ fn compute_money(
     dye: bool,
     report: bool,
     dye_cost_setting: i64,
-    report_cost_setting: i64,
+    report_pct: i64,
     internal_pct: i64,
 ) -> Money {
     let base = if let Some(s) = sub {
@@ -1023,7 +1022,6 @@ fn compute_money(
     };
     let price = pricing.and_then(|p| p.price_override_iqd).unwrap_or(base);
     let dye_c = if dye { dye_cost_setting } else { 0 };
-    let rep_c = if report { report_cost_setting } else { 0 };
     let (doc_cut, ipct) = match pricing {
         Some(p) => {
             let c = if p.cut_kind == "pct" {
@@ -1035,14 +1033,21 @@ fn compute_money(
         }
         None => (price * internal_pct / 100, Some(internal_pct)),
     };
+    // Report is a net-side carve-out: pct of the price after the doctor cut.
+    let report_amount = if report {
+        (price - doc_cut).max(0) * report_pct / 100
+    } else {
+        0
+    };
     Money {
         price,
         dye_cost: dye_c,
-        report_cost: rep_c,
+        report_amount,
         doctor_cut: doc_cut,
         internal_pct: ipct,
         operator_cut: op.base_cut_per_check_iqd,
-        total: price + dye_c + rep_c,
+        // Patient total no longer includes report.
+        total: price + dye_c,
     }
 }
 
@@ -1164,7 +1169,7 @@ struct VisitContext<'a> {
     receps: &'a [Persona],
     admin: &'a Persona,
     dye_cost: i64,
-    report_cost: i64,
+    report_pct: i64,
     internal_pct: i64,
 }
 
@@ -1268,7 +1273,7 @@ async fn create_visit(
         dye,
         report,
         ctx.dye_cost,
-        ctx.report_cost,
+        ctx.report_pct,
         ctx.internal_pct,
     );
 
@@ -1298,17 +1303,24 @@ async fn create_visit(
         }
         "locked" | "voided" => {
             let lock_at = created_at + Duration::minutes(rng.range(2, 15) as i64);
+            // Report coherence (migration 018 locked-state CHECK): when report
+            // is on, the pct snapshot must be present; when off, both snapshots
+            // stay NULL and the amount is 0.
+            let report_pct_snapshot: Option<i64> = if report { Some(ctx.report_pct) } else { None };
+            let reporting_doctor_name_snapshot: Option<&'static str> =
+                if report { Some("Dr Report") } else { None };
             sqlx::query(
                 "INSERT INTO visits (id, patient_id, status, receptionist_user_id, check_type_id, check_subtype_id, doctor_id, operator_id, dye, report, locked_at, \
-                  price_snapshot_iqd, dye_cost_snapshot_iqd, report_cost_snapshot_iqd, doctor_cut_snapshot_iqd, operator_cut_snapshot_iqd, internal_pct_snapshot, total_amount_iqd_snapshot, \
+                  price_snapshot_iqd, dye_cost_snapshot_iqd, report_amount_snapshot_iqd, report_pct_snapshot, reporting_doctor_name_snapshot, doctor_cut_snapshot_iqd, operator_cut_snapshot_iqd, internal_pct_snapshot, total_amount_iqd_snapshot, \
                   patient_name_snapshot, doctor_name_snapshot, operator_name_snapshot, check_type_name_ar_snapshot, check_type_name_en_snapshot, check_subtype_name_ar_snapshot, check_subtype_name_en_snapshot, \
                   created_at, updated_at, version, dirty, origin_device_id, entity_id) \
-                 VALUES (?, ?, 'locked', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, 0, ?, ?)",
+                 VALUES (?, ?, 'locked', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, 0, ?, ?)",
             )
             .bind(&id).bind(&patient.id).bind(&recep.id).bind(&ct.id)
             .bind(sub.map(|s| s.id.clone())).bind(doctor.map(|d| d.id.clone())).bind(&op.id)
             .bind(dye as i32).bind(report as i32).bind(rfc(lock_at))
-            .bind(money.price).bind(money.dye_cost).bind(money.report_cost)
+            .bind(money.price).bind(money.dye_cost).bind(money.report_amount)
+            .bind(report_pct_snapshot).bind(reporting_doctor_name_snapshot)
             .bind(money.doctor_cut).bind(money.operator_cut).bind(money.internal_pct).bind(money.total)
             .bind(patient.name)
             .bind(doctor.map(|d| d.name))
@@ -1541,7 +1553,7 @@ async fn main() -> R<()> {
         receps: &ps[2..4], // Mehdi + Sara
         admin: &ps[0],
         dye_cost: 10_000,
-        report_cost: 10_000,
+        report_pct: 20,
         internal_pct: 30,
     };
 

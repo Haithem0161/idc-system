@@ -129,6 +129,7 @@ const APPLY_ORDER: &[&str] = &[
     "doctor_check_pricing",
     "operators",
     "operator_specialties",
+    "mandoubs",
     "inventory_items",
     "inventory_consumption_map",
     "operator_shifts",
@@ -231,6 +232,10 @@ async fn apply_changes(
             }
             "operators" => {
                 crate::sync::puller_entities::apply_operators_change(tx, change).await?;
+                applied += 1;
+            }
+            "mandoubs" => {
+                crate::sync::puller_entities::apply_mandoubs_change(tx, change).await?;
                 applied += 1;
             }
             "operator_specialties" => {
@@ -613,4 +618,48 @@ async fn apply_users_change(tx: &mut crate::db::Tx<'_>, change: &PullChange) -> 
     // whether a row was actually applied so the caller's `applied` counter and
     // `sync:applied` invalidation stay accurate.
     Ok(result.rows_affected() > 0)
+}
+
+#[cfg(test)]
+mod apply_order_tests {
+    use super::*;
+
+    /// FK-safe pull ordering: every entity that is a foreign-key PARENT of
+    /// `visits` must apply strictly before `visits`, else a pulled visit
+    /// referencing a not-yet-applied parent trips a non-deferred FK constraint
+    /// and aborts the whole pull transaction (permanent sync stall). An entity
+    /// MISSING from `APPLY_ORDER` falls through to `APPLY_ORDER.len()` and sorts
+    /// AFTER `visits` -- exactly the `mandoubs` omission that broke sync.
+    #[test]
+    fn visit_fk_parents_apply_before_visits() {
+        let visits_rank = apply_rank("visits");
+        // The visits table has FK references to each of these (see migration
+        // 005 + 021: patient_id, receptionist_user_id, check_type_id,
+        // check_subtype_id, doctor_id, operator_id, mandoub_id).
+        for parent in [
+            "users",
+            "patients",
+            "check_types",
+            "check_subtypes",
+            "doctors",
+            "operators",
+            "mandoubs",
+        ] {
+            let rank = apply_rank(parent);
+            assert!(
+                rank < visits_rank,
+                "FK parent `{parent}` (rank {rank}) must apply before `visits` (rank {visits_rank}); \
+                 a missing entry defaults to APPLY_ORDER.len() and sorts after visits, aborting the pull"
+            );
+        }
+    }
+
+    /// `mandoubs` must be an explicit entry, not rely on the fall-through rank.
+    #[test]
+    fn mandoubs_is_in_apply_order() {
+        assert!(
+            APPLY_ORDER.contains(&"mandoubs"),
+            "mandoubs must be explicitly ranked in APPLY_ORDER (it is an FK parent of visits)"
+        );
+    }
 }

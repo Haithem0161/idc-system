@@ -56,7 +56,6 @@ export default function CheckTypeDetailPage () {
         name_en: (form.get("name_en") as string) || null,
         base_price_iqd: ct.has_subtypes ? null : Number(form.get("base_price_iqd") ?? 0),
         dye_supported: form.get("dye_supported") === "on",
-        report_supported: form.get("report_supported") === "on",
         sort_order: Number(form.get("sort_order") ?? 0),
         is_active: form.get("is_active") === "on",
       })
@@ -144,10 +143,6 @@ export default function CheckTypeDetailPage () {
             <label className="inline-flex items-center gap-2 text-[12px] font-medium text-ink-2">
               <input type="checkbox" name="dye_supported" defaultChecked={ct.dye_supported} className="h-4 w-4 accent-ink" />
               <span>{t("admin.check_types.dye_supported", { defaultValue: "Supports dye" })}</span>
-            </label>
-            <label className="inline-flex items-center gap-2 text-[12px] font-medium text-ink-2">
-              <input type="checkbox" name="report_supported" defaultChecked={ct.report_supported} className="h-4 w-4 accent-ink" />
-              <span>{t("admin.check_types.report_supported", { defaultValue: "Generates report" })}</span>
             </label>
             <label className="inline-flex items-center gap-2 text-[12px] font-medium text-ink-2">
               <input type="checkbox" name="is_active" defaultChecked={ct.is_active} className="h-4 w-4 accent-ink" />

@@ -33,8 +33,6 @@ pub struct CheckTypeCreateInput {
     #[serde(default)]
     pub dye_supported: bool,
     #[serde(default)]
-    pub report_supported: bool,
-    #[serde(default)]
     pub sort_order: i64,
 }
 
@@ -44,7 +42,6 @@ pub struct CheckTypeUpdateInput {
     pub name_en: Option<Option<String>>,
     pub base_price_iqd: Option<Option<i64>>,
     pub dye_supported: Option<bool>,
-    pub report_supported: Option<bool>,
     pub sort_order: Option<i64>,
     pub is_active: Option<bool>,
 }
@@ -125,7 +122,6 @@ impl<R: tauri::Runtime> CheckTypeService<R> {
             has_subtypes: input.has_subtypes,
             base_price_iqd: input.base_price_iqd,
             dye_supported: input.dye_supported,
-            report_supported: input.report_supported,
             sort_order: input.sort_order,
             entity_id: entity_id.to_string(),
             origin_device_id: Some(self.device_id.clone()),
@@ -180,7 +176,6 @@ impl<R: tauri::Runtime> CheckTypeService<R> {
             name_en: input.name_en,
             base_price_iqd: input.base_price_iqd,
             dye_supported: input.dye_supported,
-            report_supported: input.report_supported,
             sort_order: input.sort_order,
             is_active: input.is_active,
         };

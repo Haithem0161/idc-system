@@ -32,6 +32,8 @@ function row (over: Partial<VisitReportRowRecord> = {}): VisitReportRowRecord {
     price_iqd: 50_000,
     doctor_cut_iqd: 20_000,
     operator_cut_iqd: 4_000,
+    mandoub_cut_iqd: 0,
+    report_amount_iqd: 0,
     total_iqd: 50_000,
     amount_paid_override_iqd: null,
     net_iqd: 26_000,

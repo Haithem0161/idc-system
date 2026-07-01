@@ -7,6 +7,7 @@ import { ExplorerMaster } from "@/components/accounting/explorer-master"
 import { useMasterRows } from "@/components/accounting/use-master-rows"
 import { DoctorDetailPane } from "@/components/accounting/doctor-detail-pane"
 import { OperatorDetailPane } from "@/components/accounting/operator-detail-pane"
+import { MandoubDetailPane } from "@/components/accounting/mandoub-detail-pane"
 import { CheckDetailPane } from "@/components/accounting/check-detail-pane"
 import { VisitDetailPane } from "@/components/accounting/visit-detail-pane"
 import { isExplorerEntity } from "@/components/accounting/explorer-types"
@@ -77,6 +78,8 @@ export default function AccountingExplorerPage () {
                 <DoctorDetailPane segment={selectedId} />
               ) : entity === "operators" ? (
                 <OperatorDetailPane operatorId={selectedId} />
+              ) : entity === "mandoubs" ? (
+                <MandoubDetailPane mandoubId={selectedId} />
               ) : entity === "checks" ? (
                 <CheckDetailPane checkTypeId={selectedId} />
               ) : (

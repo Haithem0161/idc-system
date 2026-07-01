@@ -11,6 +11,7 @@ import type {
   DoctorSyncRecord,
   InventoryAdjustmentSyncRecord,
   InventoryItemSyncRecord,
+  MandoubSyncRecord,
   OperatorShiftSyncRecord,
   OperatorSpecialtySyncRecord,
   OperatorSyncRecord,
@@ -166,7 +167,6 @@ export class PrismaEntityStore implements SyncEntityStore {
           hasSubtypes: row.has_subtypes,
           basePriceIqd: row.base_price_iqd,
           dyeSupported: row.dye_supported,
-          reportSupported: row.report_supported,
           sortOrder: row.sort_order,
           isActive: row.is_active,
           createdAt: new Date(row.updated_at),
@@ -195,7 +195,6 @@ export class PrismaEntityStore implements SyncEntityStore {
       has_subtypes: row.hasSubtypes,
       base_price_iqd: row.basePriceIqd,
       dye_supported: row.dyeSupported,
-      report_supported: row.reportSupported,
       sort_order: row.sortOrder,
       is_active: row.isActive,
       entity_id: row.entityId,
@@ -330,6 +329,33 @@ export class PrismaEntityStore implements SyncEntityStore {
           entityId: row.entity_id,
         }
         await this.prisma.operator.upsert({
+          where: { id: row.id },
+          create: data,
+          update: { ...data, createdAt: undefined },
+        })
+      }
+    )
+  }
+
+  async upsertMandoub (row: MandoubSyncRecord): Promise<{ applied: boolean }> {
+    return this.lwwUpsert<MandoubSyncRecord>(
+      row,
+      async () => loadVersionMeta(this.prisma.mandoub, row.id),
+      async () => {
+        const data: Prisma.MandoubUncheckedCreateInput = {
+          id: row.id,
+          name: row.name,
+          phone: row.phone,
+          isActive: row.is_active,
+          notes: row.notes,
+          createdAt: new Date(row.updated_at),
+          updatedAt: new Date(row.updated_at),
+          deletedAt: row.deleted_at ? new Date(row.deleted_at) : null,
+          version: row.version,
+          originDeviceId: row.origin_device_id ?? null,
+          entityId: row.entity_id,
+        }
+        await this.prisma.mandoub.upsert({
           where: { id: row.id },
           create: data,
           update: { ...data, createdAt: undefined },
@@ -493,17 +519,24 @@ export class PrismaEntityStore implements SyncEntityStore {
           checkSubtypeId: row.check_subtype_id,
           doctorId: row.doctor_id,
           operatorId: row.operator_id,
+          mandoubId: row.mandoub_id,
           dye: row.dye,
           report: row.report,
+          dalal: row.dalal ?? false,
+          discount: row.discount ?? false,
           lockedAt: row.locked_at ? new Date(row.locked_at) : null,
           voidedAt: row.voided_at ? new Date(row.voided_at) : null,
           voidedByUserId: row.voided_by_user_id,
           voidReason: row.void_reason,
           priceSnapshotIqd: row.price_snapshot_iqd,
           dyeCostSnapshotIqd: row.dye_cost_snapshot_iqd,
-          reportCostSnapshotIqd: row.report_cost_snapshot_iqd,
+          reportAmountSnapshotIqd: row.report_amount_snapshot_iqd,
+          reportPctSnapshot: row.report_pct_snapshot,
+          reportingDoctorNameSnapshot: row.reporting_doctor_name_snapshot,
           doctorCutSnapshotIqd: row.doctor_cut_snapshot_iqd,
           operatorCutSnapshotIqd: row.operator_cut_snapshot_iqd,
+          mandoubCutSnapshotIqd: row.mandoub_cut_snapshot_iqd,
+          mandoubNameSnapshot: row.mandoub_name_snapshot,
           internalPctSnapshot: row.internal_pct_snapshot,
           totalAmountIqdSnapshot: row.total_amount_iqd_snapshot,
           amountPaidOverrideIqd: row.amount_paid_override_iqd,
@@ -536,11 +569,17 @@ export class PrismaEntityStore implements SyncEntityStore {
     const reified = toVisitSyncRecord(existing)
     const snapshotKeys: (keyof VisitSyncRecord)[] = [
       'status',
+      'dalal',
+      'discount',
       'price_snapshot_iqd',
       'dye_cost_snapshot_iqd',
-      'report_cost_snapshot_iqd',
+      'report_amount_snapshot_iqd',
+      'report_pct_snapshot',
+      'reporting_doctor_name_snapshot',
       'doctor_cut_snapshot_iqd',
       'operator_cut_snapshot_iqd',
+      'mandoub_cut_snapshot_iqd',
+      'mandoub_name_snapshot',
       'internal_pct_snapshot',
       'total_amount_iqd_snapshot',
       'amount_paid_override_iqd',
@@ -697,6 +736,13 @@ export class PrismaEntityStore implements SyncEntityStore {
           totalDiscountIqd: row.total_discount_iqd,
           totalDoctorCutsIqd: row.total_doctor_cuts_iqd,
           totalOperatorCutsIqd: row.total_operator_cuts_iqd,
+          // Version-boundary field (client migration 019). A pre-019 desktop
+          // client pushes a payload without it; coerce undefined -> 0 explicitly
+          // rather than relying on Prisma's @default(0).
+          totalReportIqd: row.total_report_iqd ?? 0,
+          // Version-boundary field (client migration 021). Same coercion: a
+          // pre-021 client omits it, so undefined -> 0.
+          totalMandoubCutsIqd: row.total_mandoub_cuts_iqd ?? 0,
           totalInventoryConsumptionValueIqd: row.total_inventory_consumption_value_iqd,
           netIqd: row.net_iqd,
           lockedCount: row.locked_count,
@@ -750,7 +796,7 @@ export class PrismaEntityStore implements SyncEntityStore {
 
     const [
       users, settings, checkTypes, checkSubtypes, doctors, doctorPricings,
-      operators, operatorSpecialties, inventoryItems, consumptionMaps,
+      operators, mandoubs, operatorSpecialties, inventoryItems, consumptionMaps,
       operatorShifts, patients, visits, inventoryAdjustments, dailyCloses,
     ] = await Promise.all([
       this.prisma.user.findMany({ where: { entityId: tenantId, ...sinceWhere }, orderBy, take: TAKE_CAP }),
@@ -760,6 +806,7 @@ export class PrismaEntityStore implements SyncEntityStore {
       this.prisma.doctor.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
       this.prisma.doctorCheckPricing.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
       this.prisma.operator.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
+      this.prisma.mandoub.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
       this.prisma.operatorSpecialty.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
       this.prisma.inventoryItem.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
       this.prisma.inventoryConsumptionMap.findMany({ where: { entityId: tenantId, deletedAt: null, ...sinceWhere }, orderBy, take: TAKE_CAP }),
@@ -783,6 +830,7 @@ export class PrismaEntityStore implements SyncEntityStore {
     pushChanges(changes, 'doctors', doctors, (r) => toDoctorSyncRecord(r))
     pushChanges(changes, 'doctor_check_pricing', doctorPricings, (r) => toDoctorPricingSyncRecord(r))
     pushChanges(changes, 'operators', operators, (r) => toOperatorSyncRecord(r))
+    pushChanges(changes, 'mandoubs', mandoubs, (r) => toMandoubSyncRecord(r))
     pushChanges(changes, 'operator_specialties', operatorSpecialties, (r) => toOperatorSpecialtySyncRecord(r))
     pushChanges(changes, 'inventory_items', inventoryItems, (r) => toInventoryItemSyncRecord(r))
     pushChanges(changes, 'inventory_consumption_map', consumptionMaps, (r) => toConsumptionSyncRecord(r))
@@ -998,7 +1046,6 @@ function toCheckTypeSyncRecord (r: {
   hasSubtypes: boolean
   basePriceIqd: number | null
   dyeSupported: boolean
-  reportSupported: boolean
   sortOrder: number
   isActive: boolean
   entityId: string
@@ -1014,7 +1061,6 @@ function toCheckTypeSyncRecord (r: {
     has_subtypes: r.hasSubtypes,
     base_price_iqd: r.basePriceIqd,
     dye_supported: r.dyeSupported,
-    report_supported: r.reportSupported,
     sort_order: r.sortOrder,
     is_active: r.isActive,
     entity_id: r.entityId,
@@ -1133,6 +1179,32 @@ function toOperatorSyncRecord (r: {
     name: r.name,
     phone: r.phone,
     base_cut_per_check_iqd: r.baseCutPerCheckIqd,
+    is_active: r.isActive,
+    notes: r.notes,
+    entity_id: r.entityId,
+    version: r.version,
+    updated_at: r.updatedAt.toISOString(),
+    deleted_at: isoOrNull(r.deletedAt),
+    origin_device_id: r.originDeviceId,
+  }
+}
+
+function toMandoubSyncRecord (r: {
+  id: string
+  name: string
+  phone: string | null
+  isActive: boolean
+  notes: string | null
+  entityId: string
+  version: number
+  updatedAt: Date
+  deletedAt: Date | null
+  originDeviceId: string | null
+}): MandoubSyncRecord {
+  return {
+    id: r.id,
+    name: r.name,
+    phone: r.phone,
     is_active: r.isActive,
     notes: r.notes,
     entity_id: r.entityId,
@@ -1296,17 +1368,24 @@ function toVisitSyncRecord (r: {
   checkSubtypeId: string | null
   doctorId: string | null
   operatorId: string | null
+  mandoubId: string | null
   dye: boolean
   report: boolean
+  dalal: boolean
+  discount: boolean
   lockedAt: Date | null
   voidedAt: Date | null
   voidedByUserId: string | null
   voidReason: string | null
   priceSnapshotIqd: number | null
   dyeCostSnapshotIqd: number | null
-  reportCostSnapshotIqd: number | null
+  reportAmountSnapshotIqd: number | null
+  reportPctSnapshot: number | null
+  reportingDoctorNameSnapshot: string | null
   doctorCutSnapshotIqd: number | null
   operatorCutSnapshotIqd: number | null
+  mandoubCutSnapshotIqd: number | null
+  mandoubNameSnapshot: string | null
   internalPctSnapshot: number | null
   totalAmountIqdSnapshot: number | null
   amountPaidOverrideIqd: number | null
@@ -1333,17 +1412,24 @@ function toVisitSyncRecord (r: {
     check_subtype_id: r.checkSubtypeId,
     doctor_id: r.doctorId,
     operator_id: r.operatorId,
+    mandoub_id: r.mandoubId,
     dye: r.dye,
     report: r.report,
+    dalal: r.dalal,
+    discount: r.discount,
     locked_at: isoOrNull(r.lockedAt),
     voided_at: isoOrNull(r.voidedAt),
     voided_by_user_id: r.voidedByUserId,
     void_reason: r.voidReason,
     price_snapshot_iqd: r.priceSnapshotIqd,
     dye_cost_snapshot_iqd: r.dyeCostSnapshotIqd,
-    report_cost_snapshot_iqd: r.reportCostSnapshotIqd,
+    report_amount_snapshot_iqd: r.reportAmountSnapshotIqd,
+    report_pct_snapshot: r.reportPctSnapshot,
+    reporting_doctor_name_snapshot: r.reportingDoctorNameSnapshot,
     doctor_cut_snapshot_iqd: r.doctorCutSnapshotIqd,
     operator_cut_snapshot_iqd: r.operatorCutSnapshotIqd,
+    mandoub_cut_snapshot_iqd: r.mandoubCutSnapshotIqd,
+    mandoub_name_snapshot: r.mandoubNameSnapshot,
     internal_pct_snapshot: r.internalPctSnapshot,
     total_amount_iqd_snapshot: r.totalAmountIqdSnapshot,
     amount_paid_override_iqd: r.amountPaidOverrideIqd,
@@ -1405,6 +1491,8 @@ function toDailyCloseSyncRecord (r: {
   totalDiscountIqd: number
   totalDoctorCutsIqd: number
   totalOperatorCutsIqd: number
+  totalReportIqd: number
+  totalMandoubCutsIqd: number
   totalInventoryConsumptionValueIqd: number
   netIqd: number
   lockedCount: number
@@ -1433,6 +1521,8 @@ function toDailyCloseSyncRecord (r: {
     total_discount_iqd: r.totalDiscountIqd,
     total_doctor_cuts_iqd: r.totalDoctorCutsIqd,
     total_operator_cuts_iqd: r.totalOperatorCutsIqd,
+    total_report_iqd: r.totalReportIqd,
+    total_mandoub_cuts_iqd: r.totalMandoubCutsIqd,
     total_inventory_consumption_value_iqd: r.totalInventoryConsumptionValueIqd,
     net_iqd: r.netIqd,
     locked_count: r.lockedCount,

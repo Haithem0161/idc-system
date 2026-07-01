@@ -183,17 +183,16 @@ pub(crate) async fn apply_check_types_change(
     sqlx::query(
         "INSERT INTO check_types ( \
             id, name_ar, name_en, has_subtypes, base_price_iqd, \
-            dye_supported, report_supported, sort_order, is_active, \
+            dye_supported, sort_order, is_active, \
             created_at, updated_at, deleted_at, version, dirty, \
             last_synced_at, origin_device_id, entity_id \
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?) \
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?) \
          ON CONFLICT(id) DO UPDATE SET \
             name_ar = excluded.name_ar, \
             name_en = excluded.name_en, \
             has_subtypes = excluded.has_subtypes, \
             base_price_iqd = excluded.base_price_iqd, \
             dye_supported = excluded.dye_supported, \
-            report_supported = excluded.report_supported, \
             sort_order = excluded.sort_order, \
             is_active = excluded.is_active, \
             updated_at = excluded.updated_at, \
@@ -217,11 +216,6 @@ pub(crate) async fn apply_check_types_change(
     .bind(p.get("base_price_iqd").and_then(|v| v.as_i64()))
     .bind(
         p.get("dye_supported")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false) as i64,
-    )
-    .bind(
-        p.get("report_supported")
             .and_then(|v| v.as_bool())
             .unwrap_or(false) as i64,
     )
@@ -505,6 +499,64 @@ pub(crate) async fn apply_operators_change(
             .and_then(|v| v.as_i64())
             .unwrap_or(0),
     )
+    .bind(p.get("is_active").and_then(|v| v.as_bool()).unwrap_or(true) as i64)
+    .bind(p.get("notes").and_then(|v| v.as_str()))
+    .bind(
+        p.get("created_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&change.updated_at),
+    )
+    .bind(
+        p.get("updated_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&change.updated_at),
+    )
+    .bind(p.get("deleted_at").and_then(|v| v.as_str()))
+    .bind(incoming_version)
+    .bind(now)
+    .bind(p.get("origin_device_id").and_then(|v| v.as_str()))
+    .bind(p.get("entity_id").and_then(|v| v.as_str()).unwrap_or(""))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn apply_mandoubs_change(
+    tx: &mut crate::db::Tx<'_>,
+    change: &PullChange,
+) -> AppResult<()> {
+    let p = &change.payload;
+    let id = p.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+    if id.is_empty() {
+        return Ok(());
+    }
+    // LWW: SQL WHERE gate is the sole authoritative check (mirrors operators).
+    let incoming_version = change.version;
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO mandoubs ( \
+            id, name, phone, is_active, notes, \
+            created_at, updated_at, deleted_at, version, dirty, \
+            last_synced_at, origin_device_id, entity_id \
+         ) VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?) \
+         ON CONFLICT(id) DO UPDATE SET \
+            name = excluded.name, \
+            phone = excluded.phone, \
+            is_active = excluded.is_active, \
+            notes = excluded.notes, \
+            updated_at = excluded.updated_at, \
+            deleted_at = excluded.deleted_at, \
+            version = excluded.version, \
+            dirty = 0, \
+            last_synced_at = excluded.last_synced_at, \
+            origin_device_id = excluded.origin_device_id, \
+            entity_id = excluded.entity_id \
+         WHERE mandoubs.version < excluded.version \
+           AND mandoubs.dirty = 0",
+    )
+    .bind(id)
+    .bind(p.get("name").and_then(|v| v.as_str()).unwrap_or(""))
+    .bind(p.get("phone").and_then(|v| v.as_str()))
     .bind(p.get("is_active").and_then(|v| v.as_bool()).unwrap_or(true) as i64)
     .bind(p.get("notes").and_then(|v| v.as_str()))
     .bind(
@@ -880,17 +932,20 @@ pub(crate) async fn apply_visits_change(
     sqlx::query(
         "INSERT INTO visits ( \
             id, patient_id, status, receptionist_user_id, check_type_id, \
-            check_subtype_id, doctor_id, operator_id, dye, report, \
+            check_subtype_id, doctor_id, operator_id, mandoub_id, dye, report, dalal, \
+            discount, \
             locked_at, voided_at, voided_by_user_id, void_reason, \
-            price_snapshot_iqd, dye_cost_snapshot_iqd, report_cost_snapshot_iqd, \
+            price_snapshot_iqd, dye_cost_snapshot_iqd, report_amount_snapshot_iqd, \
+            report_pct_snapshot, reporting_doctor_name_snapshot, \
             doctor_cut_snapshot_iqd, operator_cut_snapshot_iqd, \
+            mandoub_cut_snapshot_iqd, mandoub_name_snapshot, \
             internal_pct_snapshot, total_amount_iqd_snapshot, amount_paid_override_iqd, \
             patient_name_snapshot, doctor_name_snapshot, operator_name_snapshot, \
             check_type_name_ar_snapshot, check_type_name_en_snapshot, \
             check_subtype_name_ar_snapshot, check_subtype_name_en_snapshot, \
             created_at, updated_at, deleted_at, version, dirty, \
             last_synced_at, origin_device_id, entity_id \
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?) \
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?) \
          ON CONFLICT(id) DO UPDATE SET \
             patient_id = excluded.patient_id, \
             status = excluded.status, \
@@ -899,17 +954,24 @@ pub(crate) async fn apply_visits_change(
             check_subtype_id = excluded.check_subtype_id, \
             doctor_id = excluded.doctor_id, \
             operator_id = excluded.operator_id, \
+            mandoub_id = excluded.mandoub_id, \
             dye = excluded.dye, \
             report = excluded.report, \
+            dalal = excluded.dalal, \
+            discount = excluded.discount, \
             locked_at = excluded.locked_at, \
             voided_at = excluded.voided_at, \
             voided_by_user_id = excluded.voided_by_user_id, \
             void_reason = excluded.void_reason, \
             price_snapshot_iqd = excluded.price_snapshot_iqd, \
             dye_cost_snapshot_iqd = excluded.dye_cost_snapshot_iqd, \
-            report_cost_snapshot_iqd = excluded.report_cost_snapshot_iqd, \
+            report_amount_snapshot_iqd = excluded.report_amount_snapshot_iqd, \
+            report_pct_snapshot = excluded.report_pct_snapshot, \
+            reporting_doctor_name_snapshot = excluded.reporting_doctor_name_snapshot, \
             doctor_cut_snapshot_iqd = excluded.doctor_cut_snapshot_iqd, \
             operator_cut_snapshot_iqd = excluded.operator_cut_snapshot_iqd, \
+            mandoub_cut_snapshot_iqd = excluded.mandoub_cut_snapshot_iqd, \
+            mandoub_name_snapshot = excluded.mandoub_name_snapshot, \
             internal_pct_snapshot = excluded.internal_pct_snapshot, \
             total_amount_iqd_snapshot = excluded.total_amount_iqd_snapshot, \
             amount_paid_override_iqd = excluded.amount_paid_override_iqd, \
@@ -946,17 +1008,47 @@ pub(crate) async fn apply_visits_change(
     .bind(p.get("check_subtype_id").and_then(|v| v.as_str()))
     .bind(p.get("doctor_id").and_then(|v| v.as_str()))
     .bind(p.get("operator_id").and_then(|v| v.as_str()))
+    .bind(p.get("mandoub_id").and_then(|v| v.as_str()))
     .bind(p.get("dye").and_then(|v| v.as_bool()).unwrap_or(false) as i64)
     .bind(p.get("report").and_then(|v| v.as_bool()).unwrap_or(false) as i64)
+    .bind(
+        // `dalal` may arrive as a JSON bool (desktop wire shape) or as an int
+        // 0/1 (server column); accept both and default to 0.
+        p.get("dalal")
+            .map(|v| {
+                v.as_bool()
+                    .map(|b| b as i64)
+                    .or_else(|| v.as_i64())
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0),
+    )
+    .bind(
+        // `discount` shares the dalal wire-shape tolerance: bool (desktop) or
+        // int 0/1 (server column). Defaults to 0 (no discount) when absent so a
+        // pre-feature server payload converges cleanly.
+        p.get("discount")
+            .map(|v| {
+                v.as_bool()
+                    .map(|b| b as i64)
+                    .or_else(|| v.as_i64())
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0),
+    )
     .bind(p.get("locked_at").and_then(|v| v.as_str()))
     .bind(p.get("voided_at").and_then(|v| v.as_str()))
     .bind(p.get("voided_by_user_id").and_then(|v| v.as_str()))
     .bind(p.get("void_reason").and_then(|v| v.as_str()))
     .bind(p.get("price_snapshot_iqd").and_then(|v| v.as_i64()))
     .bind(p.get("dye_cost_snapshot_iqd").and_then(|v| v.as_i64()))
-    .bind(p.get("report_cost_snapshot_iqd").and_then(|v| v.as_i64()))
+    .bind(p.get("report_amount_snapshot_iqd").and_then(|v| v.as_i64()))
+    .bind(p.get("report_pct_snapshot").and_then(|v| v.as_i64()))
+    .bind(p.get("reporting_doctor_name_snapshot").and_then(|v| v.as_str()))
     .bind(p.get("doctor_cut_snapshot_iqd").and_then(|v| v.as_i64()))
     .bind(p.get("operator_cut_snapshot_iqd").and_then(|v| v.as_i64()))
+    .bind(p.get("mandoub_cut_snapshot_iqd").and_then(|v| v.as_i64()))
+    .bind(p.get("mandoub_name_snapshot").and_then(|v| v.as_str()))
     .bind(p.get("internal_pct_snapshot").and_then(|v| v.as_i64()))
     .bind(p.get("total_amount_iqd_snapshot").and_then(|v| v.as_i64()))
     .bind(p.get("amount_paid_override_iqd").and_then(|v| v.as_i64()))
@@ -1053,14 +1145,14 @@ pub(crate) async fn apply_daily_close_change(
         "INSERT INTO daily_close ( \
             id, target_date, tz_offset, input_hash, \
             total_revenue_iqd, total_collected_iqd, total_discount_iqd, \
-            total_doctor_cuts_iqd, total_operator_cuts_iqd, \
+            total_doctor_cuts_iqd, total_operator_cuts_iqd, total_report_iqd, \
             total_inventory_consumption_value_iqd, net_iqd, locked_count, \
             voided_count, voided_value_iqd, \
             signed_by_user_id, signed_by_name, signed_at, \
             reopened_at, reopened_by_user_id, reopen_reason, \
             created_at, updated_at, deleted_at, version, dirty, \
             last_synced_at, origin_device_id, entity_id \
-         ) VALUES (?,?,?,?, ?,?,?,?,?, ?,?,?, ?,?, ?,?,?, ?,?,?, ?,?,?,?,0, ?,?,?) \
+         ) VALUES (?,?,?,?, ?,?,?,?,?,?, ?,?,?, ?,?, ?,?,?, ?,?,?, ?,?,?,?,0, ?,?,?) \
          ON CONFLICT(id) DO UPDATE SET \
             reopened_at = excluded.reopened_at, \
             reopened_by_user_id = excluded.reopened_by_user_id, \
@@ -1083,6 +1175,7 @@ pub(crate) async fn apply_daily_close_change(
     .bind(i64_field("total_discount_iqd"))
     .bind(i64_field("total_doctor_cuts_iqd"))
     .bind(i64_field("total_operator_cuts_iqd"))
+    .bind(i64_field("total_report_iqd"))
     .bind(i64_field("total_inventory_consumption_value_iqd"))
     .bind(i64_field("net_iqd"))
     .bind(i64_field("locked_count"))
@@ -1178,9 +1271,9 @@ mod secondary_unique_collision_tests {
     async fn seed_check_type(pool: &sqlx::SqlitePool, id: &str) {
         sqlx::query(
             "INSERT INTO check_types (id, name_ar, has_subtypes, base_price_iqd, \
-             dye_supported, report_supported, sort_order, is_active, \
+             dye_supported, sort_order, is_active, \
              created_at, updated_at, version, dirty, entity_id) \
-             VALUES (?, 'فحص', 0, 1000, 0, 0, 0, 1, \
+             VALUES (?, 'فحص', 0, 1000, 0, 0, 1, \
              '2026-06-26T09:00:00Z', '2026-06-26T09:00:00Z', 1, 0, ?)",
         )
         .bind(id)
@@ -1380,5 +1473,224 @@ mod secondary_unique_collision_tests {
                 .await
                 .unwrap();
         assert!(old_closed.is_some(), "older open shift should be closed");
+    }
+
+    async fn seed_patient(pool: &sqlx::SqlitePool, id: &str) {
+        sqlx::query(
+            "INSERT INTO patients (id, name, created_at, updated_at, version, dirty, entity_id) \
+             VALUES (?, 'Pat', '2026-06-26T09:00:00Z', '2026-06-26T09:00:00Z', 1, 0, ?)",
+        )
+        .bind(id)
+        .bind(E)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn seed_doctor(pool: &sqlx::SqlitePool, id: &str) {
+        sqlx::query(
+            "INSERT INTO doctors (id, name, is_active, created_at, updated_at, version, dirty, entity_id) \
+             VALUES (?, 'Doc', 1, '2026-06-26T09:00:00Z', '2026-06-26T09:00:00Z', 1, 0, ?)",
+        )
+        .bind(id)
+        .bind(E)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn seed_mandoub(pool: &sqlx::SqlitePool, id: &str) {
+        sqlx::query(
+            "INSERT INTO mandoubs (id, name, is_active, created_at, updated_at, version, dirty, entity_id) \
+             VALUES (?, 'Rep', 1, '2026-06-26T09:00:00Z', '2026-06-26T09:00:00Z', 1, 0, ?)",
+        )
+        .bind(id)
+        .bind(E)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// A locked visit pull payload carrying a مندوب, parameterized by the cut
+    /// and name so two successive versions can diverge on exactly those fields.
+    #[allow(clippy::too_many_arguments)]
+    fn mandoub_visit_payload(
+        id: &str,
+        patient: &str,
+        user: &str,
+        check_type: &str,
+        doctor: &str,
+        operator: &str,
+        mandoub: &str,
+        cut: i64,
+        mandoub_name: &str,
+        updated_at: &str,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "id": id, "patient_id": patient, "status": "locked",
+            "receptionist_user_id": user, "check_type_id": check_type,
+            "check_subtype_id": null, "doctor_id": doctor, "operator_id": operator,
+            "mandoub_id": mandoub, "dye": false, "report": false, "dalal": false,
+            "locked_at": updated_at, "voided_at": null, "voided_by_user_id": null,
+            "void_reason": null,
+            "price_snapshot_iqd": 50000, "dye_cost_snapshot_iqd": 0,
+            "report_amount_snapshot_iqd": 0, "report_pct_snapshot": null,
+            "reporting_doctor_name_snapshot": null,
+            "doctor_cut_snapshot_iqd": 15000, "operator_cut_snapshot_iqd": 4000,
+            "mandoub_cut_snapshot_iqd": cut, "mandoub_name_snapshot": mandoub_name,
+            "internal_pct_snapshot": null, "total_amount_iqd_snapshot": 50000,
+            "amount_paid_override_iqd": null,
+            "patient_name_snapshot": "Pat", "doctor_name_snapshot": "Doc",
+            "operator_name_snapshot": "Op", "check_type_name_ar_snapshot": "فحص",
+            "check_type_name_en_snapshot": null,
+            "check_subtype_name_ar_snapshot": null, "check_subtype_name_en_snapshot": null,
+            "created_at": "2026-06-26T09:00:00Z", "updated_at": updated_at,
+            "deleted_at": null, "origin_device_id": "dev-b", "entity_id": E,
+        })
+    }
+
+    /// Regression: a newer pulled version of an existing locked visit must
+    /// converge the مندوب snapshot columns. The `ON CONFLICT DO UPDATE SET`
+    /// clause once updated `mandoub_id` but omitted `mandoub_cut_snapshot_iqd`
+    /// and `mandoub_name_snapshot`, so a re-locked/corrected visit syncing from
+    /// another device left the local cut + name stale (the field-drift bug
+    /// class). This pulls v1 (cut 500, "Old Rep") then v2 (cut 1000, "New Rep")
+    /// and asserts both مندوب snapshots fast-forward.
+    #[tokio::test]
+    async fn visit_pull_update_converges_mandoub_snapshots() {
+        let pool = migrated_pool().await;
+        let patient = "0190d000-0000-7000-8000-000000000001";
+        let user = "0190d000-0000-7000-8000-000000000002";
+        let ct = "0190d000-0000-7000-8000-000000000003";
+        let doctor = "0190d000-0000-7000-8000-000000000004";
+        let operator = "0190d000-0000-7000-8000-000000000005";
+        let mandoub = "0190d000-0000-7000-8000-000000000006";
+        seed_patient(&pool, patient).await;
+        seed_user(&pool, user).await;
+        seed_check_type(&pool, ct).await;
+        seed_doctor(&pool, doctor).await;
+        seed_operator(&pool, operator).await;
+        seed_mandoub(&pool, mandoub).await;
+
+        let visit = "0190e000-0000-7000-8000-0000000000aa";
+        let v1 = change(
+            "visits",
+            mandoub_visit_payload(
+                visit,
+                patient,
+                user,
+                ct,
+                doctor,
+                operator,
+                mandoub,
+                500,
+                "Old Rep",
+                "2026-06-26T10:00:00Z",
+            ),
+            1,
+        );
+        let mut tx = pool.begin().await.unwrap();
+        apply_visits_change(&mut tx, &v1).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let v2 = change(
+            "visits",
+            mandoub_visit_payload(
+                visit,
+                patient,
+                user,
+                ct,
+                doctor,
+                operator,
+                mandoub,
+                1000,
+                "New Rep",
+                "2026-06-26T11:00:00Z",
+            ),
+            2,
+        );
+        let mut tx = pool.begin().await.unwrap();
+        apply_visits_change(&mut tx, &v2).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let row = sqlx::query(
+            "SELECT mandoub_cut_snapshot_iqd, mandoub_name_snapshot, version \
+             FROM visits WHERE id = ?",
+        )
+        .bind(visit)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.get::<i64, _>("version"), 2, "version fast-forwarded");
+        assert_eq!(
+            row.get::<i64, _>("mandoub_cut_snapshot_iqd"),
+            1000,
+            "مندوب cut snapshot must converge to the newer pull (was stale at 500 before the fix)"
+        );
+        assert_eq!(
+            row.get::<String, _>("mandoub_name_snapshot"),
+            "New Rep",
+            "مندوب name snapshot must converge to the newer pull"
+        );
+    }
+
+    /// A pulled locked visit carrying `discount: true` must land with the
+    /// discount column set and a zeroed doctor cut. Also proves the bool wire
+    /// shape (JSON `true`) is accepted by the discount bind.
+    #[tokio::test]
+    async fn visit_pull_applies_discount_flag_and_zero_doctor_cut() {
+        let pool = migrated_pool().await;
+        let patient = "0190d100-0000-7000-8000-000000000001";
+        let user = "0190d100-0000-7000-8000-000000000002";
+        let ct = "0190d100-0000-7000-8000-000000000003";
+        let doctor = "0190d100-0000-7000-8000-000000000004";
+        let operator = "0190d100-0000-7000-8000-000000000005";
+        seed_patient(&pool, patient).await;
+        seed_user(&pool, user).await;
+        seed_check_type(&pool, ct).await;
+        seed_doctor(&pool, doctor).await;
+        seed_operator(&pool, operator).await;
+
+        let visit = "0190e100-0000-7000-8000-0000000000aa";
+        let payload = serde_json::json!({
+            "id": visit, "patient_id": patient, "status": "locked",
+            "receptionist_user_id": user, "check_type_id": ct,
+            "check_subtype_id": null, "doctor_id": doctor, "operator_id": operator,
+            "mandoub_id": null, "dye": false, "report": false, "dalal": false,
+            "discount": true,
+            "locked_at": "2026-06-26T10:00:00Z", "voided_at": null,
+            "voided_by_user_id": null, "void_reason": null,
+            "price_snapshot_iqd": 50000, "dye_cost_snapshot_iqd": 0,
+            "report_amount_snapshot_iqd": 0, "report_pct_snapshot": null,
+            "reporting_doctor_name_snapshot": null,
+            "doctor_cut_snapshot_iqd": 0, "operator_cut_snapshot_iqd": 4000,
+            "mandoub_cut_snapshot_iqd": null, "mandoub_name_snapshot": null,
+            "internal_pct_snapshot": null, "total_amount_iqd_snapshot": 50000,
+            "amount_paid_override_iqd": null,
+            "patient_name_snapshot": "Pat", "doctor_name_snapshot": "Doc",
+            "operator_name_snapshot": "Op", "check_type_name_ar_snapshot": "فحص",
+            "check_type_name_en_snapshot": null,
+            "check_subtype_name_ar_snapshot": null,
+            "check_subtype_name_en_snapshot": null,
+            "created_at": "2026-06-26T09:00:00Z",
+            "updated_at": "2026-06-26T10:00:00Z",
+            "deleted_at": null, "origin_device_id": "dev-b", "entity_id": E,
+        });
+        let v = change("visits", payload, 1);
+        let mut tx = pool.begin().await.unwrap();
+        apply_visits_change(&mut tx, &v).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let row = sqlx::query("SELECT discount, doctor_cut_snapshot_iqd FROM visits WHERE id = ?")
+            .bind(visit)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<i64, _>("discount"), 1, "discount flag applied");
+        assert_eq!(
+            row.get::<i64, _>("doctor_cut_snapshot_iqd"),
+            0,
+            "discounted visit has a zero doctor cut"
+        );
     }
 }

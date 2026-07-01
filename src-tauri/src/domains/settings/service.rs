@@ -203,11 +203,17 @@ impl SettingsService {
 
 fn validate_value_for_key(key: &str, value: &SettingValue) -> AppResult<()> {
     match key {
-        "dye_cost_iqd" | "report_cost_iqd" => match value {
+        "dye_cost_iqd" => match value {
             SettingValue::Int(n) if *n >= 0 => Ok(()),
             _ => Err(AppError::Validation(format!(
                 "{key} must be a non-negative integer"
             ))),
+        },
+        "report_pct" => match value {
+            SettingValue::Int(n) if (0..=100).contains(n) => Ok(()),
+            _ => Err(AppError::Validation(
+                "report_pct must be an integer 0..=100".into(),
+            )),
         },
         "internal_doctor_pct" => match value {
             SettingValue::Int(n) if (0..=100).contains(n) => Ok(()),
@@ -236,7 +242,8 @@ fn validate_value_for_key(key: &str, value: &SettingValue) -> AppResult<()> {
         "thermal_printer_name"
         | "clinic_display_name_ar"
         | "clinic_display_name_en"
-        | "currency_symbol" => match value {
+        | "currency_symbol"
+        | "reporting_doctor_name" => match value {
             SettingValue::Text(_) => Ok(()),
             _ => Err(AppError::Validation(format!("{key} must be text"))),
         },
@@ -342,9 +349,28 @@ mod tests {
     }
 
     #[test]
-    fn report_cost_uses_same_non_negative_int_rule_as_dye_cost() {
-        assert!(validate_value_for_key("report_cost_iqd", &SettingValue::Int(0)).is_ok());
-        assert!(validate_value_for_key("report_cost_iqd", &SettingValue::Int(-1)).is_err());
+    fn report_pct_accepts_0_to_100_and_rejects_out_of_range() {
+        assert!(validate_value_for_key("report_pct", &SettingValue::Int(0)).is_ok());
+        assert!(validate_value_for_key("report_pct", &SettingValue::Int(20)).is_ok());
+        assert!(validate_value_for_key("report_pct", &SettingValue::Int(100)).is_ok());
+        assert!(validate_value_for_key("report_pct", &SettingValue::Int(-1)).is_err());
+        assert!(validate_value_for_key("report_pct", &SettingValue::Int(101)).is_err());
+        assert!(validate_value_for_key("report_pct", &SettingValue::Text("20".into())).is_err());
+    }
+
+    #[test]
+    fn reporting_doctor_name_accepts_text_including_empty() {
+        assert!(validate_value_for_key(
+            "reporting_doctor_name",
+            &SettingValue::Text(String::new())
+        )
+        .is_ok());
+        assert!(validate_value_for_key(
+            "reporting_doctor_name",
+            &SettingValue::Text("Dr X".into())
+        )
+        .is_ok());
+        assert!(validate_value_for_key("reporting_doctor_name", &SettingValue::Int(1)).is_err());
     }
 
     #[test]

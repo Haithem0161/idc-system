@@ -4,12 +4,18 @@
  * into this shape so the list, search, and selection logic stay in one place.
  */
 
-export type ExplorerEntity = "visits" | "doctors" | "operators" | "checks"
+export type ExplorerEntity =
+  | "visits"
+  | "doctors"
+  | "operators"
+  | "mandoubs"
+  | "checks"
 
 export const EXPLORER_ENTITIES: ExplorerEntity[] = [
   "visits",
   "doctors",
   "operators",
+  "mandoubs",
   "checks",
 ]
 
@@ -18,6 +24,7 @@ export function isExplorerEntity (value: string | undefined): value is ExplorerE
     value === "visits" ||
     value === "doctors" ||
     value === "operators" ||
+    value === "mandoubs" ||
     value === "checks"
   )
 }

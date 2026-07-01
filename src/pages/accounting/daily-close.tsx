@@ -301,6 +301,14 @@ function DailyCloseBody ({ close, locale }: { close: DailyCloseRecord; locale: s
           value={formatIqd(close.total_operator_cuts_iqd, { locale, withSuffix: true })}
         />
         <Stat
+          label={t("accounting.kpi.mandoub_cuts", { defaultValue: "Representative cuts" })}
+          value={formatIqd(close.total_mandoub_cuts_iqd, { locale, withSuffix: true })}
+        />
+        <Stat
+          label={t("accounting.kpi.report_payable", { defaultValue: "Reporting doctor" })}
+          value={formatIqd(close.total_report_iqd, { locale, withSuffix: true })}
+        />
+        <Stat
           label={t("accounting.kpi.inventory_value", { defaultValue: "Inventory value" })}
           value={formatIqd(close.total_inventory_consumption_value_iqd, {
             locale,
@@ -368,6 +376,19 @@ function DailyCloseBody ({ close, locale }: { close: DailyCloseRecord; locale: s
             String(o.visits),
             formatIqd(o.operator_cut_iqd, { locale }),
             formatHours(o.hours_on_shift_milli),
+          ])}
+        />
+        <BreakdownTable
+          title={t("accounting.daily_close.per_mandoub", { defaultValue: "Per representative" })}
+          headers={[
+            t("accounting.daily_close.col.name", { defaultValue: "Representative" }),
+            t("accounting.daily_close.col.visits", { defaultValue: "Visits" }),
+            t("accounting.daily_close.col.cut", { defaultValue: "Cut" }),
+          ]}
+          rows={close.per_mandoub.map((m) => [
+            m.name || m.mandoub_id,
+            String(m.visits),
+            formatIqd(m.mandoub_cut_iqd, { locale }),
           ])}
         />
         <BreakdownTable

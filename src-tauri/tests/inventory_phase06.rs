@@ -577,9 +577,9 @@ async fn insert_dummy_visit(pool: &SqlitePool, user_id: Uuid) -> Uuid {
     .unwrap();
     sqlx::query(
         "INSERT INTO check_types (id, name_ar, has_subtypes, base_price_iqd, dye_supported, \
-         report_supported, sort_order, is_active, created_at, updated_at, version, dirty, \
+         sort_order, is_active, created_at, updated_at, version, dirty, \
          entity_id) \
-         VALUES (?, 'ct', 0, 10000, 0, 0, 0, 1, ?, ?, 1, 1, ?)",
+         VALUES (?, 'ct', 0, 10000, 0, 0, 1, ?, ?, 1, 1, ?)",
     )
     .bind(check_type_id.to_string())
     .bind(&now)
@@ -593,7 +593,7 @@ async fn insert_dummy_visit(pool: &SqlitePool, user_id: Uuid) -> Uuid {
             id, patient_id, status, receptionist_user_id, check_type_id, \
             dye, report, locked_at, voided_at, voided_by_user_id, void_reason, \
             patient_name_snapshot, check_type_name_ar_snapshot, \
-            price_snapshot_iqd, dye_cost_snapshot_iqd, report_cost_snapshot_iqd, \
+            price_snapshot_iqd, dye_cost_snapshot_iqd, report_amount_snapshot_iqd, \
             doctor_cut_snapshot_iqd, operator_cut_snapshot_iqd, \
             internal_pct_snapshot, total_amount_iqd_snapshot, \
             operator_id, \

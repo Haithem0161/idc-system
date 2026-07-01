@@ -37,7 +37,7 @@ use app_lib::domains::catalog::domain::repositories::{
 use app_lib::domains::catalog::domain::value_objects::CutKind;
 use app_lib::domains::catalog::infrastructure::{
     SqliteCheckSubtypeRepo, SqliteCheckTypeRepo, SqliteDoctorPricingRepo, SqliteDoctorRepo,
-    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
+    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteMandoubRepo, SqliteOperatorRepo,
     SqliteOperatorSpecialtyRepo,
 };
 use app_lib::domains::patients::domain::entities::{Patient, PatientNewInput};
@@ -153,7 +153,6 @@ async fn seed() -> Fixture {
         has_subtypes: false,
         base_price_iqd: Some(50_000),
         dye_supported: true,
-        report_supported: false,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
@@ -273,6 +272,7 @@ async fn seed() -> Fixture {
         doctor_pricing: dp_repo,
         operators: op_repo,
         operator_specialties: os_repo,
+        mandoubs: Arc::new(SqliteMandoubRepo::new(pool.clone())),
         consumption: cons_repo,
         inventory_items: item_repo,
         shifts: shift_repo,
@@ -305,7 +305,8 @@ async fn seed() -> Fixture {
 fn settings() -> MoneySettings {
     MoneySettings {
         dye_cost_iqd: 2_000,
-        report_cost_iqd: 3_000,
+        report_pct: 20,
+        reporting_doctor_name: String::new(),
         internal_doctor_pct: 40,
     }
 }
@@ -324,8 +325,11 @@ async fn create_draft_and_lock_produces_receipt_and_consumption() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(f.doctor.id),
+                mandoub_id: None,
                 dye: true,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -339,6 +343,7 @@ async fn create_draft_and_lock_produces_receipt_and_consumption() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),
@@ -388,6 +393,94 @@ async fn create_draft_and_lock_produces_receipt_and_consumption() {
 }
 
 #[tokio::test]
+async fn discount_visit_locks_with_zero_doctor_cut_and_persists_flag() {
+    // A referring-doctor visit with discount on: the money engine zeroes the
+    // doctor cut for this visit; price, dye, operator cut, and total are
+    // unchanged. The discount flag round-trips through the persisted row.
+    let f = seed().await;
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: Some(f.doctor.id),
+                mandoub_id: None,
+                dye: true,
+                report: false,
+                dalal: false,
+                discount: true,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(draft.discount);
+
+    let lock_result = f
+        .visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            None,
+            None,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await
+        .unwrap();
+
+    let snap = lock_result.visit.snapshots.as_ref().unwrap();
+    // Same fixture as the non-discount lock: base 50000, dye 2000, total 52000.
+    // The 25% (12500) doctor cut is zeroed by the discount; nothing else moves.
+    assert_eq!(snap.price_iqd, 50_000);
+    assert_eq!(snap.dye_cost_iqd, 2_000);
+    assert_eq!(snap.doctor_cut_iqd, 0);
+    assert_eq!(snap.total_amount_iqd, 52_000);
+    assert!(lock_result.visit.discount);
+
+    // The discount flag is persisted on the visit row.
+    let row: (i64,) = sqlx::query_as("SELECT discount FROM visits WHERE id = ?")
+        .bind(draft.id.to_string())
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+    assert_eq!(row.0, 1);
+}
+
+#[tokio::test]
+async fn create_draft_rejects_discount_without_referring_doctor() {
+    // A discount requires a real referring doctor; a house (no-doctor) visit
+    // with discount on is rejected at the service boundary.
+    let f = seed().await;
+    let err = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: None,
+                mandoub_id: None,
+                dye: false,
+                report: false,
+                dalal: false,
+                discount: true,
+            },
+        )
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
 async fn lock_rejected_when_no_qualified_operator_on_shift() {
     let f = seed().await;
     // Soft-delete the specialty so the operator is no longer qualified.
@@ -415,8 +508,11 @@ async fn lock_rejected_when_no_qualified_operator_on_shift() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(f.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -429,6 +525,7 @@ async fn lock_rejected_when_no_qualified_operator_on_shift() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),
@@ -451,8 +548,11 @@ async fn void_offsets_inventory_and_marks_visit_voided() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(f.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -464,6 +564,7 @@ async fn void_offsets_inventory_and_marks_visit_voided() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),
@@ -520,8 +621,11 @@ async fn discard_locked_visit_is_rejected() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(f.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -533,6 +637,7 @@ async fn discard_locked_visit_is_rejected() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),
@@ -560,8 +665,11 @@ async fn discard_draft_soft_deletes_and_emits_audit() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -657,8 +765,11 @@ async fn create_and_lock_visit(f: &Fixture) -> Uuid {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(f.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -669,6 +780,7 @@ async fn create_and_lock_visit(f: &Fixture) -> Uuid {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),
@@ -732,8 +844,11 @@ async fn lock_house_visit_records_internal_pct_and_null_doctor_snapshot() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -744,6 +859,7 @@ async fn lock_house_visit_records_internal_pct_and_null_doctor_snapshot() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),
@@ -798,8 +914,11 @@ async fn update_draft_rejected_on_locked_visit() {
                 patient_id: None,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: Some(true),
                 report: None,
+                dalal: None,
+                discount: None,
             },
         )
         .await;
@@ -820,8 +939,11 @@ async fn lock_rejects_when_operator_not_in_qualified_set() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(f.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -834,6 +956,7 @@ async fn lock_rejects_when_operator_not_in_qualified_set() {
             UserRole::Receptionist,
             draft.id,
             stranger_id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),
@@ -862,6 +985,7 @@ async fn lock_rejects_voided_visit() {
             UserRole::Receptionist,
             visit_id,
             f.operator.id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),
@@ -979,8 +1103,11 @@ async fn create_draft_rejects_subtype_when_check_type_lacks_subtypes() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: Some(bogus_subtype),
                 doctor_id: None,
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await;
@@ -1007,8 +1134,11 @@ async fn create_draft_rejects_unsupported_dye() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: true,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await;
@@ -1029,8 +1159,11 @@ async fn create_draft_rejected_for_accountant_role() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: None,
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await;
@@ -1161,8 +1294,11 @@ async fn pricing_resolve_returns_fresh_snapshot_without_mutating_visit() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(f.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -1204,8 +1340,11 @@ async fn lock_increments_visit_version_monotonically_from_create() {
                 check_type_id: f.check_type.id,
                 check_subtype_id: None,
                 doctor_id: Some(f.doctor.id),
+                mandoub_id: None,
                 dye: false,
                 report: false,
+                dalal: false,
+                discount: false,
             },
         )
         .await
@@ -1217,6 +1356,7 @@ async fn lock_increments_visit_version_monotonically_from_create() {
             UserRole::Receptionist,
             draft.id,
             f.operator.id,
+            None,
             None,
             settings(),
             ReceiptRenderOptions::default(),

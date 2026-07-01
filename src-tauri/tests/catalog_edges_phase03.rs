@@ -52,7 +52,6 @@ fn flat_check_type(name: &str, price: i64) -> CheckType {
         has_subtypes: false,
         base_price_iqd: Some(price),
         dye_supported: false,
-        report_supported: false,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
@@ -528,8 +527,8 @@ async fn edge_68_integrity_check_type_xor_db_check_constraint_blocks_violation()
     let raw_id = Uuid::now_v7().to_string();
     let res = sqlx::query(
         "INSERT INTO check_types (id, name_ar, has_subtypes, base_price_iqd, dye_supported,
-         report_supported, sort_order, is_active, created_at, updated_at, version, dirty,
-         entity_id) VALUES (?, 'X', 1, 5000, 0, 0, 0, 1, datetime('now'), datetime('now'), 1, 1, ?)",
+         sort_order, is_active, created_at, updated_at, version, dirty,
+         entity_id) VALUES (?, 'X', 1, 5000, 0, 0, 1, datetime('now'), datetime('now'), 1, 1, ?)",
     )
     .bind(&raw_id)
     .bind(ENTITY_ID)
@@ -622,7 +621,6 @@ async fn edge_68_integrity_inventory_consumption_subtype_fk_enforced() {
         has_subtypes: true,
         base_price_iqd: None,
         dye_supported: false,
-        report_supported: false,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,

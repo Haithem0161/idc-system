@@ -9,7 +9,7 @@ use crate::error::AppResult;
 
 use super::entities::{
     CheckSubtype, CheckType, Doctor, DoctorCheckPricing, InventoryConsumptionMap, InventoryItem,
-    Operator, OperatorSpecialty,
+    Mandoub, Operator, OperatorSpecialty,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -67,6 +67,13 @@ pub trait OperatorRepo: Send + Sync {
     async fn upsert(&self, tx: &mut Tx<'_>, op: &Operator) -> AppResult<()>;
     async fn get_by_id(&self, id: Uuid) -> AppResult<Option<Operator>>;
     async fn list(&self, filter: CatalogListFilter) -> AppResult<Vec<Operator>>;
+}
+
+#[async_trait]
+pub trait MandoubRepo: Send + Sync {
+    async fn upsert(&self, tx: &mut Tx<'_>, m: &Mandoub) -> AppResult<()>;
+    async fn get_by_id(&self, id: Uuid) -> AppResult<Option<Mandoub>>;
+    async fn list(&self, filter: CatalogListFilter) -> AppResult<Vec<Mandoub>>;
 }
 
 #[async_trait]

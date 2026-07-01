@@ -1,0 +1,19 @@
+-- Phase 12: external-doctor "discount" flag on visits.
+--
+-- A discount applies ONLY to a visit with a real referring doctor (not house,
+-- not دلال). When set, the referring doctor's cut for THAT visit is forced to 0
+-- by the money engine. Nothing else moves: the patient price/total, the operator
+-- cut, the report carve-out, and the مندوب cut are all unaffected. The effect is
+-- already captured in the snapshot (doctor_cut_snapshot_iqd = 0); this flag
+-- records the receptionist's intent so the visit detail page can surface it and
+-- the draft form can round-trip the toggle.
+--
+-- Additive, forward-only: a plain ADD COLUMN with a 0/1 CHECK and a 0 default.
+-- No new locked-CHECK clause is needed -- a discounted doctor visit is a normal
+-- doctor visit whose doctor_cut happens to be 0, which the existing CHECK already
+-- accepts. Legacy rows get discount = 0 (no discount), the correct historical
+-- value.
+--
+-- Conflict policy: unchanged (visits manual/version-based; the discount flag
+-- rides inside the same versioned visit row alongside dye/report/dalal).
+ALTER TABLE visits ADD COLUMN discount INTEGER NOT NULL DEFAULT 0 CHECK (discount IN (0,1));

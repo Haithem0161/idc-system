@@ -10,8 +10,27 @@ export interface VisitTabForm {
   patientName: string
   subtypeId: string | null
   doctorId: string | null
+  /**
+   * Doctor-substitute "dalal" mode: a flat 10 IQD cut. Mutually exclusive with
+   * a referring doctor (`doctorId`); selecting one clears the other.
+   */
+  dalal: boolean
+  /**
+   * Referring representative (مندوب). Only valid alongside a real referring
+   * doctor; auto-cleared to null when the doctor is removed or switched to
+   * house/dalal. The chosen cut below is sent at lock time.
+   */
+  mandoubId: string | null
+  /** The chosen representative cut in IQD: 500 or 1000. Sent only when a mandoub is set. */
+  mandoubCut: 500 | 1000
   dye: boolean
   report: boolean
+  /**
+   * Discount: zero the referring doctor's cut for this visit. Only valid
+   * alongside a real referring doctor (`doctorId`); auto-cleared to false when
+   * the doctor is removed or switched to house/dalal. Sent on the draft.
+   */
+  discount: boolean
   /**
    * Receptionist price override: when true, the patient paid a custom amount
    * (captured in `amountPaidOverrideIqd`) instead of the billed total. Does NOT
@@ -68,8 +87,12 @@ const emptyForm: VisitTabForm = {
   patientName: "",
   subtypeId: null,
   doctorId: null,
+  dalal: false,
+  mandoubId: null,
+  mandoubCut: 500,
   dye: false,
   report: false,
+  discount: false,
   overrideEnabled: false,
   amountPaidOverrideIqd: "",
 }
@@ -180,8 +203,12 @@ export const useVisitTabsStore = create<VisitTabsState>()(
             patientName: "",
             subtypeId: t.form.subtypeId,
             doctorId: t.form.doctorId,
+            dalal: t.form.dalal,
+            mandoubId: t.form.mandoubId,
+            mandoubCut: t.form.mandoubCut,
             dye: t.form.dye,
             report: t.form.report,
+            discount: t.form.discount,
           },
         })),
       }),

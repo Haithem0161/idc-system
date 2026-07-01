@@ -23,11 +23,11 @@ export interface SeedResult {
 }
 
 const CHECK_TYPES = [
-  { name_ar: "أشعة سينية", name_en: "X-Ray", base_price_iqd: 15000, dye_supported: false, report_supported: true },
-  { name_ar: "سونار", name_en: "Ultrasound", base_price_iqd: 25000, dye_supported: false, report_supported: true },
-  { name_ar: "مفراس", name_en: "CT Scan", base_price_iqd: 75000, dye_supported: true, report_supported: true },
-  { name_ar: "رنين", name_en: "MRI", base_price_iqd: 120000, dye_supported: true, report_supported: true },
-  { name_ar: "تخطيط صدى القلب", name_en: "Echo", base_price_iqd: 35000, dye_supported: false, report_supported: true },
+  { name_ar: "أشعة سينية", name_en: "X-Ray", base_price_iqd: 15000, dye_supported: false },
+  { name_ar: "سونار", name_en: "Ultrasound", base_price_iqd: 25000, dye_supported: false },
+  { name_ar: "مفراس", name_en: "CT Scan", base_price_iqd: 75000, dye_supported: true },
+  { name_ar: "رنين", name_en: "MRI", base_price_iqd: 120000, dye_supported: true },
+  { name_ar: "تخطيط صدى القلب", name_en: "Echo", base_price_iqd: 35000, dye_supported: false },
 ]
 
 const DOCTORS = [

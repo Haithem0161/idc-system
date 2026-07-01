@@ -18,7 +18,7 @@ use app_lib::domains::catalog::domain::services::EffectivePriceQuery;
 use app_lib::domains::catalog::domain::value_objects::CutKind;
 use app_lib::domains::catalog::infrastructure::{
     SqliteCheckSubtypeRepo, SqliteCheckTypeRepo, SqliteDoctorPricingRepo, SqliteDoctorRepo,
-    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
+    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteMandoubRepo, SqliteOperatorRepo,
     SqliteOperatorSpecialtyRepo,
 };
 use app_lib::domains::catalog::service::operator_specialty_service::OperatorSpecialtyInput;
@@ -90,6 +90,7 @@ async fn rig() -> Rig {
         doctor_pricing_repo: Arc::new(SqliteDoctorPricingRepo::new(pool.clone())),
         operator_repo: Arc::new(SqliteOperatorRepo::new(pool.clone())),
         operator_specialty_repo: Arc::new(SqliteOperatorSpecialtyRepo::new(pool.clone())),
+        mandoub_repo: Arc::new(SqliteMandoubRepo::new(pool.clone())),
         inventory_item_repo: Arc::new(SqliteInventoryItemRepo::new(pool.clone())),
         consumption_repo: Arc::new(SqliteInventoryConsumptionRepo::new(pool.clone())),
         audit_repo: audit_repo.clone(),
@@ -142,7 +143,6 @@ fn check_type_create_input(
         has_subtypes,
         base_price_iqd: base,
         dye_supported: false,
-        report_supported: false,
         sort_order: 0,
     }
 }

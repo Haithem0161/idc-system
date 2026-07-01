@@ -57,7 +57,11 @@
       "dye": "صبغة",
       "dye_unsupported": "الصبغة غير مدعومة لهذا الفحص.",
       "report": "تقرير",
-      "report_unsupported": "التقرير غير مدعوم لهذا الفحص.",
+      "discount": "خصم",
+      "report_internal": "حصة طبيب التقرير ({{pct}}٪)",
+      "internal_section": "داخلي (لا يُحتسب على المريض)",
+      "dalal": "دلال",
+      "dalal_hint": "مبلغ ثابت ١٠ د.ع",
       "total_label": "الإجمالي الحالي",
       "total": "الإجمالي",
       "estimating": "جارٍ الحساب…",
@@ -98,7 +102,21 @@
       "doctor_field_specialty": "التخصص",
       "doctor_name_dup": "يوجد طبيب بهذا الاسم بالفعل.",
       "doctor_phone_dup": "طبيب آخر يستخدم هذا الهاتف.",
-      "doctor_create_submit": "إنشاء طبيب"
+      "doctor_create_submit": "إنشاء طبيب",
+      "mandoub": "المندوب",
+      "mandoub_placeholder": "ابحث أو أضف مندوبًا",
+      "mandoub_none": "بدون",
+      "mandoub_none_hint": "لا يوجد مندوب",
+      "mandoub_no_results": "لا يوجد مندوبون مطابقون.",
+      "mandoub_create": "إضافة \"{{name}}\"",
+      "mandoub_create_title": "مندوب جديد",
+      "mandoub_create_submit": "إنشاء مندوب",
+      "mandoub_field_name": "الاسم",
+      "mandoub_field_phone": "الهاتف",
+      "mandoub_field_notes": "ملاحظات",
+      "mandoub_cut_label": "حصة المندوب",
+      "mandoub_cut_500": "٥٠٠ د.ع",
+      "mandoub_cut_1000": "١٠٠٠ د.ع"
     },
     "tabs": {
       "new_visit": "زيارة جديدة",
@@ -114,35 +132,43 @@
     "visit_detail": {
       "title": "الزيارة",
       "back_to_workspace": "عودة للمساحة",
-      "tabs": {
-        "details": "التفاصيل",
-        "audit": "السجل",
-        "receipts": "الإيصالات"
-      },
+      "currency_suffix": "د.ع",
+      "draft_no_snapshot": "لا تزال هذه الزيارة مسودة. اقفلها لحفظ تفصيل الأسعار.",
+      "voided_reason": "السبب: {{reason}}",
       "status_pill": {
         "draft": "مسودة",
         "locked": "مقفلة",
         "voided": "ملغاة"
       },
+      "kpi": {
+        "billed": "المفوتر",
+        "collected": "المحصّل",
+        "net": "صافي العيادة"
+      },
+      "section": {
+        "visit": "الزيارة",
+        "money": "تفصيل المبالغ"
+      },
       "snapshot": {
         "patient": "المريض",
         "doctor": "الطبيب",
         "operator": "المشغل",
+        "mandoub": "المندوب",
         "check": "الفحص",
-        "subtype": "النوع الفرعي",
         "price": "السعر",
-        "dye": "تكلفة الصبغة",
-        "report": "تكلفة التقرير",
+        "dye": "الصبغة",
+        "report_flag": "تقرير",
+        "discount_flag": "خصم",
+        "report": "حصة طبيب التقرير",
         "doctor_cut": "حصة الطبيب",
-        "internal_pct": "النسبة الداخلية",
         "operator_cut": "حصة المشغل",
-        "total": "الإجمالي"
+        "mandoub_cut": "حصة المندوب",
+        "total": "إجمالي الفاتورة",
+        "collected": "المحصّل",
+        "net": "صافي العيادة"
       },
       "actions": {
-        "void": "إلغاء الزيارة",
-        "reprint": "إعادة طباعة",
-        "open_pdf": "فتح PDF",
-        "open_thermal": "فتح إيصال حراري"
+        "void": "إلغاء الزيارة"
       },
       "void_modal": {
         "title": "إلغاء هذه الزيارة",
@@ -151,18 +177,6 @@
         "reason_placeholder": "لماذا تُلغى هذه الزيارة؟",
         "submit": "إلغاء",
         "cancel": "تراجع"
-      },
-      "receipts": {
-        "empty": "ستظهر الإيصالات بعد قفل الزيارة.",
-        "a5_label": "إيصال A5",
-        "thermal_label": "إيصال حراري"
-      },
-      "audit_empty": "لا توجد سجلات بعد.",
-      "reprinted": "تم إعادة إصدار الإيصالات.",
-      "receipt_preview": {
-        "title": "معاينة الإيصال",
-        "close": "إغلاق",
-        "print": "طباعة"
       }
     },
     "crumb": {

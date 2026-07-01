@@ -29,6 +29,7 @@ export const AUDIT_ENTITIES = [
   "operators",
   "operator_specialties",
   "operator_shifts",
+  "mandoubs",
   "patients",
   "visits",
   "inventory_items",

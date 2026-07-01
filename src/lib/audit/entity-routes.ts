@@ -11,6 +11,8 @@ export function entityDetailRoute(entity: string, entityId: string): string | nu
       return `/admin/doctors/${entityId}`
     case "operators":
       return `/admin/operators/${entityId}`
+    case "mandoubs":
+      return `/admin/mandoubs/${entityId}`
     case "check_types":
       return `/admin/check-types/${entityId}`
     case "inventory_items":

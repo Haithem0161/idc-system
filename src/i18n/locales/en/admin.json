@@ -67,7 +67,8 @@
         "clinic_display_name_en": "Clinic name (English)",
         "currency_symbol": "Currency symbol",
         "dye_cost_iqd": "Dye cost (IQD)",
-        "report_cost_iqd": "Report cost (IQD)",
+        "report_pct": "Report percentage (%)",
+        "reporting_doctor_name": "Reporting doctor",
         "internal_doctor_pct": "Internal doctor share (%)",
         "idle_lock_minutes": "Idle lock (minutes)",
         "arabic_numerals": "Arabic-Indic numerals",
@@ -110,7 +111,8 @@
         "clinic_display_name_en": "English name printed on receipts and the daily-close PDF.",
         "currency_symbol": "Symbol shown next to every money amount.",
         "dye_cost_iqd": "Added to a visit when dye is used. Applies to days locked from now on.",
-        "report_cost_iqd": "Added to a visit when a report is issued. Applies to days locked from now on.",
+        "report_pct": "Percentage of the post-doctor-cut price paid to the internal reporting doctor. Applies to days locked from now on.",
+        "reporting_doctor_name": "Name of the internal doctor who receives the reporting share.",
         "internal_doctor_pct": "Share of the price paid to an in-house doctor when no per-check rate is set.",
         "idle_lock_minutes": "Lock the session automatically after this many minutes of inactivity.",
         "arabic_numerals": "Render every number app-wide in Arabic-Indic digits.",
@@ -147,6 +149,18 @@
         "changing": "Changing...",
         "saved": "Server updated"
       }
+    },
+    "mandoubs": {
+      "title": "Representatives",
+      "subtitle": "Representatives who refer patients alongside a doctor.",
+      "new": "New representative",
+      "back": "Back to representatives",
+      "details": "Details",
+      "name": "Name",
+      "phone": "Phone",
+      "notes": "Notes",
+      "empty": "No representatives yet",
+      "confirm_delete": "Delete this representative?"
     }
   }
 }

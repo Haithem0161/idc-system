@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::domains::auth::domain::value_objects::UserRole;
 use crate::domains::catalog::domain::entities::{
     CheckSubtype, CheckType, Doctor, DoctorCheckPricing, InventoryConsumptionMap, InventoryItem,
-    Operator, OperatorSpecialty,
+    Mandoub, Operator, OperatorSpecialty,
 };
 use crate::domains::catalog::domain::services::EffectivePriceQuery;
 use crate::domains::catalog::domain::value_objects::CutKind;
@@ -20,7 +20,7 @@ use crate::domains::catalog::service::{
     CheckSubtypeCreateInput, CheckSubtypeUpdateInput, CheckTypeCreateInput, CheckTypeUpdateInput,
     ConsumptionCreateInput, ConsumptionUpdateInput, DoctorCreateInput, DoctorPricingUpsertInput,
     DoctorUpdateInput, DuplicateDoctorGroup, InventoryItemCreateInput, InventoryItemUpdateInput,
-    OperatorCreateInput, OperatorUpdateInput,
+    MandoubCreateInput, MandoubUpdateInput, OperatorCreateInput, OperatorUpdateInput,
 };
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -554,6 +554,106 @@ pub async fn operators_soft_delete(state: State<'_, AppState>, args: IdArgs) -> 
     let (uid, role, _) = current_actor(&state).await?;
     let svc = catalog(&state)?;
     svc.operators
+        .soft_delete(uid, role, Uuid::parse_str(&args.id)?)
+        .await
+}
+
+// ---- mandoubs -----------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct MandoubsListArgs {
+    #[serde(default)]
+    pub include_inactive: bool,
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MandoubDetail {
+    pub mandoub: Mandoub,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MandoubCreateArgs(pub MandoubCreateInput);
+
+#[derive(Debug, Deserialize)]
+pub struct MandoubUpdateArgs {
+    pub id: String,
+    #[serde(flatten)]
+    pub patch: MandoubUpdateInput,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MandoubSetActiveArgs {
+    pub id: String,
+    pub is_active: bool,
+}
+
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn mandoubs_list(
+    state: State<'_, AppState>,
+    args: MandoubsListArgs,
+) -> AppResult<Vec<Mandoub>> {
+    let (_, _, entity_id) = current_actor(&state).await?;
+    let svc = catalog(&state)?;
+    svc.mandoubs
+        .list(&entity_id, args.include_inactive, args.query)
+        .await
+}
+
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn mandoubs_get(state: State<'_, AppState>, args: IdArgs) -> AppResult<MandoubDetail> {
+    let _ = current_actor(&state).await?;
+    let svc = catalog(&state)?;
+    let mandoub = svc.mandoubs.get(Uuid::parse_str(&args.id)?).await?;
+    Ok(MandoubDetail { mandoub })
+}
+
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn mandoubs_create(
+    state: State<'_, AppState>,
+    args: MandoubCreateArgs,
+) -> AppResult<Mandoub> {
+    let (uid, role, entity_id) = current_actor(&state).await?;
+    let svc = catalog(&state)?;
+    svc.mandoubs.create(uid, role, &entity_id, args.0).await
+}
+
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn mandoubs_update(
+    state: State<'_, AppState>,
+    args: MandoubUpdateArgs,
+) -> AppResult<Mandoub> {
+    let (uid, role, _) = current_actor(&state).await?;
+    let svc = catalog(&state)?;
+    svc.mandoubs
+        .update(uid, role, Uuid::parse_str(&args.id)?, args.patch)
+        .await
+}
+
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn mandoubs_set_active(
+    state: State<'_, AppState>,
+    args: MandoubSetActiveArgs,
+) -> AppResult<Mandoub> {
+    let (uid, role, _) = current_actor(&state).await?;
+    let svc = catalog(&state)?;
+    svc.mandoubs
+        .set_active(uid, role, Uuid::parse_str(&args.id)?, args.is_active)
+        .await
+}
+
+#[tauri::command]
+#[instrument(skip(state, args))]
+pub async fn mandoubs_soft_delete(state: State<'_, AppState>, args: IdArgs) -> AppResult<()> {
+    let (uid, role, _) = current_actor(&state).await?;
+    let svc = catalog(&state)?;
+    svc.mandoubs
         .soft_delete(uid, role, Uuid::parse_str(&args.id)?)
         .await
 }

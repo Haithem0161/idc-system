@@ -142,6 +142,8 @@ test('TotalsSchema accepts all-zero day (idle slice)', () => {
     revenue_iqd: 0,
     doctor_cut_iqd: 0,
     operator_cut_iqd: 0,
+    report_iqd: 0,
+    mandoub_cut_iqd: 0,
     net_iqd: 0,
   }
   assert.equal(Value.Check(TotalsSchema, t), true)
@@ -175,6 +177,8 @@ test('RowSchema accepts a house visit (doctor_name null) with subtype', () => {
     price_iqd: 75_000,
     doctor_cut_iqd: 0,
     operator_cut_iqd: 2_500,
+    report_iqd: 0,
+    mandoub_cut_iqd: 0,
     net_iqd: 72_500,
   }
   assert.equal(Value.Check(RowSchema, row), true)
@@ -197,6 +201,8 @@ test('RowSchema accepts a doctor visit without subtype (all subtype fields null)
     price_iqd: 50_000,
     doctor_cut_iqd: 15_000,
     operator_cut_iqd: 1_000,
+    report_iqd: 0,
+    mandoub_cut_iqd: 0,
     net_iqd: 34_000,
   }
   assert.equal(Value.Check(RowSchema, row), true)
@@ -210,6 +216,8 @@ test('GroupSchema accepts a group row with key + label + per-group totals', () =
     revenue_iqd: 200_000,
     doctor_cut_iqd: 60_000,
     operator_cut_iqd: 4_000,
+    report_iqd: 0,
+    mandoub_cut_iqd: 0,
     net_iqd: 136_000,
   }
   assert.equal(Value.Check(GroupSchema, g), true)
@@ -228,6 +236,8 @@ test('VisitsResponseSchema accepts rows-mode response', () => {
       revenue_iqd: 0,
       doctor_cut_iqd: 0,
       operator_cut_iqd: 0,
+      report_iqd: 0,
+      mandoub_cut_iqd: 0,
       net_iqd: 0,
     },
   }
@@ -243,6 +253,8 @@ test('VisitsResponseSchema accepts groups-mode response', () => {
       revenue_iqd: 0,
       doctor_cut_iqd: 0,
       operator_cut_iqd: 0,
+      report_iqd: 0,
+      mandoub_cut_iqd: 0,
       net_iqd: 0,
     },
   }
@@ -327,6 +339,8 @@ test('DailyCloseResponseSchema accepts the canonical full artifact', () => {
     total_revenue_iqd: 1_000_000,
     total_doctor_cuts_iqd: 200_000,
     total_operator_cuts_iqd: 40_000,
+    total_report_iqd: 0,
+    total_mandoub_cuts_iqd: 0,
     total_inventory_consumption_value_iqd: 25_000,
     net_iqd: 735_000,
     locked_count: 12,
@@ -349,6 +363,14 @@ test('DailyCloseResponseSchema accepts the canonical full artifact', () => {
         dye_visits: 2,
         operator_cut_iqd: 8_000,
         hours_on_shift_milli: 28_800_000,
+      },
+    ],
+    per_mandoub: [
+      {
+        mandoub_id: VALID_UUID,
+        name: 'Mandoub One',
+        visits: 2,
+        mandoub_cut_iqd: 1_500,
       },
     ],
     per_check_type: [
@@ -377,6 +399,8 @@ test('DailyCloseResponseSchema accepts house-row doctor_id=null', () => {
     total_revenue_iqd: 0,
     total_doctor_cuts_iqd: 0,
     total_operator_cuts_iqd: 0,
+    total_report_iqd: 0,
+    total_mandoub_cuts_iqd: 0,
     total_inventory_consumption_value_iqd: 0,
     net_iqd: 0,
     locked_count: 0,
@@ -392,6 +416,7 @@ test('DailyCloseResponseSchema accepts house-row doctor_id=null', () => {
       },
     ],
     per_operator: [],
+    per_mandoub: [],
     per_check_type: [],
     generated_at: '2026-05-18T23:59:00.000Z',
   }

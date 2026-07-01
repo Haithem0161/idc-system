@@ -22,7 +22,7 @@ use app_lib::domains::catalog::domain::value_objects::CutKind;
 use app_lib::domains::catalog::events::{PricingChangeKind, PRICING_CHANGED};
 use app_lib::domains::catalog::infrastructure::{
     SqliteCheckSubtypeRepo, SqliteCheckTypeRepo, SqliteDoctorPricingRepo, SqliteDoctorRepo,
-    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
+    SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteMandoubRepo, SqliteOperatorRepo,
     SqliteOperatorSpecialtyRepo,
 };
 use app_lib::domains::catalog::service::operator_specialty_service::OperatorSpecialtyInput;
@@ -83,6 +83,7 @@ async fn rig() -> Rig {
         doctor_pricing_repo: Arc::new(SqliteDoctorPricingRepo::new(pool.clone())),
         operator_repo: Arc::new(SqliteOperatorRepo::new(pool.clone())),
         operator_specialty_repo: Arc::new(SqliteOperatorSpecialtyRepo::new(pool.clone())),
+        mandoub_repo: Arc::new(SqliteMandoubRepo::new(pool.clone())),
         inventory_item_repo: Arc::new(SqliteInventoryItemRepo::new(pool.clone())),
         consumption_repo: Arc::new(SqliteInventoryConsumptionRepo::new(pool.clone())),
         audit_repo,
@@ -140,7 +141,6 @@ async fn p03_g04_check_type_update_audit_delta_contains_before_and_after_json() 
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
                 dye_supported: false,
-                report_supported: false,
                 sort_order: 0,
             },
         )
@@ -225,7 +225,6 @@ async fn p03_g08_check_type_create_enqueues_one_outbox_row() {
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
                 dye_supported: false,
-                report_supported: false,
                 sort_order: 0,
             },
         )
@@ -254,7 +253,6 @@ async fn p03_g08_doctor_pricing_upsert_enqueues_outbox_row() {
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
                 dye_supported: false,
-                report_supported: false,
                 sort_order: 0,
             },
         )
@@ -355,7 +353,6 @@ async fn p03_g23_check_types_list_can_include_soft_deleted_when_flag_true() {
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
                 dye_supported: false,
-                report_supported: false,
                 sort_order: 0,
             },
         )
@@ -431,7 +428,6 @@ async fn p03_g33_check_type_create_sets_dirty_and_version_one() {
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
                 dye_supported: false,
-                report_supported: false,
                 sort_order: 0,
             },
         )
@@ -509,7 +505,6 @@ async fn p03_g34_operator_specialty_double_upsert_no_op_returns_same_row() {
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
                 dye_supported: false,
-                report_supported: false,
                 sort_order: 0,
             },
         )
@@ -613,7 +608,6 @@ async fn p03_g07_check_types_list_like_prefix_matches_from_start_of_name() {
             has_subtypes: false,
             base_price_iqd: Some(1000),
             dye_supported: false,
-            report_supported: false,
             sort_order: 0,
             entity_id: ENTITY_ID.into(),
             origin_device_id: None,
@@ -657,7 +651,6 @@ async fn p03_g14_doctor_pricing_cut_kind_round_trips_via_lowercase_wire_format()
         has_subtypes: false,
         base_price_iqd: Some(1000),
         dye_supported: false,
-        report_supported: false,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,

@@ -39,20 +39,20 @@ describe("computeRunningTotal", () => {
     dye_supported: true,
     dye_cost_iqd: 2_000,
     report: false,
-    report_supported: true,
-    report_cost_iqd: 3_000,
+    report_pct: 20,
     internal_doctor_pct: 40,
+    dalal: false,
   }
 
   it("flat house mode with no dye or report", () => {
     const snap = computeRunningTotal(baseInputs)
     expect(snap.price_iqd).toBe(50_000)
     expect(snap.dye_cost_iqd).toBe(0)
-    expect(snap.report_cost_iqd).toBe(0)
+    expect(snap.report_amount_iqd).toBe(0)
     expect(snap.doctor_cut_iqd).toBe(20_000)
     expect(snap.operator_cut_iqd).toBe(5_000)
     expect(snap.internal_pct).toBe(40)
-    expect(snap.total_amount_iqd).toBe(50_000)
+    expect(snap.patient_total_iqd).toBe(50_000)
   })
 
   it("adds dye cost only when dye is true and supported", () => {
@@ -74,14 +74,30 @@ describe("computeRunningTotal", () => {
     ).toThrow(/dye/)
   })
 
-  it("throws when report is requested on an unsupported check type", () => {
-    expect(() =>
-      computeRunningTotal({
-        ...baseInputs,
-        report: true,
-        report_supported: false,
-      })
-    ).toThrow(/report/)
+  it("report is internal-only: a pct of (price - doctor cut), never in the patient total", () => {
+    // House mode: doctor cut = 50_000 * 40% = 20_000.
+    // Report = (50_000 - 20_000) * 20% = 6_000. Patient total stays price + dye.
+    const snap = computeRunningTotal({ ...baseInputs, report: true })
+    expect(snap.report_amount_iqd).toBe(6_000)
+    expect(snap.patient_total_iqd).toBe(50_000)
+  })
+
+  it("report is zero when the report flag is off", () => {
+    expect(computeRunningTotal(baseInputs).report_amount_iqd).toBe(0)
+  })
+
+  it("dalal applies a flat 10 IQD doctor cut and skips house pct", () => {
+    const snap = computeRunningTotal({ ...baseInputs, dalal: true })
+    expect(snap.doctor_cut_iqd).toBe(10)
+    expect(snap.internal_pct).toBeNull()
+    // Report carves out of (price - dalal cut): (50_000 - 10) * 20% = 9_998.
+    const withReport = computeRunningTotal({
+      ...baseInputs,
+      dalal: true,
+      report: true,
+    })
+    expect(withReport.report_amount_iqd).toBe(9_998)
+    expect(withReport.patient_total_iqd).toBe(50_000)
   })
 
   it("uses subtype price when provided", () => {
@@ -90,7 +106,7 @@ describe("computeRunningTotal", () => {
       subtype_price_iqd: 70_000,
     })
     expect(snap.price_iqd).toBe(70_000)
-    expect(snap.total_amount_iqd).toBe(70_000)
+    expect(snap.patient_total_iqd).toBe(70_000)
   })
 
   it("doctor flat-cut overrides internal_pct and pricing kind", () => {
@@ -131,15 +147,14 @@ describe("computeRunningTotal", () => {
     expect(snap.doctor_cut_iqd).toBe(20_000)
   })
 
-  it("total equals price + dye + report invariant holds", () => {
+  it("patient total equals price + dye and excludes the report", () => {
     const snap = computeRunningTotal({
       ...baseInputs,
       dye: true,
       report: true,
     })
-    expect(snap.total_amount_iqd).toBe(
-      snap.price_iqd + snap.dye_cost_iqd + snap.report_cost_iqd
-    )
+    expect(snap.patient_total_iqd).toBe(snap.price_iqd + snap.dye_cost_iqd)
+    expect(snap.report_amount_iqd).toBeGreaterThan(0)
   })
 
   it("throws on doctor percentage out of range", () => {
