@@ -97,6 +97,12 @@ pub trait PatientRepo: Send + Sync {
     async fn search(&self, entity_id: &str, query: &str, limit: i64) -> AppResult<Vec<Patient>>;
     async fn count_live_visits(&self, patient_id: Uuid) -> AppResult<i64>;
 
+    /// Every row across ALL tenants, including tombstoned (`deleted_at`) and
+    /// already-synced (`dirty = 0`) rows. Used only by the sync resync sweep
+    /// (`sync_resync_local`) to re-enqueue the full local dataset; never gated
+    /// by `entity_id`/`deleted_at`/`dirty`.
+    async fn list_all_for_resync(&self) -> AppResult<Vec<Patient>>;
+
     /// Paginated, sortable, optionally-searched archive list. When
     /// `filter.query` is non-empty the FTS index narrows by name; otherwise a
     /// plain scan. Tombstones excluded unless `include_deleted`.

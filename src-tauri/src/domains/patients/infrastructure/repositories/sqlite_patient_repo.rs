@@ -165,6 +165,14 @@ impl PatientRepo for SqlitePatientRepo {
         rows.into_iter().map(PatientRow::into_domain).collect()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<Patient>> {
+        let sql = format!("SELECT {PATIENT_COLS} FROM patients ORDER BY id ASC");
+        let rows = sqlx::query_as::<_, PatientRow>(&sql)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter().map(PatientRow::into_domain).collect()
+    }
+
     async fn search(&self, entity_id: &str, query: &str, limit: i64) -> AppResult<Vec<Patient>> {
         let trimmed = query.trim();
         if trimmed.is_empty() {

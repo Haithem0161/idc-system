@@ -207,4 +207,13 @@ impl FrozenCloseRepo for SqliteFrozenCloseRepo {
             .map_err(AppError::from)?;
         rows.iter().map(map_row).collect()
     }
+
+    async fn list_all_for_resync(&self) -> AppResult<Vec<FrozenClose>> {
+        let sql = format!("SELECT {SELECT_COLS} FROM daily_close ORDER BY id ASC");
+        let rows = sqlx::query(&sql)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(AppError::from)?;
+        rows.iter().map(map_row).collect()
+    }
 }

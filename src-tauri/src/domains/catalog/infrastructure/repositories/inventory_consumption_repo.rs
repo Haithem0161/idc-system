@@ -70,6 +70,15 @@ impl InventoryConsumptionRepo for SqliteInventoryConsumptionRepo {
         row.map(ConsumptionRow::into_domain).transpose()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<InventoryConsumptionMap>> {
+        let rows: Vec<ConsumptionRow> = sqlx::query_as::<_, ConsumptionRow>(
+            "SELECT * FROM inventory_consumption_map ORDER BY id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(ConsumptionRow::into_domain).collect()
+    }
+
     async fn list_by_check_type(
         &self,
         check_type_id: Uuid,

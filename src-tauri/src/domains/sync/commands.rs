@@ -147,6 +147,33 @@ pub async fn device_info_impl(state: &AppState) -> AppResult<DeviceInfo> {
     })
 }
 
+/// Read-only snapshot of the sync-engine's persisted timing state, surfaced to
+/// the sync dashboard so the user can see when this device last shipped and
+/// received changes without digging through logs. All timestamps are RFC3339
+/// UTC; `None` means the corresponding direction has not run yet on this
+/// device (fresh install, or push/pull never succeeded).
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncTiming {
+    pub last_pushed_at: Option<String>,
+    pub last_pulled_at: Option<String>,
+    pub pull_cursor: Option<String>,
+    pub device_id: String,
+    pub server_url: Option<String>,
+    pub app_version: String,
+}
+
+pub async fn sync_last_synced_impl(state: &AppState) -> AppResult<SyncTiming> {
+    let sync_state = state.sync_engine().state_repo().get().await?;
+    Ok(SyncTiming {
+        last_pushed_at: sync_state.last_pushed_at.map(|t| t.to_rfc3339()),
+        last_pulled_at: sync_state.last_pulled_at.map(|t| t.to_rfc3339()),
+        pull_cursor: sync_state.pull_cursor,
+        device_id: sync_state.device_id,
+        server_url: state.sync_server_url().await,
+        app_version: state.app_version().to_string(),
+    })
+}
+
 /// Validate and normalize a sync server URL. Accepts only absolute http(s)
 /// URLs with a host; trims a trailing slash so persisted values are stable.
 /// Pure (no I/O) so it can be unit-tested and reused by both the bootstrap and
@@ -204,6 +231,307 @@ pub async fn config_set_sync_server_url_impl(state: &AppState, url: String) -> A
 
 pub async fn config_get_sync_server_url_impl(state: &AppState) -> AppResult<Option<String>> {
     Ok(state.sync_server_url().await)
+}
+
+/// Summary of a `sync_resync_local` sweep: how many outbox ops were enqueued
+/// per entity table, and the grand total.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResyncSummary {
+    /// `(entity_table, ops_enqueued)` in FK-dependency (APPLY_ORDER) order.
+    pub per_entity: Vec<(String, u64)>,
+    pub total: u64,
+}
+
+/// Re-enqueue EVERY syncable local row into the outbox for a full re-push.
+///
+/// # Why this exists
+/// The normal write path only enqueues an outbox op at the moment a row is
+/// mutated. Once a row is pushed and marked `dirty = 0` there is no mechanism
+/// that ever re-derives an outbox op for it. If the server subsequently loses
+/// those already-synced rows, the client has no way to replay them -- the
+/// outbox is empty and nothing sweeps clean rows back into it. This command is
+/// that sweep: it walks every syncable table (including `dirty = 0` and
+/// tombstoned rows, across ALL tenants) and enqueues one fresh upsert op per
+/// row, using the SAME push-payload serializers the write path uses, so the
+/// wire format is identical.
+///
+/// # Idempotency
+/// Each call mints fresh `op_id`s (UUIDv7) for every row. Re-running is safe:
+/// the server dedupes by `op_id` AND upserts by row `id`, so a duplicate local
+/// op for the same row just re-applies the same upsert. We deliberately do NOT
+/// dedupe against existing outbox ops -- a full resync is the whole point.
+///
+/// # Ordering
+/// Ops are enqueued strictly in `APPLY_ORDER` (parents before children) so the
+/// push loop -- which drains the outbox in `created_at`/`op_id` (creation)
+/// order -- lands a parent row (e.g. a `patients` row) on the server before any
+/// child (e.g. a `visits` row) that references it.
+///
+/// # Coverage
+/// Covers all 17 syncable entities: users, settings, check_types,
+/// check_subtypes, doctors, doctor_check_pricing, operators,
+/// operator_specialties, mandoubs, inventory_items, inventory_consumption_map,
+/// operator_shifts, patients, visits, inventory_adjustments, daily_close,
+/// audit_log. `audit_log` uses its MessagePack `encode_audit_payload`; every
+/// other entity uses `serde_json::to_vec(&XPushPayload::from(&row))`, matching
+/// the write path byte-for-byte.
+pub async fn sync_resync_local_impl(state: &AppState) -> AppResult<ResyncSummary> {
+    use crate::domains::sync::domain::entities::OutboxOp;
+
+    let pool = state
+        .db_pool()
+        .ok_or_else(|| crate::error::AppError::Internal("db pool not initialised".into()))?;
+    let outbox = state.sync_engine().outbox_repo();
+
+    // Gather all outbox ops FIRST (each list_all_for_resync is a read-only
+    // query), grouped per entity in APPLY_ORDER, so the write transaction below
+    // only does inserts and stays short. Holding a long tx across all these
+    // reads would needlessly lengthen the WAL write lock.
+    let mut per_entity: Vec<(String, Vec<OutboxOp>)> = Vec::new();
+
+    // --- users -----------------------------------------------------------
+    if let Some(user_repo) = state.user_repo() {
+        let mut ops = Vec::new();
+        for u in user_repo.list_all_for_resync().await? {
+            // include_hash = true: the create path pushes the hash so the
+            // server can serve auth; a resync must restore it too.
+            let payload = serde_json::to_vec(
+                &crate::domains::auth::user_service::to_push_payload(&u, true),
+            )?;
+            ops.push(OutboxOp::new("users", u.id.to_string(), payload));
+        }
+        per_entity.push(("users".into(), ops));
+    }
+
+    // --- settings --------------------------------------------------------
+    if let Some(settings) = state.settings_service() {
+        per_entity.push(("settings".into(), settings.resync_ops().await?));
+    }
+
+    // --- catalog (check_types .. inventory_consumption_map) --------------
+    if let Some(catalog) = state.catalog_services() {
+        use crate::domains::catalog::service::push_payloads::{
+            CheckSubtypePushPayload, CheckTypePushPayload, ConsumptionPushPayload,
+            DoctorPricingPushPayload, DoctorPushPayload, InventoryItemPushPayload,
+            MandoubPushPayload, OperatorPushPayload, OperatorSpecialtyPushPayload,
+        };
+
+        let mut ct = Vec::new();
+        for row in catalog.check_type_repo.list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&CheckTypePushPayload::from(&row))?;
+            ct.push(OutboxOp::new("check_types", row.id.to_string(), payload));
+        }
+        per_entity.push(("check_types".into(), ct));
+
+        let mut cs = Vec::new();
+        for row in catalog.check_subtype_repo.list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&CheckSubtypePushPayload::from(&row))?;
+            cs.push(OutboxOp::new("check_subtypes", row.id.to_string(), payload));
+        }
+        per_entity.push(("check_subtypes".into(), cs));
+
+        let mut d = Vec::new();
+        for row in catalog.doctor_repo.list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&DoctorPushPayload::from(&row))?;
+            d.push(OutboxOp::new("doctors", row.id.to_string(), payload));
+        }
+        per_entity.push(("doctors".into(), d));
+
+        let mut dp = Vec::new();
+        for row in catalog.doctor_pricing_repo.list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&DoctorPricingPushPayload::from(&row))?;
+            dp.push(OutboxOp::new(
+                "doctor_check_pricing",
+                row.id.to_string(),
+                payload,
+            ));
+        }
+        per_entity.push(("doctor_check_pricing".into(), dp));
+
+        let mut op = Vec::new();
+        for row in catalog.operator_repo.list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&OperatorPushPayload::from(&row))?;
+            op.push(OutboxOp::new("operators", row.id.to_string(), payload));
+        }
+        per_entity.push(("operators".into(), op));
+
+        let mut os = Vec::new();
+        for row in catalog
+            .operator_specialty_repo
+            .list_all_for_resync()
+            .await?
+        {
+            let payload = serde_json::to_vec(&OperatorSpecialtyPushPayload::from(&row))?;
+            os.push(OutboxOp::new(
+                "operator_specialties",
+                row.id.to_string(),
+                payload,
+            ));
+        }
+        per_entity.push(("operator_specialties".into(), os));
+
+        let mut m = Vec::new();
+        for row in catalog.mandoub_repo.list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&MandoubPushPayload::from(&row))?;
+            m.push(OutboxOp::new("mandoubs", row.id.to_string(), payload));
+        }
+        per_entity.push(("mandoubs".into(), m));
+
+        let mut it = Vec::new();
+        for row in catalog.inventory_item_repo.list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&InventoryItemPushPayload::from(&row))?;
+            it.push(OutboxOp::new(
+                "inventory_items",
+                row.id.to_string(),
+                payload,
+            ));
+        }
+        per_entity.push(("inventory_items".into(), it));
+
+        let mut cm = Vec::new();
+        for row in catalog.consumption_repo.list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&ConsumptionPushPayload::from(&row))?;
+            cm.push(OutboxOp::new(
+                "inventory_consumption_map",
+                row.id.to_string(),
+                payload,
+            ));
+        }
+        per_entity.push(("inventory_consumption_map".into(), cm));
+    }
+
+    // --- operator_shifts (reachable via the visit service) ---------------
+    if let Some(visits) = state.visit_service() {
+        use crate::domains::shifts::service::OperatorShiftPushPayload;
+        let mut sh = Vec::new();
+        for row in visits.shifts_repo().list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&OperatorShiftPushPayload::from(&row))?;
+            sh.push(OutboxOp::new(
+                "operator_shifts",
+                row.id.to_string(),
+                payload,
+            ));
+        }
+        per_entity.push(("operator_shifts".into(), sh));
+    }
+
+    // --- patients --------------------------------------------------------
+    if let Some(patients) = state.patient_service() {
+        use crate::domains::patients::service::push_payloads::PatientPushPayload;
+        let mut p = Vec::new();
+        for row in patients.repo().list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&PatientPushPayload::from(&row))?;
+            p.push(OutboxOp::new("patients", row.id.to_string(), payload));
+        }
+        per_entity.push(("patients".into(), p));
+    }
+
+    // --- visits + inventory_adjustments ----------------------------------
+    if let Some(visits) = state.visit_service() {
+        use crate::domains::visits::service::push_payloads::{
+            InventoryAdjustmentPushPayload, VisitPushPayload,
+        };
+        let mut v = Vec::new();
+        for row in visits.visits_repo().list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&VisitPushPayload::from(&row))?;
+            v.push(OutboxOp::new("visits", row.id.to_string(), payload));
+        }
+        per_entity.push(("visits".into(), v));
+
+        let mut a = Vec::new();
+        for row in visits.adjustments_repo().list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&InventoryAdjustmentPushPayload::from(&row))?;
+            a.push(OutboxOp::new(
+                "inventory_adjustments",
+                row.id.to_string(),
+                payload,
+            ));
+        }
+        per_entity.push(("inventory_adjustments".into(), a));
+    }
+
+    // --- daily_close (frozen close) --------------------------------------
+    if let Some(reports) = state.reports_service() {
+        use crate::domains::reports::service::FrozenClosePushPayload;
+        let mut dc = Vec::new();
+        for row in reports.frozen_close_repo().list_all_for_resync().await? {
+            let payload = serde_json::to_vec(&FrozenClosePushPayload::from(&row))?;
+            dc.push(OutboxOp::new("daily_close", row.id.to_string(), payload));
+        }
+        per_entity.push(("daily_close".into(), dc));
+    }
+
+    // --- audit_log (additive-only; MessagePack payload) ------------------
+    if let Some(audit) = state.audit_query_service() {
+        use crate::domains::sync::domain::services::encode_audit_payload;
+        let mut al = Vec::new();
+        for row in audit.audit_repo().list_all_for_resync().await? {
+            let payload = encode_audit_payload(&row)?;
+            al.push(OutboxOp::new("audit_log", row.id.to_string(), payload));
+        }
+        per_entity.push(("audit_log".into(), al));
+    }
+
+    // Enqueue everything in APPLY_ORDER, in a single transaction, so the whole
+    // sweep is atomic: either every op lands or none do (a partial outbox from
+    // a crashed sweep could push children before parents).
+    per_entity.sort_by_key(|(entity, _)| resync_apply_rank(entity));
+
+    let mut tx = pool.begin().await.map_err(crate::error::AppError::from)?;
+    let mut summary = Vec::with_capacity(per_entity.len());
+    let mut total: u64 = 0;
+    for (entity, ops) in &per_entity {
+        for op in ops {
+            outbox.enqueue(&mut tx, op).await?;
+        }
+        let count = ops.len() as u64;
+        total += count;
+        summary.push((entity.clone(), count));
+    }
+    tx.commit().await.map_err(crate::error::AppError::from)?;
+
+    tracing::info!(
+        total,
+        "sync_resync_local: re-enqueued local rows for full re-push"
+    );
+
+    // Kick a push so the re-enqueued ops drain promptly.
+    state.sync_engine().trigger_push().await;
+
+    Ok(ResyncSummary {
+        per_entity: summary,
+        total,
+    })
+}
+
+/// FK-dependency rank for resync enqueue ordering. Mirrors the puller's
+/// `APPLY_ORDER` so parents are enqueued (and therefore pushed) before their
+/// children. An unlisted entity sorts last.
+fn resync_apply_rank(entity: &str) -> usize {
+    const APPLY_ORDER: &[&str] = &[
+        "users",
+        "settings",
+        "check_types",
+        "check_subtypes",
+        "doctors",
+        "doctor_check_pricing",
+        "operators",
+        "operator_specialties",
+        "mandoubs",
+        "inventory_items",
+        "inventory_consumption_map",
+        "operator_shifts",
+        "patients",
+        "visits",
+        "inventory_adjustments",
+        "daily_close",
+        "audit_log",
+    ];
+    APPLY_ORDER
+        .iter()
+        .position(|e| *e == entity)
+        .unwrap_or(APPLY_ORDER.len())
 }
 
 // --- #[tauri::command] wrappers (boundary layer) ------------------------
@@ -331,6 +659,24 @@ pub async fn config_update_sync_server_url(
 #[instrument(skip(state))]
 pub async fn config_get_sync_server_url(state: State<'_, AppState>) -> AppResult<Option<String>> {
     config_get_sync_server_url_impl(&state).await
+}
+
+/// Re-enqueue every syncable local row for a full re-push (recovery from a
+/// server that lost already-synced rows). Not role-gated: like the other
+/// `sync_*` commands it only re-pushes local data this device already owns.
+#[tauri::command]
+#[instrument(skip(state))]
+pub async fn sync_resync_local(state: State<'_, AppState>) -> AppResult<ResyncSummary> {
+    sync_resync_local_impl(&state).await
+}
+
+/// Read-only timing snapshot for the sync dashboard (last push/pull, cursor,
+/// device id, server url, app version). Not role-gated: it exposes only this
+/// device's own sync bookkeeping, no other tenant's data.
+#[tauri::command]
+#[instrument(skip(state))]
+pub async fn sync_last_synced(state: State<'_, AppState>) -> AppResult<SyncTiming> {
+    sync_last_synced_impl(&state).await
 }
 
 #[cfg(test)]

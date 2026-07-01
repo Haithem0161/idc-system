@@ -13,6 +13,40 @@ export const syncKeys = {
   conflicts: ["sync", "conflicts"] as const,
   outboxCount: ["sync", "outbox-count"] as const,
   stuck: ["sync", "stuck"] as const,
+  timing: ["sync", "timing"] as const,
+}
+
+export interface SyncTiming {
+  lastPushedAt: string | null
+  lastPulledAt: string | null
+  pullCursor: string | null
+  deviceId: string
+  serverUrl: string | null
+  appVersion: string
+}
+
+/**
+ * Persisted sync timing for the dashboard: when this device last pushed and
+ * pulled, plus device/server identity. Read-only; refetched on a slow cadence
+ * since the timestamps only move when a sync round-trip completes.
+ */
+export function useLastSynced () {
+  return useQuery({
+    queryKey: syncKeys.timing,
+    enabled: isTauri(),
+    queryFn: async (): Promise<SyncTiming> => {
+      const r = await invoke("sync_last_synced")
+      return {
+        lastPushedAt: r.last_pushed_at,
+        lastPulledAt: r.last_pulled_at,
+        pullCursor: r.pull_cursor,
+        deviceId: r.device_id,
+        serverUrl: r.server_url,
+        appVersion: r.app_version,
+      }
+    },
+    refetchInterval: 5_000,
+  })
 }
 
 export interface SyncStatusSnapshot {
@@ -139,6 +173,30 @@ export function useRequeueOp () {
       void qc.invalidateQueries({ queryKey: syncKeys.stuck })
       void qc.invalidateQueries({ queryKey: syncKeys.status })
       void qc.invalidateQueries({ queryKey: syncKeys.outboxCount })
+    },
+  })
+}
+
+export interface ResyncSummary {
+  perEntity: [string, number][]
+  total: number
+}
+
+/**
+ * Full local re-push: re-enqueue every syncable local row into the outbox.
+ * Recovery tool for when the server lost rows this device had marked synced.
+ * Idempotent (server dedupes by op_id, upserts by row id).
+ */
+export function useResyncLocal () {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (): Promise<ResyncSummary> => {
+      const res = await invoke("sync_resync_local")
+      return { perEntity: res.per_entity, total: res.total }
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: syncKeys.outboxCount })
+      void qc.invalidateQueries({ queryKey: syncKeys.status })
     },
   })
 }

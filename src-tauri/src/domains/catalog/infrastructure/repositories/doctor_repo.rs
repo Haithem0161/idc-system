@@ -70,6 +70,14 @@ impl DoctorRepo for SqliteDoctorRepo {
         row.map(DoctorRow::into_domain).transpose()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<Doctor>> {
+        let rows: Vec<DoctorRow> =
+            sqlx::query_as::<_, DoctorRow>("SELECT * FROM doctors ORDER BY id ASC")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.into_iter().map(DoctorRow::into_domain).collect()
+    }
+
     async fn list(&self, filter: CatalogListFilter) -> AppResult<Vec<Doctor>> {
         let mut sql = String::from("SELECT * FROM doctors WHERE entity_id = ?");
         if !filter.include_deleted {

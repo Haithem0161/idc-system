@@ -26,6 +26,12 @@ export type CommandMap = {
   // Tauri v2 maps the Rust snake_case param `op_id` to camelCase `opId` on
   // the JS side (top-level command args only -- inner structs do NOT convert).
   sync_requeue_op: { args: { opId: string }; result: null }
+  // Full local re-push: re-enqueue every syncable local row into the outbox.
+  // Recovery tool for when the server lost rows the client had marked synced.
+  sync_resync_local: { args: void; result: ResyncSummaryRecord }
+  // Read-only timing snapshot for the sync dashboard (last push/pull, cursor,
+  // device id, server url, app version). Not role-gated.
+  sync_last_synced: { args: void; result: SyncTimingRecord }
   sync_list_conflicts: {
     args: { limit?: number; offset?: number }
     result: ConflictRecord[]
@@ -1145,8 +1151,25 @@ export interface StuckOpRecord {
   created_at: string
 }
 
+export interface ResyncSummaryRecord {
+  /** `[entity_table, ops_enqueued]` pairs in FK-dependency order. serde
+   *  serializes the Rust `(String, u64)` tuple as a 2-element array. */
+  per_entity: [string, number][]
+  total: number
+}
+
 export interface DeviceInfo {
   device_id: string
+  app_version: string
+}
+
+export interface SyncTimingRecord {
+  /** RFC3339 UTC; null when this device has never pushed/pulled. */
+  last_pushed_at: string | null
+  last_pulled_at: string | null
+  pull_cursor: string | null
+  device_id: string
+  server_url: string | null
   app_version: string
 }
 

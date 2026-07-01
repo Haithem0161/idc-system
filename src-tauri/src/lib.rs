@@ -99,8 +99,9 @@ use crate::domains::shifts::infrastructure::SqliteOperatorShiftRepo;
 use crate::domains::shifts::ShiftService;
 use crate::domains::sync::commands::{
     config_get_sync_server_url, config_set_sync_server_url, config_update_sync_server_url,
-    device_info, sync_list_conflicts, sync_list_stuck, sync_outbox_count, sync_requeue_op,
-    sync_resolve_conflict, sync_status, sync_trigger_pull, sync_trigger_push,
+    device_info, sync_last_synced, sync_list_conflicts, sync_list_stuck, sync_outbox_count,
+    sync_requeue_op, sync_resolve_conflict, sync_resync_local, sync_status, sync_trigger_pull,
+    sync_trigger_push,
 };
 use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo, SyncStateRepo};
 use crate::domains::sync::infrastructure::{
@@ -168,6 +169,8 @@ pub fn run() {
             sync_requeue_op,
             sync_list_conflicts,
             sync_resolve_conflict,
+            sync_resync_local,
+            sync_last_synced,
             device_info,
             config_set_sync_server_url,
             config_update_sync_server_url,

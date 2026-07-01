@@ -67,6 +67,14 @@ impl OperatorRepo for SqliteOperatorRepo {
         row.map(OperatorRow::into_domain).transpose()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<Operator>> {
+        let rows: Vec<OperatorRow> =
+            sqlx::query_as::<_, OperatorRow>("SELECT * FROM operators ORDER BY id ASC")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.into_iter().map(OperatorRow::into_domain).collect()
+    }
+
     async fn list(&self, filter: CatalogListFilter) -> AppResult<Vec<Operator>> {
         let mut sql = String::from("SELECT * FROM operators WHERE entity_id = ?");
         if !filter.include_deleted {

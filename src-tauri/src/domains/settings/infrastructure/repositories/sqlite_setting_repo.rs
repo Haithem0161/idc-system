@@ -74,6 +74,14 @@ impl SettingRepo for SqliteSettingRepo {
         .await?;
         rows.into_iter().map(SettingRow::into_domain).collect()
     }
+
+    async fn list_all_for_resync(&self) -> AppResult<Vec<Setting>> {
+        let rows: Vec<SettingRow> =
+            sqlx::query_as::<_, SettingRow>("SELECT * FROM settings ORDER BY id ASC")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.into_iter().map(SettingRow::into_domain).collect()
+    }
 }
 
 #[derive(sqlx::FromRow)]

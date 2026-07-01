@@ -32,6 +32,11 @@ pub trait OperatorShiftRepo: Send + Sync {
     /// soft-deleted rows.
     async fn list_open(&self, entity_id: &str) -> AppResult<Vec<OperatorShift>>;
 
+    /// Every row across ALL tenants, including tombstoned (`deleted_at`) and
+    /// already-synced (`dirty = 0`) rows. Used only by the sync resync sweep
+    /// (`sync_resync_local`); never gated by `entity_id`/`deleted_at`/`dirty`.
+    async fn list_all_for_resync(&self) -> AppResult<Vec<OperatorShift>>;
+
     /// Today's shifts (both open and closed) in the given tenant, sorted by
     /// `check_in_at ASC`. `today_start` and `today_end` are caller-provided
     /// so the timezone boundary lives in the application layer.

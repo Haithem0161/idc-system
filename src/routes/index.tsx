@@ -39,6 +39,7 @@ import AccountingExplorerPage from "@/pages/accounting/explorer"
 import AccountingVisitDrillPage from "@/pages/accounting/visit-drill"
 import AccountingDailyClosePage from "@/pages/accounting/daily-close"
 import AuditPage from "@/pages/audit"
+import SyncDashboardPage from "@/pages/sync"
 import SyncConflictsPage from "@/pages/sync/conflicts"
 import { RequireRole } from "@/components/auth/require-role"
 
@@ -142,6 +143,14 @@ export const router = createBrowserRouter([
                 <AuditPage />
               </RequireRole>
             ),
+          },
+          {
+            // Sync status dashboard -- open to every authenticated role
+            // (viewing sync health is not privileged). Destructive controls
+            // inside the page are gated to superadmin.
+            path: "sync",
+            Component: SyncDashboardPage,
+            handle: { crumb: () => "Sync" },
           },
           {
             path: "sync/conflicts",

@@ -67,6 +67,13 @@ pub trait AuditRepo: Send + Sync {
     /// Oldest audit row's `at`, used by the merge-paginator to decide
     /// whether to fan out to the server (phase-08 §7.4).
     async fn oldest_at(&self, entity_id_tenant: &str) -> AppResult<Option<DateTime<Utc>>>;
+
+    /// Every audit row across ALL tenants, including tombstoned (`deleted_at`)
+    /// and already-synced (`dirty = 0`) rows, ordered by `id`. Additive-only:
+    /// the server dedupes by op_id and applies with INSERT OR IGNORE, so
+    /// re-pushing every row is safe. Used only by the sync resync sweep
+    /// (`sync_resync_local`); never gated by tenant/`deleted_at`/`dirty`.
+    async fn list_all_for_resync(&self) -> AppResult<Vec<AuditEntry>>;
 }
 
 #[cfg(test)]

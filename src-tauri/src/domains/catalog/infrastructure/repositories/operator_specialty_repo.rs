@@ -62,6 +62,17 @@ impl OperatorSpecialtyRepo for SqliteOperatorSpecialtyRepo {
         row.map(OperatorSpecialtyRow::into_domain).transpose()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<OperatorSpecialty>> {
+        let rows: Vec<OperatorSpecialtyRow> = sqlx::query_as::<_, OperatorSpecialtyRow>(
+            "SELECT * FROM operator_specialties ORDER BY id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(OperatorSpecialtyRow::into_domain)
+            .collect()
+    }
+
     async fn list_by_operator(&self, operator_id: Uuid) -> AppResult<Vec<OperatorSpecialty>> {
         let rows: Vec<OperatorSpecialtyRow> = sqlx::query_as::<_, OperatorSpecialtyRow>(
             "SELECT * FROM operator_specialties WHERE operator_id = ? AND deleted_at IS NULL \

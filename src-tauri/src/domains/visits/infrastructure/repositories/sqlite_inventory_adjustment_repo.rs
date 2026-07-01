@@ -125,6 +125,14 @@ impl InventoryAdjustmentRepo for SqliteInventoryAdjustmentRepo {
         Ok(())
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<InventoryAdjustment>> {
+        let sql = format!("SELECT {COLUMNS} FROM inventory_adjustments ORDER BY id ASC");
+        let rows = sqlx::query_as::<_, AdjustmentRow>(&sql)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter().map(AdjustmentRow::into_domain).collect()
+    }
+
     async fn list_consume_for_visit(&self, visit_id: Uuid) -> AppResult<Vec<InventoryAdjustment>> {
         let sql = format!(
             "SELECT {COLUMNS} FROM inventory_adjustments \

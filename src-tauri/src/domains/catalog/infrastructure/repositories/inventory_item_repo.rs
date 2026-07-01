@@ -69,6 +69,16 @@ impl InventoryItemRepo for SqliteInventoryItemRepo {
         row.map(InventoryItemRow::into_domain).transpose()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<InventoryItem>> {
+        let rows: Vec<InventoryItemRow> =
+            sqlx::query_as::<_, InventoryItemRow>("SELECT * FROM inventory_items ORDER BY id ASC")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.into_iter()
+            .map(InventoryItemRow::into_domain)
+            .collect()
+    }
+
     async fn list(&self, filter: CatalogListFilter) -> AppResult<Vec<InventoryItem>> {
         let mut sql = String::from("SELECT * FROM inventory_items WHERE entity_id = ?");
         if !filter.include_deleted {

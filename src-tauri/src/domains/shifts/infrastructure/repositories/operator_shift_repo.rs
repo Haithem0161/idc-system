@@ -123,6 +123,16 @@ impl OperatorShiftRepo for SqliteOperatorShiftRepo {
             .collect()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<OperatorShift>> {
+        let rows =
+            sqlx::query_as::<_, OperatorShiftRow>("SELECT * FROM operator_shifts ORDER BY id ASC")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.into_iter()
+            .map(OperatorShiftRow::into_domain)
+            .collect()
+    }
+
     async fn history_today(
         &self,
         entity_id: &str,

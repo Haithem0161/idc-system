@@ -27,4 +27,12 @@ pub trait UserRepo: Send + Sync {
     async fn find_by_email(&self, email: &str) -> AppResult<Option<User>>;
     async fn list(&self, filter: UserListFilter) -> AppResult<Vec<User>>;
     async fn count(&self) -> AppResult<u32>;
+
+    /// Every user row across ALL tenants, including tombstoned (`deleted_at`)
+    /// and already-synced (`dirty = 0`) rows. The returned entities carry the
+    /// `password_hash` so the resync push can restore credentials on the
+    /// server (the normal create path also pushes the hash). Used only by the
+    /// sync resync sweep (`sync_resync_local`); never gated by
+    /// `entity_id`/`deleted_at`/`dirty`.
+    async fn list_all_for_resync(&self) -> AppResult<Vec<User>>;
 }

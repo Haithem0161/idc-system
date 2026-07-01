@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useNavigate } from "react-router"
-import { FlaskConical, Sprout } from "lucide-react"
+import { FlaskConical, Sprout, RefreshCw } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 
 import { cn } from "@/lib/utils"
@@ -13,6 +13,7 @@ import {
   homeForRole,
 } from "@/features/dev/dev-accounts"
 import { seedCatalog } from "@/features/dev/dev-seed"
+import { useResyncLocal } from "@/features/sync/queries"
 
 // Dev-only role-account switcher. Lets a developer flip between the three role
 // surfaces by performing a REAL re-login as a per-role dev account (see
@@ -47,6 +48,8 @@ export function DevViewSwitcher () {
   const [error, setError] = useState<string | null>(null)
   const [seeding, setSeeding] = useState(false)
   const [seedNote, setSeedNote] = useState<string | null>(null)
+  const resync = useResyncLocal()
+  const [resyncNote, setResyncNote] = useState<string | null>(null)
 
   // Only in dev, and only once a session exists. Visible to every role so a
   // developer can flip between surfaces from any account, not just superadmin.
@@ -85,6 +88,17 @@ export function DevViewSwitcher () {
       setError((e as { message?: string }).message ?? "Switch failed")
     } finally {
       setBusy(null)
+    }
+  }
+
+  const handleResync = async () => {
+    if (resync.isPending) return
+    setResyncNote(null)
+    try {
+      const r = await resync.mutateAsync()
+      setResyncNote(`resynced ${r.total} rows`)
+    } catch (e) {
+      setResyncNote((e as { message?: string }).message ?? "Resync failed")
     }
   }
 
@@ -150,6 +164,22 @@ export function DevViewSwitcher () {
             {seeding ? "Seeding" : "Seed"}
           </button>
         </>
+      ) : null}
+      <span className="mx-0.5 h-4 w-px bg-line-2" aria-hidden />
+      <button
+        type="button"
+        onClick={() => void handleResync()}
+        disabled={resync.isPending}
+        title="Dev only: re-enqueue every local row for a full re-push (recovers a server that lost synced rows)"
+        className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold text-ink-3 transition-colors duration-150 hover:bg-surface/60 hover:text-ink disabled:opacity-60"
+      >
+        <RefreshCw className={cn("h-3.5 w-3.5", resync.isPending && "animate-spin")} strokeWidth={1.8} />
+        {resync.isPending ? "Resyncing" : "Resync"}
+      </button>
+      {resyncNote ? (
+        <span className="ms-1 max-w-[160px] truncate text-[10px] text-ink-4" title={resyncNote}>
+          {resyncNote}
+        </span>
       ) : null}
       {seedNote ? (
         <span className="ms-1 max-w-[160px] truncate text-[10px] text-ink-4" title={seedNote}>

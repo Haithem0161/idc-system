@@ -292,6 +292,14 @@ impl VisitRepo for SqliteVisitRepo {
         row.map(VisitRow::into_domain).transpose()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<Visit>> {
+        let sql = format!("SELECT {COLUMNS} FROM visits ORDER BY id ASC");
+        let rows: Vec<VisitRow> = sqlx::query_as::<_, VisitRow>(&sql)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter().map(VisitRow::into_domain).collect()
+    }
+
     async fn list_today_by_check(
         &self,
         entity_id: &str,

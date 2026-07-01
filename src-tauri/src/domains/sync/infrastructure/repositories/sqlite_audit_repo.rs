@@ -77,6 +77,19 @@ impl AuditRepo for SqliteAuditRepo {
         rows.into_iter().map(AuditRow::into_domain).collect()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<AuditEntry>> {
+        let rows: Vec<AuditRow> = sqlx::query_as::<_, AuditRow>(
+            "SELECT id, actor_user_id, action, entity, entity_id, delta, ip, device_id, at, \
+                    created_at, updated_at, deleted_at, version, dirty, last_synced_at, \
+                    origin_device_id, entity_id_tenant \
+             FROM audit_log \
+             ORDER BY id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(AuditRow::into_domain).collect()
+    }
+
     async fn query(&self, filter: &AuditFilter) -> AppResult<Vec<AuditEntry>> {
         let filter = filter.clone().clamp();
 

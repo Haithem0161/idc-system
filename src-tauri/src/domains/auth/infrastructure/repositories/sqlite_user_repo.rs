@@ -127,6 +127,14 @@ impl UserRepo for SqliteUserRepo {
             .await?;
         Ok(n.max(0) as u32)
     }
+
+    async fn list_all_for_resync(&self) -> AppResult<Vec<User>> {
+        let rows: Vec<UserRow> =
+            sqlx::query_as::<_, UserRow>("SELECT * FROM users ORDER BY id ASC")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.into_iter().map(UserRow::into_domain).collect()
+    }
 }
 
 #[derive(sqlx::FromRow)]

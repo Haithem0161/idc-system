@@ -41,4 +41,9 @@ pub trait FrozenCloseRepo: Send + Sync {
         from_date: NaiveDate,
         to_date: NaiveDate,
     ) -> AppResult<Vec<FrozenClose>>;
+
+    /// Every daily-close row across ALL tenants (in-force and reopened). Used
+    /// only by the sync resync sweep (`sync_resync_local`) to re-enqueue the
+    /// full local dataset; never gated by `entity_id` or date range.
+    async fn list_all_for_resync(&self) -> AppResult<Vec<FrozenClose>>;
 }

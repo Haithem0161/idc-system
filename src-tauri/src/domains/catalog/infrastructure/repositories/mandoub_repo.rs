@@ -65,6 +65,14 @@ impl MandoubRepo for SqliteMandoubRepo {
         row.map(MandoubRow::into_domain).transpose()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<Mandoub>> {
+        let rows: Vec<MandoubRow> =
+            sqlx::query_as::<_, MandoubRow>("SELECT * FROM mandoubs ORDER BY id ASC")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.into_iter().map(MandoubRow::into_domain).collect()
+    }
+
     async fn list(&self, filter: CatalogListFilter) -> AppResult<Vec<Mandoub>> {
         let mut sql = String::from("SELECT * FROM mandoubs WHERE entity_id = ?");
         if !filter.include_deleted {

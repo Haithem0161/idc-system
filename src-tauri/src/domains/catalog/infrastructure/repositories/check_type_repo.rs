@@ -70,6 +70,14 @@ impl CheckTypeRepo for SqliteCheckTypeRepo {
         row.map(CheckTypeRow::into_domain).transpose()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<CheckType>> {
+        let rows: Vec<CheckTypeRow> =
+            sqlx::query_as::<_, CheckTypeRow>("SELECT * FROM check_types ORDER BY id ASC")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.into_iter().map(CheckTypeRow::into_domain).collect()
+    }
+
     async fn list(&self, filter: CatalogListFilter) -> AppResult<Vec<CheckType>> {
         let mut sql = String::from("SELECT * FROM check_types WHERE entity_id = ?");
         if !filter.include_deleted {

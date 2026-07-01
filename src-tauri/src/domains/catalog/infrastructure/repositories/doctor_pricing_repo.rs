@@ -72,6 +72,17 @@ impl DoctorPricingRepo for SqliteDoctorPricingRepo {
         row.map(DoctorPricingRow::into_domain).transpose()
     }
 
+    async fn list_all_for_resync(&self) -> AppResult<Vec<DoctorCheckPricing>> {
+        let rows: Vec<DoctorPricingRow> = sqlx::query_as::<_, DoctorPricingRow>(
+            "SELECT * FROM doctor_check_pricing ORDER BY id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(DoctorPricingRow::into_domain)
+            .collect()
+    }
+
     async fn list_by_doctor(&self, doctor_id: Uuid) -> AppResult<Vec<DoctorCheckPricing>> {
         let rows: Vec<DoctorPricingRow> = sqlx::query_as::<_, DoctorPricingRow>(
             "SELECT * FROM doctor_check_pricing WHERE doctor_id = ? AND deleted_at IS NULL \

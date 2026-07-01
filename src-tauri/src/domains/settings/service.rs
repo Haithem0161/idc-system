@@ -53,6 +53,22 @@ impl SettingsService {
         self.setting_repo.list(entity_id).await
     }
 
+    /// Build one upsert outbox op per local setting row (ALL tenants, including
+    /// tombstoned and already-synced rows), using the exact same
+    /// `SettingPushPayload` wire format as the normal write path. Consumed by
+    /// the sync resync sweep (`sync_resync_local`), which enqueues the returned
+    /// ops in one transaction. Serialization lives here so the private
+    /// `SettingPushPayload` shape stays encapsulated in the settings domain.
+    pub async fn resync_ops(&self) -> AppResult<Vec<OutboxOp>> {
+        let settings = self.setting_repo.list_all_for_resync().await?;
+        let mut ops = Vec::with_capacity(settings.len());
+        for setting in &settings {
+            let payload = serde_json::to_vec(&SettingPushPayload::from(setting))?;
+            ops.push(OutboxOp::new("settings", setting.id.to_string(), payload));
+        }
+        Ok(ops)
+    }
+
     pub async fn get(&self, key: &str, entity_id: &str) -> AppResult<Option<Setting>> {
         self.setting_repo.get_by_key(key, entity_id).await
     }

@@ -62,6 +62,12 @@ impl AuditQueryService {
         }
     }
 
+    /// The underlying audit repository. Exposed so the sync resync sweep
+    /// (`sync_resync_local`) can enumerate every local audit row for re-push.
+    pub fn audit_repo(&self) -> Arc<dyn AuditRepo> {
+        self.audit_repo.clone()
+    }
+
     /// Phase-08 §7.23: audit query is superadmin-only.
     pub fn require_audit_role(role: UserRole) -> AppResult<()> {
         if role == UserRole::Superadmin {

@@ -90,6 +90,8 @@ https://idc-sync.example.com
 # English-only and not internationalized.
 Dev only: switch role account (real re-login)
 Switch failed
+Dev only: re-enqueue every local row for a full re-push (recovers a server that lost synced rows)
+Resync failed
 
 # Dev-only catalog seed fixtures (src/features/dev/dev-seed.ts + the seed button
 # in dev-view-switcher.tsx). Test data, never user-facing copy; gated on

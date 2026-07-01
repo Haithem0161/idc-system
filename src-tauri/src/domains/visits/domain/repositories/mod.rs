@@ -57,11 +57,17 @@ pub trait VisitRepo: Send + Sync {
         day_start: DateTime<Utc>,
         day_end: DateTime<Utc>,
     ) -> AppResult<i64>;
+    /// Every row across ALL tenants, including tombstoned (`deleted_at`) and
+    /// already-synced (`dirty = 0`) rows. Used only by the sync resync sweep
+    /// (`sync_resync_local`); never gated by `entity_id`/`deleted_at`/`dirty`.
+    async fn list_all_for_resync(&self) -> AppResult<Vec<Visit>>;
 }
 
 #[async_trait]
 pub trait InventoryAdjustmentRepo: Send + Sync {
     async fn append(&self, tx: &mut Tx<'_>, adj: &InventoryAdjustment) -> AppResult<()>;
+    /// See `VisitRepo::list_all_for_resync`. All tenants, all rows.
+    async fn list_all_for_resync(&self) -> AppResult<Vec<InventoryAdjustment>>;
     async fn list_consume_for_visit(&self, visit_id: Uuid) -> AppResult<Vec<InventoryAdjustment>>;
     async fn list_by_item(
         &self,

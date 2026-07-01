@@ -162,6 +162,13 @@ impl ReportsService {
         }
     }
 
+    /// The frozen daily-close repository. Exposed so the sync resync sweep
+    /// (`sync_resync_local`) can enumerate every local `daily_close` row for
+    /// re-push.
+    pub fn frozen_close_repo(&self) -> Arc<dyn FrozenCloseRepo> {
+        self.frozen.clone()
+    }
+
     pub fn require_role(role: UserRole, allowed: &[UserRole]) -> AppResult<()> {
         if allowed.contains(&role) {
             Ok(())

@@ -76,6 +76,14 @@ impl CheckSubtypeRepo for SqliteCheckSubtypeRepo {
         .await?;
         rows.into_iter().map(CheckSubtypeRow::into_domain).collect()
     }
+
+    async fn list_all_for_resync(&self) -> AppResult<Vec<CheckSubtype>> {
+        let rows: Vec<CheckSubtypeRow> =
+            sqlx::query_as::<_, CheckSubtypeRow>("SELECT * FROM check_subtypes ORDER BY id ASC")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.into_iter().map(CheckSubtypeRow::into_domain).collect()
+    }
 }
 
 #[derive(sqlx::FromRow)]
