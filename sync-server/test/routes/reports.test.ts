@@ -147,6 +147,58 @@ test('GET /reports/visits returns rows + totals', async (t) => {
   assert.strictEqual(body.totals.doctor_cut_iqd, 20000)
 })
 
+test('GET /reports/visits net_iqd uses collected basis and can go negative', async (t) => {
+  const app = await build(t) as unknown as FastifyAppLike
+  const token = authToken(app, 'superadmin')
+  const isoDate = new Date().toISOString()
+  const patientId = '01900000-0000-7000-8000-000000000102'
+  const visitId = '01900000-0000-7000-8000-000000000205'
+  const doctorId = '01900000-0000-7000-8000-00000000C002'
+  // Billed total 50000, doctor cut 20000, operator cut 5000 -- but the
+  // receptionist only collected 10000 (a partial payment). Net against the
+  // billed total would be 50000 - 20000 - 5000 = 25000 (positive); net
+  // against COLLECTED cash is 10000 - 20000 - 5000 = -15000 (negative). The
+  // server must report the collected-basis figure, uncapped.
+  const payload = {
+    ...lockedVisitPayload(visitId, patientId, isoDate, doctorId, 20000),
+    amount_paid_override_iqd: 10000,
+  }
+  await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-r' },
+    payload: {
+      ops: [
+        jsonOp('01HZRP00000000000000000101', 'patients', patientId, patientPayload(patientId)),
+        jsonOp('01HZRP00000000000000000102', 'visits', visitId, payload),
+      ],
+    },
+  })
+
+  const from = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+  const to = new Date(Date.now() + 24 * 3600 * 1000).toISOString()
+  const res = await app.inject({
+    method: 'GET',
+    url: `/reports/visits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    headers: { authorization: `Bearer ${token}` },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.rows.length, 1)
+  assert.strictEqual(body.rows[0].net_iqd, -15000)
+  assert.strictEqual(body.totals.net_iqd, -15000)
+
+  const groupedRes = await app.inject({
+    method: 'GET',
+    url: `/reports/visits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&groupBy=by_doctor`,
+    headers: { authorization: `Bearer ${token}` },
+  })
+  assert.strictEqual(groupedRes.statusCode, 200, groupedRes.payload)
+  const groupedBody = JSON.parse(groupedRes.payload)
+  assert.strictEqual(groupedBody.groups.length, 1)
+  assert.strictEqual(groupedBody.groups[0].net_iqd, -15000)
+})
+
 test('GET /reports/visits groupBy=by_doctor returns grouped totals', async (t) => {
   const app = await build(t) as unknown as FastifyAppLike
   const seedToken = authToken(app, 'superadmin')

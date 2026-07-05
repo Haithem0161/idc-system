@@ -53,7 +53,8 @@ use app_lib::domains::shifts::infrastructure::SqliteOperatorShiftRepo;
 use app_lib::domains::sync::domain::repositories::{AuditRepo, OutboxRepo};
 use app_lib::domains::sync::infrastructure::{SqliteAuditRepo, SqliteOutboxRepo};
 use app_lib::domains::visits::domain::entities::{
-    AdjustmentNewInput, AdjustmentReason, InventoryAdjustment, VisitStatus,
+    AdjustmentNewInput, AdjustmentReason, InventoryAdjustment, Visit, VisitCreateDraftInput,
+    VisitStatus,
 };
 use app_lib::domains::visits::domain::repositories::{InventoryAdjustmentRepo, VisitRepo};
 use app_lib::domains::visits::domain::services::MoneySettings;
@@ -330,6 +331,7 @@ async fn create_draft_and_lock_produces_receipt_and_consumption() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -353,10 +355,12 @@ async fn create_draft_and_lock_produces_receipt_and_consumption() {
 
     assert_eq!(lock_result.visit.status, VisitStatus::Locked);
     let snap = lock_result.visit.snapshots.as_ref().unwrap();
-    // 50000 base price * 25% cut = 12500 doctor cut; dye=true => 2000.
+    // Paid-basis cut: no override so collected = price = 50000; dye=true => 2000,
+    // and dye is covered first, so cut_base = 50000 - 2000 = 48000.
+    // doctor_cut = 48000 * 25% = 12000 (was 12500 when the cut was off full price).
     assert_eq!(snap.price_iqd, 50_000);
     assert_eq!(snap.dye_cost_iqd, 2_000);
-    assert_eq!(snap.doctor_cut_iqd, 12_500);
+    assert_eq!(snap.doctor_cut_iqd, 12_000);
     assert_eq!(snap.total_amount_iqd, 52_000);
     assert!(lock_result.visit.locked_at.is_some());
     // Both receipt files exist.
@@ -414,6 +418,7 @@ async fn discount_visit_locks_with_zero_doctor_cut_and_persists_flag() {
                 report: false,
                 dalal: false,
                 discount: true,
+                price_override_iqd: None,
             },
         )
         .await
@@ -474,6 +479,7 @@ async fn create_draft_rejects_discount_without_referring_doctor() {
                 report: false,
                 dalal: false,
                 discount: true,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -513,6 +519,7 @@ async fn lock_rejected_when_no_qualified_operator_on_shift() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -553,6 +560,7 @@ async fn void_offsets_inventory_and_marks_visit_voided() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -626,6 +634,7 @@ async fn discard_locked_visit_is_rejected() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -670,6 +679,7 @@ async fn discard_draft_soft_deletes_and_emits_audit() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -770,6 +780,7 @@ async fn create_and_lock_visit(f: &Fixture) -> Uuid {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -849,6 +860,7 @@ async fn lock_house_visit_records_internal_pct_and_null_doctor_snapshot() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -876,6 +888,58 @@ async fn lock_house_visit_records_internal_pct_and_null_doctor_snapshot() {
     assert!(row.0.is_some());
     assert!(row.1.is_none());
     assert!(row.2.is_none());
+}
+
+#[tokio::test]
+async fn lock_house_visit_with_price_override_and_partial_paid_scales_doctor_cut() {
+    // House visit (no referring doctor -> internal_doctor_pct applies), editable
+    // price overridden to 100000, but the receptionist only collected 40000.
+    // cut_base = collected (40000), no dye => doctor_cut = 40000 * 40% = 16000,
+    // NOT 40000 (40% of the full 100000 override price).
+    let f = seed().await;
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: None,
+                mandoub_id: None,
+                dye: false,
+                report: false,
+                dalal: false,
+                discount: false,
+                price_override_iqd: Some(100_000),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(draft.price_override_iqd, Some(100_000));
+
+    let lock_result = f
+        .visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            Some(40_000),
+            None,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await
+        .unwrap();
+
+    let snap = lock_result.visit.snapshots.as_ref().unwrap();
+    assert_eq!(snap.price_iqd, 100_000);
+    assert_eq!(snap.amount_paid_override_iqd, Some(40_000));
+    assert_eq!(snap.dye_cost_iqd, 0);
+    assert_eq!(snap.doctor_cut_iqd, 16_000);
 }
 
 #[tokio::test]
@@ -919,6 +983,7 @@ async fn update_draft_rejected_on_locked_visit() {
                 report: None,
                 dalal: None,
                 discount: None,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -944,6 +1009,7 @@ async fn lock_rejects_when_operator_not_in_qualified_set() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -1108,6 +1174,7 @@ async fn create_draft_rejects_subtype_when_check_type_lacks_subtypes() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -1139,6 +1206,7 @@ async fn create_draft_rejects_unsupported_dye() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -1164,6 +1232,7 @@ async fn create_draft_rejected_for_accountant_role() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -1299,6 +1368,7 @@ async fn pricing_resolve_returns_fresh_snapshot_without_mutating_visit() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -1345,6 +1415,7 @@ async fn lock_increments_visit_version_monotonically_from_create() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -1463,4 +1534,48 @@ async fn inventory_adjustments_no_update_trigger_allows_sync_metadata_only() {
     .execute(&f.pool)
     .await;
     assert!(res.is_ok());
+}
+
+#[tokio::test]
+async fn price_override_round_trips_through_repo() {
+    let f = seed().await;
+    let visit_repo: Arc<dyn VisitRepo> = Arc::new(SqliteVisitRepo::new(f.pool.clone()));
+
+    let mut input = VisitCreateDraftInput {
+        patient_id: f.patient.id,
+        receptionist_user_id: f.receptionist.id,
+        check_type_id: f.check_type.id,
+        check_subtype_id: None,
+        doctor_id: None,
+        mandoub_id: None,
+        dye: false,
+        report: false,
+        dalal: false,
+        discount: false,
+        price_override_iqd: Some(77_000),
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    };
+    let with_override = Visit::create_draft(input.clone()).unwrap();
+    let mut tx = f.pool.begin().await.unwrap();
+    visit_repo.upsert(&mut tx, &with_override).await.unwrap();
+    tx.commit().await.unwrap();
+    let loaded = visit_repo
+        .get_by_id(with_override.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.price_override_iqd, Some(77_000));
+
+    input.price_override_iqd = None;
+    let without_override = Visit::create_draft(input).unwrap();
+    let mut tx = f.pool.begin().await.unwrap();
+    visit_repo.upsert(&mut tx, &without_override).await.unwrap();
+    tx.commit().await.unwrap();
+    let loaded_none = visit_repo
+        .get_by_id(without_override.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded_none.price_override_iqd, None);
 }

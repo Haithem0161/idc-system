@@ -307,6 +307,7 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -406,6 +407,7 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -439,6 +441,7 @@ async fn persona_p2_mehdi_walks_through_phase05_reception_day() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await

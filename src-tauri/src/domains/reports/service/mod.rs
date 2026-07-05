@@ -220,13 +220,15 @@ impl ReportsService {
             .read
             .inventory_consumption_value(entity_id, range.from_utc, range.to_utc)
             .await?;
-        let net = agg
-            .revenue_iqd
-            .saturating_sub(agg.doctor_cut_iqd)
-            .saturating_sub(agg.operator_cut_iqd)
-            .saturating_sub(agg.report_iqd)
-            .saturating_sub(agg.mandoub_cut_iqd)
-            .saturating_sub(inv_value);
+        // Net is on the COLLECTED basis (not billed revenue) so it reconciles
+        // with the daily-close net, and is plain subtraction so it can go
+        // truthfully negative when fixed/flat cuts exceed what was collected.
+        let net = agg.collected_iqd
+            - agg.doctor_cut_iqd
+            - agg.operator_cut_iqd
+            - agg.report_iqd
+            - agg.mandoub_cut_iqd
+            - inv_value;
 
         let today_offset_secs = baghdad_offset_seconds();
         let today_naive =
@@ -319,20 +321,19 @@ impl ReportsService {
             .read
             .inventory_consumption_value(entity_id, prior_from, prior_to)
             .await?;
-        let cur_net = current
-            .revenue_iqd
-            .saturating_sub(current.doctor_cut_iqd)
-            .saturating_sub(current.operator_cut_iqd)
-            .saturating_sub(current.report_iqd)
-            .saturating_sub(current.mandoub_cut_iqd)
-            .saturating_sub(current_inv);
-        let prior_net = prior
-            .revenue_iqd
-            .saturating_sub(prior.doctor_cut_iqd)
-            .saturating_sub(prior.operator_cut_iqd)
-            .saturating_sub(prior.report_iqd)
-            .saturating_sub(prior.mandoub_cut_iqd)
-            .saturating_sub(prior_inv);
+        // Collected basis + plain subtraction, matching `dashboard_kpis`.
+        let cur_net = current.collected_iqd
+            - current.doctor_cut_iqd
+            - current.operator_cut_iqd
+            - current.report_iqd
+            - current.mandoub_cut_iqd
+            - current_inv;
+        let prior_net = prior.collected_iqd
+            - prior.doctor_cut_iqd
+            - prior.operator_cut_iqd
+            - prior.report_iqd
+            - prior.mandoub_cut_iqd
+            - prior_inv;
         Ok(TrendMatrix {
             revenue: trend_cell(TrendInputs {
                 current: current.revenue_iqd,
@@ -674,13 +675,12 @@ impl ReportsService {
         let total_discount_iqd = agg_locked
             .revenue_iqd
             .saturating_sub(agg_locked.collected_iqd);
-        let net_iqd = agg_locked
-            .collected_iqd
-            .saturating_sub(agg_locked.doctor_cut_iqd)
-            .saturating_sub(agg_locked.operator_cut_iqd)
-            .saturating_sub(agg_locked.report_iqd)
-            .saturating_sub(agg_locked.mandoub_cut_iqd)
-            .saturating_sub(inv_value);
+        let net_iqd = agg_locked.collected_iqd
+            - agg_locked.doctor_cut_iqd
+            - agg_locked.operator_cut_iqd
+            - agg_locked.report_iqd
+            - agg_locked.mandoub_cut_iqd
+            - inv_value;
 
         let target_date_str = target_date.format("%Y-%m-%d").to_string();
         let hash_input = DailyCloseHashInput {

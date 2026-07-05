@@ -200,6 +200,10 @@ pub struct VisitCreateDraftArgs {
     pub dalal: bool,
     #[serde(default)]
     pub discount: bool,
+    /// Editable per-visit price. Absent/null keeps the catalog/doctor-pricing
+    /// price.
+    #[serde(default)]
+    pub price_override_iqd: Option<i64>,
 }
 
 #[instrument(skip(state))]
@@ -234,6 +238,7 @@ pub async fn visits_create_draft(
                 report: args.report,
                 dalal: args.dalal,
                 discount: args.discount,
+                price_override_iqd: args.price_override_iqd,
             },
         )
         .await?;
@@ -259,6 +264,10 @@ pub struct VisitUpdateDraftArgs {
     pub dalal: Option<bool>,
     #[serde(default)]
     pub discount: Option<bool>,
+    /// `Some(Some(n))` sets the editable price override, `Some(None)` clears
+    /// it, `None` (absent) leaves it unchanged.
+    #[serde(default)]
+    pub price_override_iqd: Option<Option<i64>>,
 }
 
 fn parse_uuid_set_opt(v: Option<Option<String>>) -> AppResult<Option<Option<Uuid>>> {
@@ -291,6 +300,7 @@ pub async fn visits_update_draft(
                 report: args.report,
                 dalal: args.dalal,
                 discount: args.discount,
+                price_override_iqd: args.price_override_iqd,
             },
         )
         .await?;

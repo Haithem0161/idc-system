@@ -51,6 +51,8 @@
       "patient_no_results": "لا يوجد مرضى مطابقون.",
       "subtype": "النوع الفرعي",
       "subtype_required": "اختر نوعاً فرعياً",
+      "price": "السعر",
+      "price_hint": "عدّل السعر إذا اختلف عن الافتراضي لهذه الزيارة",
       "doctor": "الطبيب",
       "doctor_placeholder": "اتركه فارغاً للبيت",
       "house": "البيت",

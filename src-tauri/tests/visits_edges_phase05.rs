@@ -303,6 +303,7 @@ async fn create_and_lock(r: &Rig) -> Uuid {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -451,6 +452,7 @@ async fn operator_clocks_out_mid_session_makes_subsequent_lock_fail() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -503,6 +505,7 @@ async fn failed_create_draft_leaves_no_partial_state() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -536,6 +539,7 @@ async fn list_workspace_at_100_visits_under_one_second_smoke() {
                     report: false,
                     dalal: false,
                     discount: false,
+                    price_override_iqd: None,
                 },
             )
             .await
@@ -598,6 +602,7 @@ async fn role_bypass_accountant_cannot_create_draft_or_lock() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -638,6 +643,7 @@ async fn soft_deleted_visit_is_hidden_from_reads_but_persists_in_table() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -696,6 +702,7 @@ async fn fk_violation_when_visit_references_unknown_patient() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -721,6 +728,7 @@ async fn sync_version_increments_on_every_visit_mutation() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await

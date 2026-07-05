@@ -470,6 +470,7 @@ model Visit {
   voidedByUserId                  String?      @map("voided_by_user_id")
   voidReason                      String?      @map("void_reason")
   priceSnapshotIqd                Int?         @map("price_snapshot_iqd")
+  priceOverrideIqd                Int?         @map("price_override_iqd")
   dyeCostSnapshotIqd              Int?         @map("dye_cost_snapshot_iqd")
   reportAmountSnapshotIqd         Int?         @map("report_amount_snapshot_iqd")
   reportPctSnapshot               Int?         @map("report_pct_snapshot")

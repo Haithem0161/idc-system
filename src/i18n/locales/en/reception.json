@@ -51,6 +51,8 @@
       "patient_no_results": "No matching patients.",
       "subtype": "Subtype",
       "subtype_required": "Pick a subtype",
+      "price": "Price",
+      "price_hint": "Edit if this visit's price differs from the default",
       "doctor": "Doctor",
       "doctor_placeholder": "Leave empty for house",
       "house": "House",

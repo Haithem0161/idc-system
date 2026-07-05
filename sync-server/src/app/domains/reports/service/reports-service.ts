@@ -322,7 +322,12 @@ function toVisitRow (v: VisitSyncRecord): VisitsReportRow {
   const oc = v.operator_cut_snapshot_iqd ?? 0
   const reportAmt = v.report_amount_snapshot_iqd ?? 0
   const mandoubCut = v.mandoub_cut_snapshot_iqd ?? 0
-  const total = v.total_amount_iqd_snapshot ?? price
+  // Net is against cash actually COLLECTED (the receptionist override when
+  // set, otherwise the billed total), matching the daily-close headline net
+  // and `sumCollected()` below -- not the billed `total`. This can go
+  // negative (e.g. a partial-payment visit with a full doctor cut); no floor
+  // is applied, so a shortfall is visible rather than hidden.
+  const collected = v.amount_paid_override_iqd ?? v.total_amount_iqd_snapshot ?? 0
   return {
     visit_id: v.id,
     locked_at: v.locked_at,
@@ -342,8 +347,8 @@ function toVisitRow (v: VisitSyncRecord): VisitsReportRow {
     report_iqd: reportAmt,
     mandoub_cut_iqd: mandoubCut,
     // Report and مندوب are payables subtracted from net; neither is part of
-    // `total`. مندوب is subtracted AFTER the report.
-    net_iqd: total - dc - oc - reportAmt - mandoubCut,
+    // `collected`. مندوب is subtracted AFTER the report.
+    net_iqd: collected - dc - oc - reportAmt - mandoubCut,
   }
 }
 
@@ -381,7 +386,7 @@ function sumTotals (rows: VisitSyncRecord[]): VisitsReportTotals {
   for (const r of rows) {
     visits += 1
     const price = r.price_snapshot_iqd ?? 0
-    const total = r.total_amount_iqd_snapshot ?? price
+    const collected = r.amount_paid_override_iqd ?? r.total_amount_iqd_snapshot ?? 0
     const cutD = r.doctor_cut_snapshot_iqd ?? 0
     const cutO = r.operator_cut_snapshot_iqd ?? 0
     const reportAmt = r.report_amount_snapshot_iqd ?? 0
@@ -391,10 +396,11 @@ function sumTotals (rows: VisitSyncRecord[]): VisitsReportTotals {
     oc += cutO
     report += reportAmt
     mandoub += mandoubCut
-    // Report and مندوب are payables SUBTRACTED here (neither is part of
-    // `total`) so grouped nets reconcile with the daily-close headline net.
-    // مندوب is subtracted AFTER the report.
-    net += total - cutD - cutO - reportAmt - mandoubCut
+    // Report and مندوب are payables SUBTRACTED here against cash actually
+    // COLLECTED (neither is part of `collected`) so grouped nets reconcile
+    // with the daily-close headline net. مندوب is subtracted AFTER the
+    // report. No floor: a partial-payment shortfall surfaces as negative net.
+    net += collected - cutD - cutO - reportAmt - mandoubCut
   }
   return {
     visits,

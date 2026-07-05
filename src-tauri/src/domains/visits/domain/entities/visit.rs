@@ -113,6 +113,7 @@ pub struct Visit {
     /// doctor's cut for this visit to 0; nothing else moves (patient total,
     /// operator cut, report, and مندوب cut are unchanged).
     pub discount: bool,
+    pub price_override_iqd: Option<i64>,
     pub locked_at: Option<DateTime<Utc>>,
     pub voided_at: Option<DateTime<Utc>>,
     pub voided_by_user_id: Option<Uuid>,
@@ -140,6 +141,7 @@ pub struct VisitCreateDraftInput {
     pub report: bool,
     pub dalal: bool,
     pub discount: bool,
+    pub price_override_iqd: Option<i64>,
     pub entity_id: String,
     pub origin_device_id: Option<String>,
 }
@@ -156,6 +158,9 @@ pub struct VisitDraftPatch {
     pub report: Option<bool>,
     pub dalal: Option<bool>,
     pub discount: Option<bool>,
+    /// `Some(Some(p))` sets the editable price, `Some(None)` clears it back to
+    /// the catalog default, `None` leaves it unchanged.
+    pub price_override_iqd: Option<Option<i64>>,
 }
 
 impl Visit {
@@ -184,6 +189,13 @@ impl Visit {
                 "discount requires a referring doctor".into(),
             ));
         }
+        if let Some(p) = input.price_override_iqd {
+            if p < 0 {
+                return Err(AppError::Validation(
+                    "price_override_iqd must be >= 0".into(),
+                ));
+            }
+        }
         let now = Utc::now();
         Ok(Self {
             id: Uuid::now_v7(),
@@ -199,6 +211,7 @@ impl Visit {
             report: input.report,
             dalal: input.dalal,
             discount: input.discount,
+            price_override_iqd: input.price_override_iqd,
             locked_at: None,
             voided_at: None,
             voided_by_user_id: None,
@@ -257,6 +270,16 @@ impl Visit {
         }
         if let Some(discount) = patch.discount {
             self.discount = discount;
+        }
+        if let Some(price) = patch.price_override_iqd {
+            if let Some(p) = price {
+                if p < 0 {
+                    return Err(AppError::Validation(
+                        "price_override_iqd must be >= 0".into(),
+                    ));
+                }
+            }
+            self.price_override_iqd = price;
         }
         // Validate the resulting state: دلال is mutually exclusive with a
         // referring doctor. Checked after applying both patches so a single
@@ -333,6 +356,14 @@ impl Visit {
             if self.doctor_id.is_none() {
                 return Err(AppError::Validation(
                     "mandoub requires a referring doctor".into(),
+                ));
+            }
+            // A مندوب visit that collected nothing after dye produces a zeroed
+            // cut base (money engine zero-guard). Rather than fail the opaque
+            // 500/1000 CHECK, reject with a precise reason.
+            if snapshots.mandoub_cut_iqd == 0 {
+                return Err(AppError::Validation(
+                    "cannot lock a mandoub visit with no collectable amount after dye".into(),
                 ));
             }
             if !matches!(snapshots.mandoub_cut_iqd, 500 | 1000) {
@@ -537,9 +568,51 @@ mod tests {
             report: false,
             dalal: false,
             discount: false,
+            price_override_iqd: None,
             entity_id: "t".into(),
             origin_device_id: Some("dev".into()),
         }
+    }
+
+    #[test]
+    fn create_draft_defaults_price_override_none() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        assert_eq!(v.price_override_iqd, None);
+    }
+
+    #[test]
+    fn create_draft_accepts_price_override() {
+        let mut input = draft_input();
+        input.price_override_iqd = Some(80_000);
+        let v = Visit::create_draft(input).unwrap();
+        assert_eq!(v.price_override_iqd, Some(80_000));
+    }
+
+    #[test]
+    fn create_draft_rejects_negative_price_override() {
+        let mut input = draft_input();
+        input.price_override_iqd = Some(-1);
+        assert!(Visit::create_draft(input).is_err());
+    }
+
+    #[test]
+    fn edit_draft_sets_and_clears_price_override() {
+        let v = Visit::create_draft(draft_input()).unwrap();
+        let set = v
+            .clone()
+            .edit_draft(VisitDraftPatch {
+                price_override_iqd: Some(Some(90_000)),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(set.price_override_iqd, Some(90_000));
+        let cleared = set
+            .edit_draft(VisitDraftPatch {
+                price_override_iqd: Some(None),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(cleared.price_override_iqd, None);
     }
 
     #[test]
@@ -1022,6 +1095,26 @@ mod tests {
         snap.mandoub_name = None;
         let err = v.lock(Uuid::now_v7(), snap, Utc::now());
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_mandoub_visit_with_zeroed_cut_base_is_rejected_clearly() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        input.mandoub_id = Some(Uuid::now_v7());
+        let v = Visit::create_draft(input).unwrap();
+        // Snapshot the engine would produce when base==0: mandoub cut 0.
+        let mut snap = snap_doctor(50_000, "Dr");
+        snap.mandoub_cut_iqd = 0;
+        snap.mandoub_name = Some("Rep".into());
+        let err = v.lock(Uuid::now_v7(), snap, Utc::now());
+        match err {
+            Err(AppError::Validation(msg)) => assert!(
+                msg.contains("no collectable amount"),
+                "expected the clear mandoub-zero message, got: {msg}"
+            ),
+            other => panic!("expected Validation error, got {other:?}"),
+        }
     }
 
     #[test]

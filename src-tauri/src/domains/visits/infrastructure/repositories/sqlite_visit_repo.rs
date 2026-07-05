@@ -64,6 +64,7 @@ struct VisitRow {
     internal_pct_snapshot: Option<i64>,
     total_amount_iqd_snapshot: Option<i64>,
     amount_paid_override_iqd: Option<i64>,
+    price_override_iqd: Option<i64>,
     patient_name_snapshot: Option<String>,
     doctor_name_snapshot: Option<String>,
     operator_name_snapshot: Option<String>,
@@ -130,6 +131,7 @@ impl VisitRow {
             report: self.report != 0,
             dalal: self.dalal != 0,
             discount: self.discount != 0,
+            price_override_iqd: self.price_override_iqd,
             locked_at: parse_dt_opt(self.locked_at.as_deref())?,
             voided_at: parse_dt_opt(self.voided_at.as_deref())?,
             voided_by_user_id: parse_uuid_opt(self.voided_by_user_id.as_deref())?,
@@ -155,7 +157,7 @@ const COLUMNS: &str = "id, patient_id, status, receptionist_user_id, check_type_
                        reporting_doctor_name_snapshot, doctor_cut_snapshot_iqd, \
                        operator_cut_snapshot_iqd, mandoub_cut_snapshot_iqd, mandoub_name_snapshot, \
                        internal_pct_snapshot, total_amount_iqd_snapshot, \
-                       amount_paid_override_iqd, \
+                       amount_paid_override_iqd, price_override_iqd, \
                        patient_name_snapshot, doctor_name_snapshot, operator_name_snapshot, \
                        check_type_name_ar_snapshot, check_type_name_en_snapshot, \
                        check_subtype_name_ar_snapshot, check_subtype_name_en_snapshot, \
@@ -179,7 +181,7 @@ impl VisitRepo for SqliteVisitRepo {
         let snap = v.snapshots.as_ref();
         let sql = format!(
             "INSERT INTO visits ({COLUMNS}) VALUES (\
-                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?\
+                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?\
              ) ON CONFLICT(id) DO UPDATE SET \
                status = excluded.status, \
                patient_id = excluded.patient_id, \
@@ -207,6 +209,7 @@ impl VisitRepo for SqliteVisitRepo {
                internal_pct_snapshot = excluded.internal_pct_snapshot, \
                total_amount_iqd_snapshot = excluded.total_amount_iqd_snapshot, \
                amount_paid_override_iqd = excluded.amount_paid_override_iqd, \
+               price_override_iqd = excluded.price_override_iqd, \
                patient_name_snapshot = excluded.patient_name_snapshot, \
                doctor_name_snapshot = excluded.doctor_name_snapshot, \
                operator_name_snapshot = excluded.operator_name_snapshot, \
@@ -254,6 +257,7 @@ impl VisitRepo for SqliteVisitRepo {
             .bind(snap.and_then(|s| s.internal_pct))
             .bind(snap.map(|s| s.total_amount_iqd))
             .bind(snap.and_then(|s| s.amount_paid_override_iqd))
+            .bind(v.price_override_iqd)
             .bind(snap.map(|s| s.patient_name.clone()))
             .bind(snap.and_then(|s| s.doctor_name.clone()))
             .bind(snap.map(|s| s.operator_name.clone()))

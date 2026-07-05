@@ -311,6 +311,7 @@ mod tests {
             report: false,
             dalal: false,
             discount: false,
+            price_override_iqd: None,
             locked_at: Some(now),
             voided_at: None,
             voided_by_user_id: None,

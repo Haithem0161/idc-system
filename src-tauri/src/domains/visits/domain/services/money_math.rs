@@ -52,6 +52,14 @@ pub struct MoneyMathInputs<'a> {
     /// مندوب name, copied into the snapshot alongside the cut. `Some(name)` when
     /// a مندوب is referenced, `None` otherwise.
     pub mandoub_name: Option<&'a str>,
+    /// Receptionist-editable price for this visit. `Some(p)` overrides the
+    /// catalog/subtype/pricing price; `None` uses the resolved catalog price.
+    /// Becomes the snapshot `price_iqd` and the default "collected" basis.
+    pub price_override_iqd: Option<i64>,
+    /// Cash actually collected. `Some(c)` (incl. 0) is the collected amount;
+    /// `None` means the patient paid the full price. The doctor-side cuts scale
+    /// off `max(0, collected - dye)`.
+    pub amount_paid_override_iqd: Option<i64>,
     pub settings: MoneySettings,
 }
 
@@ -94,7 +102,14 @@ pub fn compute(inputs: &MoneyMathInputs<'_>) -> AppResult<VisitSnapshots> {
     }
 
     let base_price = base_price(inputs)?;
-    let price_iqd = effective_price(base_price, inputs.doctor_pricing);
+    let catalog_price = effective_price(base_price, inputs.doctor_pricing);
+    // Receptionist-editable price wins over the catalog/pricing price.
+    let price_iqd = inputs.price_override_iqd.unwrap_or(catalog_price);
+    if price_iqd < 0 {
+        return Err(AppError::Validation(
+            "price_override_iqd must be >= 0".into(),
+        ));
+    }
 
     let dye_cost = if inputs.dye {
         inputs.settings.dye_cost_iqd
@@ -102,36 +117,74 @@ pub fn compute(inputs: &MoneyMathInputs<'_>) -> AppResult<VisitSnapshots> {
         0
     };
 
-    let (computed_doctor_cut, internal_pct, operator_cut) = cuts(
-        price_iqd,
-        inputs.operator,
-        inputs.doctor,
-        inputs.dalal,
-        inputs.doctor_pricing,
-        &inputs.settings,
-    )?;
+    // Collected cash defaults to the (editable) price when no override is set.
+    let collected = inputs.amount_paid_override_iqd.unwrap_or(price_iqd);
+    if collected < 0 {
+        return Err(AppError::Validation(
+            "amount_paid_override_iqd must be >= 0".into(),
+        ));
+    }
+    // Cut base: collected minus dye (dye is a material cost, covered first).
+    // When this hits 0, EVERY cut zeroes -- fixed and scaled alike.
+    let base = cut_base(price_iqd, collected, dye_cost);
 
-    // Discount forces the referring doctor's cut to 0 for this visit. Applied
-    // here, BEFORE the report base, so the report carve-out (a pct of
-    // `price - doctor_cut`) sees the zeroed cut and widens accordingly. The
-    // discount is only valid with a real referring doctor (guarded above and at
-    // the entity level), so `internal_pct` is necessarily None here.
-    let doctor_cut = if inputs.discount && inputs.doctor.is_some() {
-        0
+    // Compute every cut off the paid-net-of-dye base. When the base is 0
+    // (patient did not cover the dye) the zero-guard fires: nobody is paid,
+    // not even fixed entities, but internal_pct still marks house mode so the
+    // lock invariant that a house visit carries an internal_pct is preserved.
+    let (doctor_cut, internal_pct, operator_cut, mandoub_cut, report_amount) = if base == 0 {
+        let internal_pct = if inputs.doctor.is_none() && !inputs.dalal {
+            if !(0..=100).contains(&inputs.settings.internal_doctor_pct) {
+                return Err(AppError::Validation(
+                    "internal_doctor_pct must be 0..=100".into(),
+                ));
+            }
+            Some(inputs.settings.internal_doctor_pct)
+        } else {
+            None
+        };
+        (0, internal_pct, 0, 0, 0)
     } else {
-        computed_doctor_cut
-    };
+        let (computed_doctor_cut, internal_pct, operator_cut) = cuts(
+            base,
+            inputs.operator,
+            inputs.doctor,
+            inputs.dalal,
+            inputs.doctor_pricing,
+            &inputs.settings,
+        )?;
 
-    // Report is a net-side carve-out, not part of the patient bill. It is a
-    // percentage of the price AFTER the doctor cut (excluding dye and the
-    // operator cut) paid to the internal reporting doctor.
-    let report_amount = if inputs.report {
-        if !(0..=100).contains(&inputs.settings.report_pct) {
-            return Err(AppError::Validation("report_pct must be 0..=100".into()));
-        }
-        (price_iqd - doctor_cut).max(0) * inputs.settings.report_pct / 100
-    } else {
-        0
+        // Discount forces the referring doctor's cut to 0 for this visit.
+        // Applied here, BEFORE the report base, so the report carve-out (a pct
+        // of `cut_base - doctor_cut`) sees the zeroed cut and widens
+        // accordingly. The discount is only valid with a real referring doctor
+        // (guarded above and at the entity level), so `internal_pct` is
+        // necessarily None here.
+        let doctor_cut = if inputs.discount && inputs.doctor.is_some() {
+            0
+        } else {
+            computed_doctor_cut
+        };
+
+        // Report is a net-side carve-out, not part of the patient bill. It is a
+        // percentage of the cut base AFTER the doctor cut (excluding dye and
+        // the operator cut) paid to the internal reporting doctor.
+        let report_amount = if inputs.report {
+            if !(0..=100).contains(&inputs.settings.report_pct) {
+                return Err(AppError::Validation("report_pct must be 0..=100".into()));
+            }
+            (base - doctor_cut).max(0) * inputs.settings.report_pct / 100
+        } else {
+            0
+        };
+
+        (
+            doctor_cut,
+            internal_pct,
+            operator_cut,
+            inputs.mandoub_cut_iqd,
+            report_amount,
+        )
     };
     let report_pct = inputs.report.then_some(inputs.settings.report_pct);
     let reporting_doctor_name =
@@ -155,14 +208,15 @@ pub fn compute(inputs: &MoneyMathInputs<'_>) -> AppResult<VisitSnapshots> {
         // مندوب cut + name are PURE PASSTHROUGH: copied straight from the
         // visit-chosen inputs into the snapshot. They never went through
         // cuts() and never perturbed the doctor/operator cut or the report base.
-        mandoub_cut_iqd: inputs.mandoub_cut_iqd,
+        // The cut is zeroed by the zero-guard when the cut base is 0; the name
+        // still follows the existing rule so a referenced مندوب is captured.
+        mandoub_cut_iqd: mandoub_cut,
         mandoub_name: inputs.mandoub_name.map(|s| s.to_string()),
         internal_pct,
         total_amount_iqd: total,
-        // The money engine only ever produces the billed snapshot. A collected
-        // override is a receptionist decision applied after compute(), so it is
-        // never set here.
-        amount_paid_override_iqd: None,
+        // The collected amount now flows through the engine: it drives the cut
+        // base and is recorded on the snapshot so the lock read-back agrees.
+        amount_paid_override_iqd: inputs.amount_paid_override_iqd,
         patient_name: inputs.patient_name.to_string(),
         doctor_name: inputs.doctor.map(|d| d.name.clone()),
         operator_name: inputs.operator.name.clone(),
@@ -189,10 +243,18 @@ fn effective_price(base: i64, pricing: Option<&DoctorCheckPricing>) -> i64 {
     }
 }
 
-/// Resolve a doctor cut from a `(kind, value)` pair against the visit price.
+/// The base every cut is measured against: collected cash net of dye, floored
+/// at zero. When it is zero, no cut (fixed or scaled) is paid. `price_iqd` is
+/// accepted for signature symmetry with the design spec but is not needed for
+/// the computation (the base is purely collected - dye).
+fn cut_base(_price_iqd: i64, collected: i64, dye_cost: i64) -> i64 {
+    (collected - dye_cost).max(0)
+}
+
+/// Resolve a doctor cut from a `(kind, value)` pair against the cut base.
 /// Shared by the per-check `DoctorCheckPricing` override and the doctor-level
 /// default cut so the pct/fixed math never drifts between the two.
-fn cut_from_kind_value(price_iqd: i64, kind: &str, value: i64) -> AppResult<i64> {
+fn cut_from_kind_value(cut_base: i64, kind: &str, value: i64) -> AppResult<i64> {
     match kind {
         "pct" => {
             if !(0..=100).contains(&value) {
@@ -200,7 +262,7 @@ fn cut_from_kind_value(price_iqd: i64, kind: &str, value: i64) -> AppResult<i64>
                     "doctor cut percentage must be 0..=100".into(),
                 ));
             }
-            Ok(price_iqd * value / 100)
+            Ok(cut_base * value / 100)
         }
         "fixed" => Ok(value.max(0)),
         other => Err(AppError::Validation(format!("unknown cut_kind: {other}"))),
@@ -208,7 +270,7 @@ fn cut_from_kind_value(price_iqd: i64, kind: &str, value: i64) -> AppResult<i64>
 }
 
 fn cuts(
-    price_iqd: i64,
+    cut_base: i64,
     operator: &Operator,
     doctor: Option<&Doctor>,
     dalal: bool,
@@ -236,7 +298,7 @@ fn cuts(
         (_, Some(p)) => {
             // Per-check override wins over everything: explicit cut for this
             // exact doctor + check (+ subtype).
-            let doctor_cut = cut_from_kind_value(price_iqd, p.cut_kind.as_str(), p.cut_value)?;
+            let doctor_cut = cut_from_kind_value(cut_base, p.cut_kind.as_str(), p.cut_value)?;
             Ok((doctor_cut, None, operator_cut))
         }
         (Some(d), None) => {
@@ -246,7 +308,7 @@ fn cuts(
             // MUST stay None -- it is the house-mode marker and Visit::lock
             // rejects a doctor visit that carries one (invariant 6).
             let doctor_cut = match (d.default_cut_kind.as_deref(), d.default_cut_value) {
-                (Some(kind), Some(value)) => cut_from_kind_value(price_iqd, kind, value)?,
+                (Some(kind), Some(value)) => cut_from_kind_value(cut_base, kind, value)?,
                 _ => 0,
             };
             Ok((doctor_cut, None, operator_cut))
@@ -260,7 +322,7 @@ fn cuts(
                     "internal_doctor_pct must be 0..=100".into(),
                 ));
             }
-            let doctor_cut = price_iqd * settings.internal_doctor_pct / 100;
+            let doctor_cut = cut_base * settings.internal_doctor_pct / 100;
             Ok((doctor_cut, Some(settings.internal_doctor_pct), operator_cut))
         }
     }
@@ -423,6 +485,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -432,7 +496,9 @@ mod tests {
         assert_eq!(snap.report_amount_iqd, 0);
         assert_eq!(snap.report_pct, None);
         assert_eq!(snap.reporting_doctor_name, None);
-        assert_eq!(snap.doctor_cut_iqd, 20_000); // 40% of 50000
+        // Paid basis: dye now reduces the cut base, so cut_base = 50000 - 2000
+        // = 48000 and doctor_cut = 48000*40/100 = 19200 (was 20000 off price).
+        assert_eq!(snap.doctor_cut_iqd, 19_200);
         assert_eq!(snap.internal_pct, Some(40));
         assert_eq!(snap.operator_cut_iqd, 5_000);
         // Patient total = price + dye only.
@@ -458,6 +524,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -488,6 +556,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         });
         assert!(err.is_err());
@@ -514,6 +584,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -540,6 +612,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -549,10 +623,14 @@ mod tests {
     }
 
     #[test]
-    fn report_base_excludes_dye() {
-        // With dye on, the report base must still be price - doctor_cut, NOT
-        // price + dye - doctor_cut. price=50000, doctor_cut=20000, base=30000,
-        // 20% = 6000 -- identical to the no-dye case.
+    fn report_base_uses_cut_base_which_dye_reduces() {
+        // Paid basis: dye now comes out of the collected cash first, so it
+        // reduces the cut base and therefore the report base too.
+        //   with dye:    cut_base = 50000-2000 = 48000; doctor_cut = 19200;
+        //                report = 20% * (48000-19200) = 20% * 28800 = 5760.
+        //   without dye: cut_base = 50000; doctor_cut = 20000;
+        //                report = 20% * (50000-20000) = 6000.
+        // The two DIVERGE (the legacy invariant that they matched is gone).
         let ct = ct(false, Some(50_000));
         let op = operator();
         let with_dye = compute(&MoneyMathInputs {
@@ -568,6 +646,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -584,11 +664,14 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
-        assert_eq!(with_dye.report_amount_iqd, 6_000);
-        assert_eq!(with_dye.report_amount_iqd, without_dye.report_amount_iqd);
+        assert_eq!(with_dye.report_amount_iqd, 5_760);
+        assert_eq!(without_dye.report_amount_iqd, 6_000);
+        assert_ne!(with_dye.report_amount_iqd, without_dye.report_amount_iqd);
     }
 
     #[test]
@@ -613,6 +696,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -639,6 +724,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: s,
         })
         .unwrap();
@@ -666,6 +753,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: s,
         })
         .unwrap();
@@ -692,6 +781,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: s,
         });
         match err {
@@ -719,6 +810,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -745,6 +838,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -771,6 +866,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -797,6 +894,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         });
         match err {
@@ -824,6 +923,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -853,6 +954,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -878,6 +981,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -905,6 +1010,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -931,6 +1038,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -956,6 +1065,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -983,6 +1094,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1008,6 +1121,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1034,6 +1149,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1057,6 +1174,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1081,6 +1200,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1098,6 +1219,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1122,6 +1245,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         });
         match err {
@@ -1149,6 +1274,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         });
         assert!(err.is_err());
@@ -1167,6 +1294,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         });
         assert!(err2.is_err());
@@ -1190,6 +1319,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1217,6 +1348,8 @@ mod tests {
                 discount: false,
                 mandoub_cut_iqd: 0,
                 mandoub_name: None,
+                price_override_iqd: None,
+                amount_paid_override_iqd: None,
                 settings: settings(),
             })
             .unwrap();
@@ -1248,6 +1381,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         });
         assert!(err.is_err());
@@ -1276,6 +1411,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: bad,
         });
         assert!(err.is_err());
@@ -1298,6 +1435,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         });
         assert!(err.is_err());
@@ -1323,6 +1462,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1356,6 +1497,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1373,6 +1516,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 1_000,
             mandoub_name: Some("Rep"),
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1416,6 +1561,8 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1434,6 +1581,8 @@ mod tests {
             discount: true,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1466,6 +1615,8 @@ mod tests {
             discount: true,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1490,6 +1641,8 @@ mod tests {
             discount: true,
             mandoub_cut_iqd: 0,
             mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         });
         assert!(err.is_err());
@@ -1515,6 +1668,8 @@ mod tests {
             discount: true,
             mandoub_cut_iqd: 1_000,
             mandoub_name: Some("Rep"),
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         })
         .unwrap();
@@ -1540,8 +1695,172 @@ mod tests {
             discount: false,
             mandoub_cut_iqd: 500,
             mandoub_name: Some("Rep"),
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings: settings(),
         });
         assert!(err.is_err());
+    }
+
+    // ---- paid-basis cut tests (feature: cuts off paid amount) ------------
+
+    fn inputs_house<'a>(
+        ct: &'a CheckType,
+        op: &'a Operator,
+        price_override: Option<i64>,
+        paid: Option<i64>,
+        dye: bool,
+        report: bool,
+    ) -> MoneyMathInputs<'a> {
+        MoneyMathInputs {
+            check_type: ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: op,
+            patient_name: "p",
+            dye,
+            report,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            price_override_iqd: price_override,
+            amount_paid_override_iqd: paid,
+            settings: settings(),
+        }
+    }
+
+    #[test]
+    fn house_underpaid_scales_internal_cut_off_collected() {
+        // price 50k, no override on price, collected 30k, internal 40%.
+        // cut_base = 30000; doctor_cut = 30000*40/100 = 12000.
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let snap = compute(&inputs_house(&ct, &op, None, Some(30_000), false, false)).unwrap();
+        assert_eq!(snap.price_iqd, 50_000);
+        assert_eq!(snap.doctor_cut_iqd, 12_000);
+        assert_eq!(snap.operator_cut_iqd, 5_000); // fixed, unchanged
+        assert_eq!(snap.amount_paid_override_iqd, Some(30_000));
+        assert_eq!(snap.total_amount_iqd, 50_000); // price + dye(0), unchanged
+    }
+
+    #[test]
+    fn editable_price_override_replaces_catalog_price() {
+        // catalog 50k but receptionist sets price 80k, paid in full.
+        // cut_base = 80000; internal 40% = 32000.
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let snap = compute(&inputs_house(&ct, &op, Some(80_000), None, false, false)).unwrap();
+        assert_eq!(snap.price_iqd, 80_000);
+        assert_eq!(snap.doctor_cut_iqd, 32_000);
+        assert_eq!(snap.total_amount_iqd, 80_000);
+    }
+
+    #[test]
+    fn external_doctor_pct_scales_off_collected() {
+        // price 100k, doctor pct 25, collected 60k -> cut_base 60k -> 15000.
+        let ct = ct(false, Some(100_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 25, None);
+        let snap = compute(&MoneyMathInputs {
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            amount_paid_override_iqd: Some(60_000),
+            ..inputs_house(&ct, &op, None, None, false, false)
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 15_000);
+        assert_eq!(snap.internal_pct, None);
+    }
+
+    #[test]
+    fn external_doctor_fixed_cut_does_not_scale() {
+        // price 100k, doctor FIXED 12k, collected 60k. Fixed stays 12000.
+        let ct = ct(false, Some(100_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Fixed, 12_000, None);
+        let snap = compute(&MoneyMathInputs {
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            amount_paid_override_iqd: Some(60_000),
+            ..inputs_house(&ct, &op, None, None, false, false)
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 12_000);
+    }
+
+    #[test]
+    fn report_base_uses_cut_base_after_doctor_cut() {
+        // price 100k, doctor pct 25, collected 60k, report 20%.
+        // cut_base 60k, doctor_cut 15k, report = 20% * (60000-15000) = 9000.
+        let ct = ct(false, Some(100_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 25, None);
+        let snap = compute(&MoneyMathInputs {
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            amount_paid_override_iqd: Some(60_000),
+            ..inputs_house(&ct, &op, None, None, false, true)
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 15_000);
+        assert_eq!(snap.report_amount_iqd, 9_000);
+    }
+
+    #[test]
+    fn zero_cut_base_zeroes_every_cut_including_fixed() {
+        // price 50k, dye 2000, collected 5000 -> cut_base = max(0, 5000-2000)=3000?
+        // NO: choose collected below dye. collected 1500, dye 2000 -> base 0.
+        // Everyone (operator fixed 5000, mandoub, doctor) zeroes.
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Fixed, 12_000, None);
+        let snap = compute(&MoneyMathInputs {
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            dye: true,
+            amount_paid_override_iqd: Some(1_500),
+            mandoub_cut_iqd: 1_000,
+            mandoub_name: Some("Rep"),
+            ..inputs_house(&ct, &op, None, None, true, false)
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 0);
+        assert_eq!(snap.operator_cut_iqd, 0);
+        assert_eq!(snap.mandoub_cut_iqd, 0);
+        assert_eq!(snap.report_amount_iqd, 0);
+        // Patient total is still price + dye regardless of the zero cuts.
+        assert_eq!(snap.total_amount_iqd, 52_000);
+    }
+
+    #[test]
+    fn paid_full_default_matches_price_when_no_overrides() {
+        // No price override, no paid override -> collected = price, cut_base = price.
+        // Identical to the legacy house behaviour: internal 40% of 50000 = 20000.
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let snap = compute(&inputs_house(&ct, &op, None, None, false, false)).unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 20_000);
+        assert_eq!(snap.amount_paid_override_iqd, None);
+    }
+
+    #[test]
+    fn dalal_flat_cut_survives_partial_payment_when_base_positive() {
+        // dalal flat 10k; collected 40k (>0 after dye 0) -> base 40k, dalal stays 10k.
+        let ct = ct(false, Some(50_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            dalal: true,
+            amount_paid_override_iqd: Some(40_000),
+            ..inputs_house(&ct, &op, None, None, false, false)
+        })
+        .unwrap();
+        assert_eq!(snap.doctor_cut_iqd, 10_000);
+        assert!(snap.internal_pct.is_none());
     }
 }

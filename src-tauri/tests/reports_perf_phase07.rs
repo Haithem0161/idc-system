@@ -338,6 +338,7 @@ async fn lock_visit(r: &Rig, dye: bool, doctor: Option<Uuid>) -> Uuid {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await

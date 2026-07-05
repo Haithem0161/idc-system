@@ -41,6 +41,10 @@ export const VisitCreateDraftSchema = z
     report: z.boolean().default(false),
     // Discount: zero the referring doctor's cut. Only valid with a real doctor.
     discount: z.boolean().default(false),
+    // Receptionist per-visit price edit. Null/omitted = use the catalog's
+    // effective price (subtype/base + doctor override). Feeds the paid-basis
+    // doctor-cut math on the backend.
+    price_override_iqd: z.number().int().min(0).nullable().optional(),
   })
   .refine(doctorAndDalalExclusive, {
     message: "doctor_and_dalal_exclusive",
@@ -71,6 +75,9 @@ export const VisitUpdateDraftSchema = z
     report: z.boolean().optional(),
     // Discount: zero the referring doctor's cut. Only valid with a real doctor.
     discount: z.boolean().optional(),
+    // Receptionist per-visit price edit. Null clears back to the catalog
+    // price; omitted = unchanged. See create-draft note.
+    price_override_iqd: z.number().int().min(0).nullable().optional(),
   })
   .refine(doctorAndDalalExclusive, {
     message: "doctor_and_dalal_exclusive",

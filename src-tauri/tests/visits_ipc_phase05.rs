@@ -364,6 +364,7 @@ async fn create_draft(r: &Rig) -> Uuid {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await

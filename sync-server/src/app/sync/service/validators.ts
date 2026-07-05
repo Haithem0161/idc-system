@@ -136,6 +136,18 @@ export function validateVisit (row: VisitSyncRecord, opId: string): void {
         { op_id: opId }
       )
     }
+    // The editable per-visit price override is snapshotted into
+    // `price_snapshot_iqd` at lock (validated against the total invariant
+    // above), but the raw override itself must still be non-negative when
+    // present. Mirrors the desktop `Visit` draft guard.
+    if (row.price_override_iqd != null && row.price_override_iqd < 0) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'price_override_iqd must be >= 0',
+        422,
+        { op_id: opId }
+      )
+    }
     // `dalal` is a built-in doctor substitute (flat cut). It is mutually
     // exclusive with a referring doctor: a visit cannot route a cut to both.
     if (row.dalal && row.doctor_id != null) {
