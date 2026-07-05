@@ -140,11 +140,10 @@ impl VisitRowRaw {
             mandoub_cut_iqd: mandoub_amt,
             total_iqd: self.total_iqd,
             amount_paid_override_iqd: self.amount_paid_override_iqd,
-            net_iqd: collected
-                .saturating_sub(dc)
-                .saturating_sub(oc)
-                .saturating_sub(report_amt)
-                .saturating_sub(mandoub_amt),
+            // Truthful net: cuts against cash actually collected can exceed it
+            // (fixed/flat cuts don't scale down), so this is plain i64
+            // subtraction -- it must be allowed to go negative, never floored.
+            net_iqd: collected - dc - oc - report_amt - mandoub_amt,
         })
     }
 }
@@ -278,11 +277,10 @@ impl ReportsReadModel for SqliteReportsReadModel {
                     operator_cut_iqd: oc,
                     report_iqd: report,
                     mandoub_cut_iqd: mc,
-                    net_iqd: collected
-                        .saturating_sub(dc)
-                        .saturating_sub(oc)
-                        .saturating_sub(report)
-                        .saturating_sub(mc),
+                    // Truthful net: see the per-visit comment in
+                    // `VisitRowRaw::into_domain` -- plain subtraction, never
+                    // floored.
+                    net_iqd: collected - dc - oc - report - mc,
                 },
             )
             .collect())
@@ -1076,5 +1074,47 @@ mod tests {
         };
         let (sql, _) = build_where_binds(&f);
         assert!(sql.contains("'locked' OR v.status = 'voided'"));
+    }
+
+    fn raw_row(
+        collected_override: Option<i64>,
+        total_iqd: i64,
+        doc_cut: i64,
+        op_cut: i64,
+        report_amt: i64,
+        mandoub_amt: i64,
+    ) -> VisitRowRaw {
+        VisitRowRaw {
+            visit_id: Uuid::nil().to_string(),
+            locked_at: None,
+            status: "locked".into(),
+            dye: 0,
+            report: 0,
+            patient_name: Some("Pat".into()),
+            ct_ar: Some("ct".into()),
+            ct_en: None,
+            cs_ar: None,
+            cs_en: None,
+            doctor_name: None,
+            operator_name: Some("Op".into()),
+            price: total_iqd,
+            doc_cut,
+            op_cut,
+            report_amt,
+            mandoub_amt,
+            total_iqd,
+            amount_paid_override_iqd: collected_override,
+        }
+    }
+
+    /// Truthful net (PRD §3.5): when the fixed/flat cuts exceed the cash
+    /// actually collected, the per-visit net must go negative rather than
+    /// floor at 0. Collected 10_000, doctor cut 12_000 (fixed), operator cut
+    /// 5_000, no report/mandoub -> net = 10_000 - 12_000 - 5_000 = -7_000.
+    #[test]
+    fn per_visit_net_goes_negative_when_cuts_exceed_collected() {
+        let row = raw_row(Some(10_000), 10_000, 12_000, 5_000, 0, 0);
+        let domain = row.into_domain().unwrap();
+        assert_eq!(domain.net_iqd, -7_000);
     }
 }

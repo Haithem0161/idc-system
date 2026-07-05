@@ -661,6 +661,42 @@ async fn dashboard_kpis_aggregate_locked_visits() {
     assert_eq!(kpis.net_iqd, 102_000 - 34_400 - 8_000 - 2);
 }
 
+/// The dashboard net MUST reconcile with the daily-close net: both are on the
+/// COLLECTED basis, never the billed (revenue) basis. A house visit billed
+/// 50_000 but with only 30_000 actually collected (receptionist override)
+/// must report a net computed off 30_000, not 50_000.
+#[tokio::test]
+async fn dashboard_kpis_net_uses_collected_basis_not_billed_revenue() {
+    let f = seed().await;
+    let _ = lock_visit_with_override(&f, 30_000).await;
+
+    let now = Utc::now();
+    let range = DateRange {
+        from_utc: now - Duration::days(1),
+        to_utc: now + Duration::days(1),
+    };
+    let kpis = f
+        .reports_service
+        .dashboard_kpis(ENTITY_ID, range, false)
+        .await
+        .unwrap();
+
+    // Billed revenue is unchanged by the override.
+    assert_eq!(kpis.revenue_iqd, 50_000);
+    // Paid-basis cut: no dye, so cut_base = collected = 30_000. House mode:
+    // doctor cut = 40% of 30_000 = 12_000. Operator cut is a flat per-check
+    // amount, unaffected by the override: 4_000.
+    assert_eq!(kpis.doctor_cuts_iqd, 12_000);
+    assert_eq!(kpis.operator_cuts_iqd, 4_000);
+    // Net MUST be collected(30_000) - 12_000 - 4_000 - inventory, i.e. 13_000
+    // net of the 1-IQD-equivalent inventory draw -- NOT
+    // billed(50_000) - 12_000 - 4_000 = 34_000, which is what the revenue
+    // basis would have produced.
+    let expected_net = 30_000 - 12_000 - 4_000 - kpis.inventory_consumption_value_iqd;
+    assert_eq!(kpis.net_iqd, expected_net);
+    assert_ne!(kpis.net_iqd, 50_000 - 12_000 - 4_000);
+}
+
 #[tokio::test]
 async fn visits_report_rows_mode_and_groups_mode() {
     let f = seed().await;
