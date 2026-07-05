@@ -85,6 +85,7 @@ pub async fn auth_login_impl(state: &AppState, args: LoginArgs) -> AppResult<Log
         role: result.role.to_string(),
     };
     state.set_current_user(ctx).await;
+    let _ = state.reconcile_and_warm_settings(&result.entity_id).await;
     if let (Some(token), Some(exp)) = (result.access_token, result.access_token_expires_at) {
         state.set_current_token(token, exp.timestamp()).await;
     }
@@ -338,6 +339,9 @@ pub async fn restore_session_impl(app: &AppHandle, state: &AppState) -> AppResul
 
     // Establish the in-memory session.
     state.set_current_user(session.user.clone()).await;
+    let _ = state
+        .reconcile_and_warm_settings(&session.user.entity_id)
+        .await;
     state
         .set_refresh_token(Some(session.refresh_token.clone()))
         .await;
@@ -721,6 +725,7 @@ pub async fn users_create_first_admin_impl(
                 role: result.role.to_string(),
             })
             .await;
+        let _ = state.reconcile_and_warm_settings(&result.entity_id).await;
         // The online login materialized the local user row under the
         // server-assigned scope; return it. Use the login's user_id (the server
         // is canonical) rather than the locally-generated one.
@@ -749,6 +754,7 @@ pub async fn users_create_first_admin_impl(
             role: user.role.to_string(),
         })
         .await;
+    let _ = state.reconcile_and_warm_settings(&user.entity_id).await;
     Ok(user.into())
 }
 

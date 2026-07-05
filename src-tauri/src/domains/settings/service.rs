@@ -21,6 +21,13 @@ use crate::domains::sync::domain::services::{
 use crate::domains::sync::domain::value_objects::AuditAction;
 use crate::error::{AppError, AppResult};
 
+/// Result of a `reconcile_scope` run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReconcileOutcome {
+    pub repointed: usize,
+    pub tombstoned: usize,
+}
+
 #[derive(Clone)]
 pub struct SettingsService {
     pool: sqlx::SqlitePool,
@@ -214,6 +221,77 @@ impl SettingsService {
 
         tx.commit().await.map_err(AppError::from)?;
         Ok(after_rows)
+    }
+
+    /// Fold every live `'unscoped'` settings row into `tenant_entity_id`:
+    /// tombstone the unscoped row when the tenant already has that key live,
+    /// otherwise re-point it to the tenant. Runs in one transaction and is
+    /// idempotent -- a no-op once no live `'unscoped'` rows remain. A `tenant_id`
+    /// of `"unscoped"` (no real tenant yet) is a no-op.
+    ///
+    /// Sync semantics: the RE-POINT branch enqueues a `settings` outbox op (the
+    /// row now carries the tenant `entity_id`, so it pushes cleanly and other
+    /// devices converge via LWW). The TOMBSTONE branch does NOT enqueue an op:
+    /// the tombstoned row keeps `entity_id = 'unscoped'`, and the server's push
+    /// path rejects any settings payload whose `entity_id` differs from the
+    /// caller's JWT tenant (403). Those `'unscoped'` seed rows were never pushed
+    /// server-side to begin with (seeds create no outbox op), so there is nothing
+    /// to converge -- enqueuing the tombstone would only park a permanently-stuck
+    /// op. The soft-delete is still applied LOCALLY so the money engine and the
+    /// hardened reads stop seeing the stale unscoped row.
+    pub async fn reconcile_scope(&self, tenant_entity_id: &str) -> AppResult<ReconcileOutcome> {
+        if tenant_entity_id == "unscoped" {
+            return Ok(ReconcileOutcome::default());
+        }
+
+        let unscoped = self.setting_repo.list_live_by_entity("unscoped").await?;
+        if unscoped.is_empty() {
+            return Ok(ReconcileOutcome::default());
+        }
+
+        // Classify BEFORE opening the tx (reads only). For each unscoped row,
+        // decide tombstone-vs-repoint by whether the tenant already holds the key.
+        let mut plan: Vec<(Setting, bool)> = Vec::with_capacity(unscoped.len());
+        for row in unscoped {
+            let tenant_has = self
+                .setting_repo
+                .has_live_key(&row.key, tenant_entity_id)
+                .await?;
+            plan.push((row, tenant_has));
+        }
+
+        let mut tx = self.pool.begin().await.map_err(AppError::from)?;
+        let mut out = ReconcileOutcome::default();
+
+        for (row, tenant_has) in plan {
+            // `enqueue` gates the outbox op: re-points sync (tenant-scoped,
+            // accepted by the server); tombstones do NOT (they keep
+            // `entity_id = 'unscoped'`, which the server 403s, and the row was
+            // never pushed server-side, so there is nothing to converge).
+            let (changed, enqueue) = if tenant_has {
+                out.tombstoned += 1;
+                (row.tombstoned(), false)
+            } else {
+                out.repointed += 1;
+                (row.repointed_to(tenant_entity_id), true)
+            };
+            // MUST be update_row_by_id, NOT upsert: a tombstone sets deleted_at
+            // (row no longer matches the partial unique index) and a re-point
+            // changes entity_id, so the ON CONFLICT(entity_id, key) path would
+            // fall through to an id-PK collision. UPDATE ... WHERE id = ? targets
+            // the exact existing row.
+            self.setting_repo
+                .update_row_by_id(&mut tx, &changed)
+                .await?;
+            if enqueue {
+                let payload = serde_json::to_vec(&SettingPushPayload::from(&changed))?;
+                let op = OutboxOp::new("settings", changed.id.to_string(), payload);
+                self.outbox_repo.enqueue(&mut tx, &op).await?;
+            }
+        }
+
+        tx.commit().await.map_err(AppError::from)?;
+        Ok(out)
     }
 }
 

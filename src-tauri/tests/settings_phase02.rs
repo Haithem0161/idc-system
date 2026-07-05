@@ -375,3 +375,385 @@ async fn list_returns_empty_vec_for_fresh_tenant() {
     let out = svc.list("tenant-fresh").await.unwrap();
     assert!(out.is_empty());
 }
+
+#[tokio::test]
+async fn list_live_by_entity_returns_only_live_rows_for_scope() {
+    let pool = fresh_pool().await;
+    let (svc, repo) = make_service(&pool, "dev-A");
+    let actor = Uuid::now_v7();
+
+    // Seed migration already inserted the 'unscoped' rows; add a tenant row.
+    svc.update(
+        actor,
+        UserRole::Superadmin,
+        "tenant-1",
+        "dye_cost_iqd",
+        SettingValue::Int(60_000),
+    )
+    .await
+    .unwrap();
+
+    let unscoped = repo.list_live_by_entity("unscoped").await.unwrap();
+    assert!(
+        unscoped
+            .iter()
+            .all(|s| s.entity_id == "unscoped" && s.deleted_at.is_none()),
+        "only live unscoped rows"
+    );
+    assert!(
+        unscoped.iter().any(|s| s.key == "dye_cost_iqd"),
+        "the unscoped dye seed is present"
+    );
+
+    let tenant = repo.list_live_by_entity("tenant-1").await.unwrap();
+    assert_eq!(tenant.len(), 1);
+    assert_eq!(tenant[0].key, "dye_cost_iqd");
+    assert_eq!(tenant[0].value, SettingValue::Int(60_000));
+}
+
+#[tokio::test]
+async fn has_live_key_true_only_for_live_scoped_row() {
+    let pool = fresh_pool().await;
+    let (svc, repo) = make_service(&pool, "dev-A");
+    let actor = Uuid::now_v7();
+
+    assert!(repo.has_live_key("dye_cost_iqd", "unscoped").await.unwrap());
+    assert!(!repo.has_live_key("dye_cost_iqd", "tenant-1").await.unwrap());
+
+    svc.update(
+        actor,
+        UserRole::Superadmin,
+        "tenant-1",
+        "dye_cost_iqd",
+        SettingValue::Int(60_000),
+    )
+    .await
+    .unwrap();
+    assert!(repo.has_live_key("dye_cost_iqd", "tenant-1").await.unwrap());
+}
+
+#[tokio::test]
+async fn update_row_by_id_applies_tombstone_and_repoint_without_conflict() {
+    let pool = fresh_pool().await;
+    let (_svc, repo) = make_service(&pool, "dev-A");
+
+    // Take a live 'unscoped' seed row and tombstone it via update_row_by_id.
+    let row = repo
+        .get_by_key("dye_cost_iqd", "unscoped")
+        .await
+        .unwrap()
+        .unwrap();
+    let tomb = row.clone().tombstoned();
+    let mut tx = pool.begin().await.unwrap();
+    repo.update_row_by_id(&mut tx, &tomb).await.unwrap();
+    tx.commit().await.unwrap();
+    assert!(
+        repo.get_by_key("dye_cost_iqd", "unscoped")
+            .await
+            .unwrap()
+            .is_none(),
+        "tombstone hides the row"
+    );
+
+    // Re-point a different live 'unscoped' row to a tenant; no conflict, value kept.
+    let cfg = repo
+        .get_by_key("arabic_numerals", "unscoped")
+        .await
+        .unwrap()
+        .unwrap();
+    let repointed = cfg.clone().repointed_to("tenant-1");
+    let mut tx = pool.begin().await.unwrap();
+    repo.update_row_by_id(&mut tx, &repointed).await.unwrap();
+    tx.commit().await.unwrap();
+    assert!(repo
+        .get_by_key("arabic_numerals", "unscoped")
+        .await
+        .unwrap()
+        .is_none());
+    let moved = repo
+        .get_by_key("arabic_numerals", "tenant-1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.value, cfg.value);
+}
+
+#[tokio::test]
+async fn reconcile_scope_tombstones_duplicates_and_repoints_singletons() {
+    let pool = fresh_pool().await;
+    let (svc, repo) = make_service(&pool, "dev-A");
+    let actor = Uuid::now_v7();
+    let tenant = "3627804e-3594-4d6f-9e8c-b157e460e7f4";
+
+    // Tenant already edited dye + report_pct + internal (the accountant's values).
+    for (k, v) in [
+        ("dye_cost_iqd", 60_000),
+        ("report_pct", 25),
+        ("internal_doctor_pct", 25),
+    ] {
+        svc.update(actor, UserRole::Superadmin, tenant, k, SettingValue::Int(v))
+            .await
+            .unwrap();
+    }
+
+    let out = svc.reconcile_scope(tenant).await.unwrap();
+    assert!(
+        out.tombstoned >= 3,
+        "3 money keys had tenant dupes to tombstone"
+    );
+    assert!(out.repointed >= 1, "config-only keys got re-pointed");
+
+    // No live 'unscoped' rows remain.
+    let unscoped = repo.list_live_by_entity("unscoped").await.unwrap();
+    assert!(
+        unscoped.is_empty(),
+        "unscoped fully folded, got {unscoped:?}"
+    );
+
+    // Tenant keeps the edited money values (tombstone won, not re-point).
+    let dye = repo
+        .get_by_key("dye_cost_iqd", tenant)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(dye.value, SettingValue::Int(60_000));
+    let rp = repo
+        .get_by_key("report_pct", tenant)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rp.value, SettingValue::Int(25));
+
+    // A config-only key (arabic_numerals) is now under the tenant with its value.
+    let an = repo
+        .get_by_key("arabic_numerals", tenant)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(an.value, SettingValue::Bool(false));
+    assert!(repo
+        .get_by_key("arabic_numerals", "unscoped")
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn reconcile_scope_is_idempotent() {
+    let pool = fresh_pool().await;
+    let (svc, repo) = make_service(&pool, "dev-A");
+    let tenant = "tenant-1";
+
+    let first = svc.reconcile_scope(tenant).await.unwrap();
+    assert!(
+        first.repointed + first.tombstoned > 0,
+        "first run does work"
+    );
+
+    let second = svc.reconcile_scope(tenant).await.unwrap();
+    assert_eq!(second.repointed, 0);
+    assert_eq!(second.tombstoned, 0);
+
+    assert!(repo
+        .list_live_by_entity("unscoped")
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn reconcile_scope_noop_for_unscoped_tenant() {
+    let pool = fresh_pool().await;
+    let (svc, repo) = make_service(&pool, "dev-A");
+
+    let out = svc.reconcile_scope("unscoped").await.unwrap();
+    assert_eq!(out.repointed, 0);
+    assert_eq!(out.tombstoned, 0);
+    // Unscoped rows are untouched (still live) when there is no real tenant.
+    assert!(!repo
+        .list_live_by_entity("unscoped")
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn reconcile_scope_enqueues_one_outbox_op_per_repoint_and_none_per_tombstone() {
+    let pool = fresh_pool().await;
+    let (svc, _repo) = make_service(&pool, "dev-A");
+    let actor = Uuid::now_v7();
+    let tenant = "3627804e-3594-4d6f-9e8c-b157e460e7f4";
+
+    // Give the tenant a live row for three money keys so those unscoped rows
+    // TOMBSTONE (dupe) while every other seed key RE-POINTS (singleton).
+    for (k, v) in [
+        ("dye_cost_iqd", 60_000),
+        ("report_pct", 25),
+        ("internal_doctor_pct", 25),
+    ] {
+        svc.update(actor, UserRole::Superadmin, tenant, k, SettingValue::Int(v))
+            .await
+            .unwrap();
+    }
+
+    // The three svc.update calls above each enqueued their own settings op, so
+    // count the outbox BEFORE reconcile and measure only reconcile's delta.
+    let settings_ops = |p: &sqlx::SqlitePool| {
+        let p = p.clone();
+        async move {
+            let c: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE entity = 'settings'")
+                .fetch_one(&p)
+                .await
+                .unwrap();
+            c.0 as usize
+        }
+    };
+    let before = settings_ops(&pool).await;
+
+    let out = svc.reconcile_scope(tenant).await.unwrap();
+    assert!(out.tombstoned >= 3, "the three money keys tombstone");
+    assert!(out.repointed >= 1, "config-only keys re-point");
+
+    let after = settings_ops(&pool).await;
+    let reconcile_ops = after - before;
+    // Re-points sync (tenant-scoped, server-accepted); tombstones do NOT enqueue
+    // (they keep entity_id='unscoped', which the server 403s, and were never
+    // pushed server-side). So reconcile's op delta is EXACTLY the re-point count
+    // -- and strictly fewer than the total changed rows, proving tombstones skip.
+    assert_eq!(
+        reconcile_ops, out.repointed,
+        "one settings op per re-pointed row, zero for tombstones"
+    );
+    assert!(
+        reconcile_ops < out.repointed + out.tombstoned,
+        "tombstone ops are NOT enqueued (fewer ops than total changed rows)"
+    );
+}
+
+/// Guard test for Task 4 (`AppState::reconcile_and_warm_settings`): confirms
+/// the service-level contract the cache re-warm loop depends on -- after
+/// `reconcile_scope`, `list(tenant)` carries the tenant money values (not
+/// seed defaults) and the unscoped scope is left empty.
+#[tokio::test]
+async fn reconcile_then_list_yields_tenant_scoped_money_values() {
+    let pool = fresh_pool().await;
+    let (svc, _repo) = make_service(&pool, "dev-A");
+    let actor = Uuid::now_v7();
+    let tenant = "tenant-1";
+
+    for (k, v) in [
+        ("dye_cost_iqd", 60_000),
+        ("report_pct", 25),
+        ("internal_doctor_pct", 25),
+    ] {
+        svc.update(actor, UserRole::Superadmin, tenant, k, SettingValue::Int(v))
+            .await
+            .unwrap();
+    }
+
+    svc.reconcile_scope(tenant).await.unwrap();
+
+    // What the cache-warm loop reads after login: list(tenant) must carry the
+    // tenant money values AND the re-pointed config keys, with no unscoped rows.
+    let rows = svc.list(tenant).await.unwrap();
+    let get = |k: &str| rows.iter().find(|s| s.key == k).map(|s| s.value.clone());
+    assert_eq!(get("dye_cost_iqd"), Some(SettingValue::Int(60_000)));
+    assert_eq!(get("report_pct"), Some(SettingValue::Int(25)));
+    assert_eq!(get("internal_doctor_pct"), Some(SettingValue::Int(25)));
+    assert_eq!(get("arabic_numerals"), Some(SettingValue::Bool(false)));
+    assert!(svc.list("unscoped").await.unwrap().is_empty());
+}
+
+/// Migration 024 must NO-OP on a fresh install: fresh_pool runs ALL migrations
+/// (incl. 024) before any user exists, so the 'unscoped' seed rows stay live.
+#[tokio::test]
+async fn migration_024_noops_when_no_user_exists() {
+    let pool = fresh_pool().await;
+    let repo = app_lib::domains::settings::infrastructure::SqliteSettingRepo::new(pool.clone());
+    let unscoped = SettingRepo::list_live_by_entity(&repo, "unscoped")
+        .await
+        .unwrap();
+    assert!(
+        !unscoped.is_empty(),
+        "no user at migration time -> 024 no-ops, unscoped seed stays live"
+    );
+    // And no rows were spuriously moved to any tenant.
+    let any_tenant: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM settings WHERE entity_id <> 'unscoped' AND deleted_at IS NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        any_tenant.0, 0,
+        "fresh install has no tenant-scoped settings"
+    );
+}
+
+/// Migration 024 fold branch: with a user present, replaying the migration's
+/// exact SQL tombstones unscoped money dupes and re-points unscoped singletons.
+#[tokio::test]
+async fn migration_024_folds_unscoped_into_tenant_when_user_present() {
+    let pool = fresh_pool().await;
+    let tenant = "3627804e-3594-4d6f-9e8c-b157e460e7f4";
+
+    // Seed a user under the tenant (satisfies every NOT NULL users column).
+    sqlx::query(
+        "INSERT INTO users (id, email, name, password_hash, role, created_at, updated_at, entity_id) \
+         VALUES (?, 'a@b.co', 'Admin', 'x', 'superadmin', \
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?)",
+    )
+    .bind(Uuid::now_v7().to_string())
+    .bind(tenant)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Create a tenant-scoped dye row so dye is the "dupe -> tombstone" case;
+    // every other seed key has no tenant row -> "re-point" case.
+    let (svc, repo) = make_service(&pool, "dev-A");
+    svc.update(
+        Uuid::now_v7(),
+        UserRole::Superadmin,
+        tenant,
+        "dye_cost_iqd",
+        SettingValue::Int(60_000),
+    )
+    .await
+    .unwrap();
+
+    // Replay the SHIPPING migration SQL (no duplication of statements in-test).
+    let sql = include_str!("../migrations/024_settings_tenant_reconcile.sql");
+    for stmt in sql.split(';') {
+        let stmt = stmt.trim();
+        if stmt.is_empty() || stmt.starts_with("--") {
+            continue;
+        }
+        sqlx::query(stmt).execute(&pool).await.unwrap();
+    }
+
+    // No live 'unscoped' rows remain.
+    let unscoped = repo.list_live_by_entity("unscoped").await.unwrap();
+    assert!(unscoped.is_empty(), "unscoped folded, got {unscoped:?}");
+
+    // dye kept the tenant's edited value (tombstone won, not re-point).
+    let dye = repo
+        .get_by_key("dye_cost_iqd", tenant)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(dye.value, SettingValue::Int(60_000));
+
+    // A config-only seed key was re-pointed to the tenant with its value.
+    let an = repo
+        .get_by_key("arabic_numerals", tenant)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(an.value, SettingValue::Bool(false));
+}
+
+#[test]
+fn schema_version_is_24() {
+    assert_eq!(app_lib::db::migrations::SYNC_SCHEMA_VERSION, 24);
+}

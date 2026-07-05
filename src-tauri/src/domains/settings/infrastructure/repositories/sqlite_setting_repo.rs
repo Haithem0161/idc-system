@@ -55,8 +55,13 @@ impl SettingRepo for SqliteSettingRepo {
     }
 
     async fn get_by_key(&self, key: &str, entity_id: &str) -> AppResult<Option<Setting>> {
+        // Deterministic even if a duplicate ever slips past the reconcile:
+        // newest row wins, tie-broken by id, capped to one.
         let row: Option<SettingRow> = sqlx::query_as::<_, SettingRow>(
-            "SELECT * FROM settings WHERE key = ? AND entity_id = ? AND deleted_at IS NULL",
+            "SELECT * FROM settings \
+             WHERE key = ? AND entity_id = ? AND deleted_at IS NULL \
+             ORDER BY updated_at DESC, id DESC \
+             LIMIT 1",
         )
         .bind(key)
         .bind(entity_id)
@@ -67,7 +72,8 @@ impl SettingRepo for SqliteSettingRepo {
 
     async fn list(&self, entity_id: &str) -> AppResult<Vec<Setting>> {
         let rows: Vec<SettingRow> = sqlx::query_as::<_, SettingRow>(
-            "SELECT * FROM settings WHERE entity_id = ? AND deleted_at IS NULL ORDER BY key ASC",
+            "SELECT * FROM settings WHERE entity_id = ? AND deleted_at IS NULL \
+             ORDER BY key ASC, updated_at DESC, id DESC",
         )
         .bind(entity_id)
         .fetch_all(&self.pool)
@@ -81,6 +87,49 @@ impl SettingRepo for SqliteSettingRepo {
                 .fetch_all(&self.pool)
                 .await?;
         rows.into_iter().map(SettingRow::into_domain).collect()
+    }
+
+    async fn list_live_by_entity(&self, entity_id: &str) -> AppResult<Vec<Setting>> {
+        let rows: Vec<SettingRow> = sqlx::query_as::<_, SettingRow>(
+            "SELECT * FROM settings WHERE entity_id = ? AND deleted_at IS NULL \
+             ORDER BY key ASC",
+        )
+        .bind(entity_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(SettingRow::into_domain).collect()
+    }
+
+    async fn has_live_key(&self, key: &str, entity_id: &str) -> AppResult<bool> {
+        let found: Option<(i64,)> = sqlx::query_as(
+            "SELECT 1 FROM settings \
+             WHERE key = ? AND entity_id = ? AND deleted_at IS NULL LIMIT 1",
+        )
+        .bind(key)
+        .bind(entity_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(found.is_some())
+    }
+
+    async fn update_row_by_id(&self, tx: &mut Tx<'_>, setting: &Setting) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE settings SET \
+                entity_id = ?, value = ?, value_type = ?, updated_at = ?, \
+                deleted_at = ?, version = ?, dirty = ? \
+             WHERE id = ?",
+        )
+        .bind(&setting.entity_id)
+        .bind(setting.value.as_storage())
+        .bind(setting.value.value_type())
+        .bind(setting.updated_at.to_rfc3339())
+        .bind(setting.deleted_at.map(|d| d.to_rfc3339()))
+        .bind(setting.version)
+        .bind(setting.dirty as i64)
+        .bind(setting.id.to_string())
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
     }
 }
 
