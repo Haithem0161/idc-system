@@ -130,6 +130,7 @@ impl VisitRow {
             report: self.report != 0,
             dalal: self.dalal != 0,
             discount: self.discount != 0,
+            price_override_iqd: None,
             locked_at: parse_dt_opt(self.locked_at.as_deref())?,
             voided_at: parse_dt_opt(self.voided_at.as_deref())?,
             voided_by_user_id: parse_uuid_opt(self.voided_by_user_id.as_deref())?,

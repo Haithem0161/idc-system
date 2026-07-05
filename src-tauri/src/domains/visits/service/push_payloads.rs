@@ -186,6 +186,7 @@ mod tests {
             report: false,
             dalal: false,
             discount: false,
+            price_override_iqd: None,
             entity_id: "t".into(),
             origin_device_id: Some("dev".into()),
         })

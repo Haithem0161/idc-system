@@ -416,6 +416,7 @@ impl VisitService {
             report: input.report,
             dalal: input.dalal,
             discount: input.discount,
+            price_override_iqd: None,
             entity_id: entity_id.to_string(),
             origin_device_id: Some(self.device_id.clone()),
         })?;
@@ -479,6 +480,7 @@ impl VisitService {
             report: input.report,
             dalal: input.dalal,
             discount: input.discount,
+            price_override_iqd: None,
         })?;
         // Re-validate dye against parent. Report is universally available now.
         let ct = self
