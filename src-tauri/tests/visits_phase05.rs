@@ -53,7 +53,8 @@ use app_lib::domains::shifts::infrastructure::SqliteOperatorShiftRepo;
 use app_lib::domains::sync::domain::repositories::{AuditRepo, OutboxRepo};
 use app_lib::domains::sync::infrastructure::{SqliteAuditRepo, SqliteOutboxRepo};
 use app_lib::domains::visits::domain::entities::{
-    AdjustmentNewInput, AdjustmentReason, InventoryAdjustment, VisitStatus,
+    AdjustmentNewInput, AdjustmentReason, InventoryAdjustment, Visit, VisitCreateDraftInput,
+    VisitStatus,
 };
 use app_lib::domains::visits::domain::repositories::{InventoryAdjustmentRepo, VisitRepo};
 use app_lib::domains::visits::domain::services::MoneySettings;
@@ -1463,4 +1464,48 @@ async fn inventory_adjustments_no_update_trigger_allows_sync_metadata_only() {
     .execute(&f.pool)
     .await;
     assert!(res.is_ok());
+}
+
+#[tokio::test]
+async fn price_override_round_trips_through_repo() {
+    let f = seed().await;
+    let visit_repo: Arc<dyn VisitRepo> = Arc::new(SqliteVisitRepo::new(f.pool.clone()));
+
+    let mut input = VisitCreateDraftInput {
+        patient_id: f.patient.id,
+        receptionist_user_id: f.receptionist.id,
+        check_type_id: f.check_type.id,
+        check_subtype_id: None,
+        doctor_id: None,
+        mandoub_id: None,
+        dye: false,
+        report: false,
+        dalal: false,
+        discount: false,
+        price_override_iqd: Some(77_000),
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    };
+    let with_override = Visit::create_draft(input.clone()).unwrap();
+    let mut tx = f.pool.begin().await.unwrap();
+    visit_repo.upsert(&mut tx, &with_override).await.unwrap();
+    tx.commit().await.unwrap();
+    let loaded = visit_repo
+        .get_by_id(with_override.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.price_override_iqd, Some(77_000));
+
+    input.price_override_iqd = None;
+    let without_override = Visit::create_draft(input).unwrap();
+    let mut tx = f.pool.begin().await.unwrap();
+    visit_repo.upsert(&mut tx, &without_override).await.unwrap();
+    tx.commit().await.unwrap();
+    let loaded_none = visit_repo
+        .get_by_id(without_override.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded_none.price_override_iqd, None);
 }
