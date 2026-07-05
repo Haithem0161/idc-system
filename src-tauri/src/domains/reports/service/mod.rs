@@ -675,13 +675,12 @@ impl ReportsService {
         let total_discount_iqd = agg_locked
             .revenue_iqd
             .saturating_sub(agg_locked.collected_iqd);
-        let net_iqd = agg_locked
-            .collected_iqd
-            .saturating_sub(agg_locked.doctor_cut_iqd)
-            .saturating_sub(agg_locked.operator_cut_iqd)
-            .saturating_sub(agg_locked.report_iqd)
-            .saturating_sub(agg_locked.mandoub_cut_iqd)
-            .saturating_sub(inv_value);
+        let net_iqd = agg_locked.collected_iqd
+            - agg_locked.doctor_cut_iqd
+            - agg_locked.operator_cut_iqd
+            - agg_locked.report_iqd
+            - agg_locked.mandoub_cut_iqd
+            - inv_value;
 
         let target_date_str = target_date.format("%Y-%m-%d").to_string();
         let hash_input = DailyCloseHashInput {

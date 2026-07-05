@@ -888,6 +888,47 @@ async fn daily_close_tracks_collected_discount_and_collected_net() {
     assert_eq!(close.net_iqd, expected_net);
 }
 
+/// Reconciliation guard: when cuts exceed the cash actually collected (a deep
+/// receptionist override on a house visit), `net_iqd` on the signed daily
+/// close MUST go negative -- it must NEVER floor at zero. The desktop
+/// dashboard/trend net and the sync server's daily-close net both use plain
+/// subtraction; the daily close is the frozen, hash-signed, syncable record,
+/// so it must reconcile with both instead of silently flooring the loss away.
+#[tokio::test]
+async fn daily_close_net_goes_negative_when_cuts_exceed_collected() {
+    let f = seed().await;
+    // House visit billed 50_000 but the receptionist collected only 1_000 --
+    // the flat operator cut (4_000) alone already exceeds what was collected.
+    let _ = lock_visit_with_override(&f, 1_000).await;
+
+    let now = Utc::now();
+    let baghdad = now + Duration::hours(3);
+    let target: NaiveDate = baghdad.date_naive();
+
+    let mut settings_snapshot: BTreeMap<String, String> = BTreeMap::new();
+    settings_snapshot.insert("dye_cost_iqd".into(), "2000".into());
+    settings_snapshot.insert("report_cost_iqd".into(), "3000".into());
+    settings_snapshot.insert("internal_doctor_pct".into(), "40".into());
+
+    let close = f
+        .reports_service
+        .daily_close(f.superadmin.id, ENTITY_ID, target, settings_snapshot)
+        .await
+        .unwrap();
+
+    assert_eq!(close.total_collected_iqd, 1_000);
+    // House mode doctor cut = 40% of collected (1_000) = 400. Operator cut is
+    // a flat per-check amount, unaffected by the override: 4_000.
+    assert_eq!(close.total_doctor_cuts_iqd, 400);
+    assert_eq!(close.total_operator_cuts_iqd, 4_000);
+    // Inventory: 1 unit consumed at the v1 flat unit-cost of 1 IQD.
+    assert_eq!(close.total_inventory_consumption_value_iqd, 1);
+    let expected_net = 1_000 - 400 - 4_000 - close.total_inventory_consumption_value_iqd;
+    assert_eq!(close.net_iqd, expected_net);
+    assert_eq!(close.net_iqd, -3_401);
+    assert!(close.net_iqd < 0);
+}
+
 #[tokio::test]
 async fn role_gate_rejects_receptionist() {
     // The static gate is pure; assert it returns the right outcome.
