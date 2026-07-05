@@ -21,6 +21,13 @@ use crate::domains::sync::domain::services::{
 use crate::domains::sync::domain::value_objects::AuditAction;
 use crate::error::{AppError, AppResult};
 
+/// Result of a `reconcile_scope` run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReconcileOutcome {
+    pub repointed: usize,
+    pub tombstoned: usize,
+}
+
 #[derive(Clone)]
 pub struct SettingsService {
     pool: sqlx::SqlitePool,
@@ -214,6 +221,61 @@ impl SettingsService {
 
         tx.commit().await.map_err(AppError::from)?;
         Ok(after_rows)
+    }
+
+    /// Fold every live `'unscoped'` settings row into `tenant_entity_id`:
+    /// tombstone the unscoped row when the tenant already has that key live,
+    /// otherwise re-point it to the tenant. Runs in one transaction, enqueues a
+    /// `settings` outbox op per changed row (so the change syncs LWW), and is
+    /// idempotent -- a no-op once no live `'unscoped'` rows remain. A `tenant_id`
+    /// of `"unscoped"` (no real tenant yet) is a no-op.
+    pub async fn reconcile_scope(&self, tenant_entity_id: &str) -> AppResult<ReconcileOutcome> {
+        if tenant_entity_id == "unscoped" {
+            return Ok(ReconcileOutcome::default());
+        }
+
+        let unscoped = self.setting_repo.list_live_by_entity("unscoped").await?;
+        if unscoped.is_empty() {
+            return Ok(ReconcileOutcome::default());
+        }
+
+        // Classify BEFORE opening the tx (reads only). For each unscoped row,
+        // decide tombstone-vs-repoint by whether the tenant already holds the key.
+        let mut plan: Vec<(Setting, bool)> = Vec::with_capacity(unscoped.len());
+        for row in unscoped {
+            let tenant_has = self
+                .setting_repo
+                .has_live_key(&row.key, tenant_entity_id)
+                .await?;
+            plan.push((row, tenant_has));
+        }
+
+        let mut tx = self.pool.begin().await.map_err(AppError::from)?;
+        let mut out = ReconcileOutcome::default();
+
+        for (row, tenant_has) in plan {
+            let changed = if tenant_has {
+                out.tombstoned += 1;
+                row.tombstoned()
+            } else {
+                out.repointed += 1;
+                row.repointed_to(tenant_entity_id)
+            };
+            // MUST be update_row_by_id, NOT upsert: a tombstone sets deleted_at
+            // (row no longer matches the partial unique index) and a re-point
+            // changes entity_id, so the ON CONFLICT(entity_id, key) path would
+            // fall through to an id-PK collision. UPDATE ... WHERE id = ? targets
+            // the exact existing row.
+            self.setting_repo
+                .update_row_by_id(&mut tx, &changed)
+                .await?;
+            let payload = serde_json::to_vec(&SettingPushPayload::from(&changed))?;
+            let op = OutboxOp::new("settings", changed.id.to_string(), payload);
+            self.outbox_repo.enqueue(&mut tx, &op).await?;
+        }
+
+        tx.commit().await.map_err(AppError::from)?;
+        Ok(out)
     }
 }
 

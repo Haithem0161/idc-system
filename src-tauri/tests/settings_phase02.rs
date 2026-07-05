@@ -477,3 +477,118 @@ async fn update_row_by_id_applies_tombstone_and_repoint_without_conflict() {
         .unwrap();
     assert_eq!(moved.value, cfg.value);
 }
+
+#[tokio::test]
+async fn reconcile_scope_tombstones_duplicates_and_repoints_singletons() {
+    let pool = fresh_pool().await;
+    let (svc, repo) = make_service(&pool, "dev-A");
+    let actor = Uuid::now_v7();
+    let tenant = "3627804e-3594-4d6f-9e8c-b157e460e7f4";
+
+    // Tenant already edited dye + report_pct + internal (the accountant's values).
+    for (k, v) in [
+        ("dye_cost_iqd", 60_000),
+        ("report_pct", 25),
+        ("internal_doctor_pct", 25),
+    ] {
+        svc.update(actor, UserRole::Superadmin, tenant, k, SettingValue::Int(v))
+            .await
+            .unwrap();
+    }
+
+    let out = svc.reconcile_scope(tenant).await.unwrap();
+    assert!(
+        out.tombstoned >= 3,
+        "3 money keys had tenant dupes to tombstone"
+    );
+    assert!(out.repointed >= 1, "config-only keys got re-pointed");
+
+    // No live 'unscoped' rows remain.
+    let unscoped = repo.list_live_by_entity("unscoped").await.unwrap();
+    assert!(
+        unscoped.is_empty(),
+        "unscoped fully folded, got {unscoped:?}"
+    );
+
+    // Tenant keeps the edited money values (tombstone won, not re-point).
+    let dye = repo
+        .get_by_key("dye_cost_iqd", tenant)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(dye.value, SettingValue::Int(60_000));
+    let rp = repo
+        .get_by_key("report_pct", tenant)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rp.value, SettingValue::Int(25));
+
+    // A config-only key (arabic_numerals) is now under the tenant with its value.
+    let an = repo
+        .get_by_key("arabic_numerals", tenant)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(an.value, SettingValue::Bool(false));
+    assert!(repo
+        .get_by_key("arabic_numerals", "unscoped")
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn reconcile_scope_is_idempotent() {
+    let pool = fresh_pool().await;
+    let (svc, repo) = make_service(&pool, "dev-A");
+    let tenant = "tenant-1";
+
+    let first = svc.reconcile_scope(tenant).await.unwrap();
+    assert!(
+        first.repointed + first.tombstoned > 0,
+        "first run does work"
+    );
+
+    let second = svc.reconcile_scope(tenant).await.unwrap();
+    assert_eq!(second.repointed, 0);
+    assert_eq!(second.tombstoned, 0);
+
+    assert!(repo
+        .list_live_by_entity("unscoped")
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn reconcile_scope_noop_for_unscoped_tenant() {
+    let pool = fresh_pool().await;
+    let (svc, repo) = make_service(&pool, "dev-A");
+
+    let out = svc.reconcile_scope("unscoped").await.unwrap();
+    assert_eq!(out.repointed, 0);
+    assert_eq!(out.tombstoned, 0);
+    // Unscoped rows are untouched (still live) when there is no real tenant.
+    assert!(!repo
+        .list_live_by_entity("unscoped")
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn reconcile_scope_enqueues_one_outbox_op_per_changed_row() {
+    let pool = fresh_pool().await;
+    let (svc, _repo) = make_service(&pool, "dev-A");
+    let tenant = "tenant-1";
+
+    let out = svc.reconcile_scope(tenant).await.unwrap();
+    let changed = out.repointed + out.tombstoned;
+
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE entity = 'settings'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count.0 as usize, changed, "one settings op per changed row");
+}
