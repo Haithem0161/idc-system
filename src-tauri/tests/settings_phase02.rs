@@ -578,19 +578,56 @@ async fn reconcile_scope_noop_for_unscoped_tenant() {
 }
 
 #[tokio::test]
-async fn reconcile_scope_enqueues_one_outbox_op_per_changed_row() {
+async fn reconcile_scope_enqueues_one_outbox_op_per_repoint_and_none_per_tombstone() {
     let pool = fresh_pool().await;
     let (svc, _repo) = make_service(&pool, "dev-A");
-    let tenant = "tenant-1";
+    let actor = Uuid::now_v7();
+    let tenant = "3627804e-3594-4d6f-9e8c-b157e460e7f4";
+
+    // Give the tenant a live row for three money keys so those unscoped rows
+    // TOMBSTONE (dupe) while every other seed key RE-POINTS (singleton).
+    for (k, v) in [
+        ("dye_cost_iqd", 60_000),
+        ("report_pct", 25),
+        ("internal_doctor_pct", 25),
+    ] {
+        svc.update(actor, UserRole::Superadmin, tenant, k, SettingValue::Int(v))
+            .await
+            .unwrap();
+    }
+
+    // The three svc.update calls above each enqueued their own settings op, so
+    // count the outbox BEFORE reconcile and measure only reconcile's delta.
+    let settings_ops = |p: &sqlx::SqlitePool| {
+        let p = p.clone();
+        async move {
+            let c: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE entity = 'settings'")
+                .fetch_one(&p)
+                .await
+                .unwrap();
+            c.0 as usize
+        }
+    };
+    let before = settings_ops(&pool).await;
 
     let out = svc.reconcile_scope(tenant).await.unwrap();
-    let changed = out.repointed + out.tombstoned;
+    assert!(out.tombstoned >= 3, "the three money keys tombstone");
+    assert!(out.repointed >= 1, "config-only keys re-point");
 
-    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE entity = 'settings'")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(count.0 as usize, changed, "one settings op per changed row");
+    let after = settings_ops(&pool).await;
+    let reconcile_ops = after - before;
+    // Re-points sync (tenant-scoped, server-accepted); tombstones do NOT enqueue
+    // (they keep entity_id='unscoped', which the server 403s, and were never
+    // pushed server-side). So reconcile's op delta is EXACTLY the re-point count
+    // -- and strictly fewer than the total changed rows, proving tombstones skip.
+    assert_eq!(
+        reconcile_ops, out.repointed,
+        "one settings op per re-pointed row, zero for tombstones"
+    );
+    assert!(
+        reconcile_ops < out.repointed + out.tombstoned,
+        "tombstone ops are NOT enqueued (fewer ops than total changed rows)"
+    );
 }
 
 /// Guard test for Task 4 (`AppState::reconcile_and_warm_settings`): confirms

@@ -225,10 +225,20 @@ impl SettingsService {
 
     /// Fold every live `'unscoped'` settings row into `tenant_entity_id`:
     /// tombstone the unscoped row when the tenant already has that key live,
-    /// otherwise re-point it to the tenant. Runs in one transaction, enqueues a
-    /// `settings` outbox op per changed row (so the change syncs LWW), and is
+    /// otherwise re-point it to the tenant. Runs in one transaction and is
     /// idempotent -- a no-op once no live `'unscoped'` rows remain. A `tenant_id`
     /// of `"unscoped"` (no real tenant yet) is a no-op.
+    ///
+    /// Sync semantics: the RE-POINT branch enqueues a `settings` outbox op (the
+    /// row now carries the tenant `entity_id`, so it pushes cleanly and other
+    /// devices converge via LWW). The TOMBSTONE branch does NOT enqueue an op:
+    /// the tombstoned row keeps `entity_id = 'unscoped'`, and the server's push
+    /// path rejects any settings payload whose `entity_id` differs from the
+    /// caller's JWT tenant (403). Those `'unscoped'` seed rows were never pushed
+    /// server-side to begin with (seeds create no outbox op), so there is nothing
+    /// to converge -- enqueuing the tombstone would only park a permanently-stuck
+    /// op. The soft-delete is still applied LOCALLY so the money engine and the
+    /// hardened reads stop seeing the stale unscoped row.
     pub async fn reconcile_scope(&self, tenant_entity_id: &str) -> AppResult<ReconcileOutcome> {
         if tenant_entity_id == "unscoped" {
             return Ok(ReconcileOutcome::default());
@@ -254,12 +264,16 @@ impl SettingsService {
         let mut out = ReconcileOutcome::default();
 
         for (row, tenant_has) in plan {
-            let changed = if tenant_has {
+            // `enqueue` gates the outbox op: re-points sync (tenant-scoped,
+            // accepted by the server); tombstones do NOT (they keep
+            // `entity_id = 'unscoped'`, which the server 403s, and the row was
+            // never pushed server-side, so there is nothing to converge).
+            let (changed, enqueue) = if tenant_has {
                 out.tombstoned += 1;
-                row.tombstoned()
+                (row.tombstoned(), false)
             } else {
                 out.repointed += 1;
-                row.repointed_to(tenant_entity_id)
+                (row.repointed_to(tenant_entity_id), true)
             };
             // MUST be update_row_by_id, NOT upsert: a tombstone sets deleted_at
             // (row no longer matches the partial unique index) and a re-point
@@ -269,9 +283,11 @@ impl SettingsService {
             self.setting_repo
                 .update_row_by_id(&mut tx, &changed)
                 .await?;
-            let payload = serde_json::to_vec(&SettingPushPayload::from(&changed))?;
-            let op = OutboxOp::new("settings", changed.id.to_string(), payload);
-            self.outbox_repo.enqueue(&mut tx, &op).await?;
+            if enqueue {
+                let payload = serde_json::to_vec(&SettingPushPayload::from(&changed))?;
+                let op = OutboxOp::new("settings", changed.id.to_string(), payload);
+                self.outbox_repo.enqueue(&mut tx, &op).await?;
+            }
         }
 
         tx.commit().await.map_err(AppError::from)?;
