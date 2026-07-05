@@ -1108,7 +1108,13 @@ mod tests {
         snap.mandoub_cut_iqd = 0;
         snap.mandoub_name = Some("Rep".into());
         let err = v.lock(Uuid::now_v7(), snap, Utc::now());
-        assert!(err.is_err());
+        match err {
+            Err(AppError::Validation(msg)) => assert!(
+                msg.contains("no collectable amount"),
+                "expected the clear mandoub-zero message, got: {msg}"
+            ),
+            other => panic!("expected Validation error, got {other:?}"),
+        }
     }
 
     #[test]
