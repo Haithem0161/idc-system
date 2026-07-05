@@ -375,3 +375,105 @@ async fn list_returns_empty_vec_for_fresh_tenant() {
     let out = svc.list("tenant-fresh").await.unwrap();
     assert!(out.is_empty());
 }
+
+#[tokio::test]
+async fn list_live_by_entity_returns_only_live_rows_for_scope() {
+    let pool = fresh_pool().await;
+    let (svc, repo) = make_service(&pool, "dev-A");
+    let actor = Uuid::now_v7();
+
+    // Seed migration already inserted the 'unscoped' rows; add a tenant row.
+    svc.update(
+        actor,
+        UserRole::Superadmin,
+        "tenant-1",
+        "dye_cost_iqd",
+        SettingValue::Int(60_000),
+    )
+    .await
+    .unwrap();
+
+    let unscoped = repo.list_live_by_entity("unscoped").await.unwrap();
+    assert!(
+        unscoped
+            .iter()
+            .all(|s| s.entity_id == "unscoped" && s.deleted_at.is_none()),
+        "only live unscoped rows"
+    );
+    assert!(
+        unscoped.iter().any(|s| s.key == "dye_cost_iqd"),
+        "the unscoped dye seed is present"
+    );
+
+    let tenant = repo.list_live_by_entity("tenant-1").await.unwrap();
+    assert_eq!(tenant.len(), 1);
+    assert_eq!(tenant[0].key, "dye_cost_iqd");
+    assert_eq!(tenant[0].value, SettingValue::Int(60_000));
+}
+
+#[tokio::test]
+async fn has_live_key_true_only_for_live_scoped_row() {
+    let pool = fresh_pool().await;
+    let (svc, repo) = make_service(&pool, "dev-A");
+    let actor = Uuid::now_v7();
+
+    assert!(repo.has_live_key("dye_cost_iqd", "unscoped").await.unwrap());
+    assert!(!repo.has_live_key("dye_cost_iqd", "tenant-1").await.unwrap());
+
+    svc.update(
+        actor,
+        UserRole::Superadmin,
+        "tenant-1",
+        "dye_cost_iqd",
+        SettingValue::Int(60_000),
+    )
+    .await
+    .unwrap();
+    assert!(repo.has_live_key("dye_cost_iqd", "tenant-1").await.unwrap());
+}
+
+#[tokio::test]
+async fn update_row_by_id_applies_tombstone_and_repoint_without_conflict() {
+    let pool = fresh_pool().await;
+    let (_svc, repo) = make_service(&pool, "dev-A");
+
+    // Take a live 'unscoped' seed row and tombstone it via update_row_by_id.
+    let row = repo
+        .get_by_key("dye_cost_iqd", "unscoped")
+        .await
+        .unwrap()
+        .unwrap();
+    let tomb = row.clone().tombstoned();
+    let mut tx = pool.begin().await.unwrap();
+    repo.update_row_by_id(&mut tx, &tomb).await.unwrap();
+    tx.commit().await.unwrap();
+    assert!(
+        repo.get_by_key("dye_cost_iqd", "unscoped")
+            .await
+            .unwrap()
+            .is_none(),
+        "tombstone hides the row"
+    );
+
+    // Re-point a different live 'unscoped' row to a tenant; no conflict, value kept.
+    let cfg = repo
+        .get_by_key("arabic_numerals", "unscoped")
+        .await
+        .unwrap()
+        .unwrap();
+    let repointed = cfg.clone().repointed_to("tenant-1");
+    let mut tx = pool.begin().await.unwrap();
+    repo.update_row_by_id(&mut tx, &repointed).await.unwrap();
+    tx.commit().await.unwrap();
+    assert!(repo
+        .get_by_key("arabic_numerals", "unscoped")
+        .await
+        .unwrap()
+        .is_none());
+    let moved = repo
+        .get_by_key("arabic_numerals", "tenant-1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.value, cfg.value);
+}
