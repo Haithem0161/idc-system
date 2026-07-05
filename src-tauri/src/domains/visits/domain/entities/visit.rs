@@ -358,6 +358,14 @@ impl Visit {
                     "mandoub requires a referring doctor".into(),
                 ));
             }
+            // A مندوب visit that collected nothing after dye produces a zeroed
+            // cut base (money engine zero-guard). Rather than fail the opaque
+            // 500/1000 CHECK, reject with a precise reason.
+            if snapshots.mandoub_cut_iqd == 0 {
+                return Err(AppError::Validation(
+                    "cannot lock a mandoub visit with no collectable amount after dye".into(),
+                ));
+            }
             if !matches!(snapshots.mandoub_cut_iqd, 500 | 1000) {
                 return Err(AppError::Validation(
                     "mandoub_cut_snapshot must be 500 or 1000 when a mandoub is set".into(),
@@ -1085,6 +1093,20 @@ mod tests {
         let mut snap = snap_doctor(50_000, "Dr");
         snap.mandoub_cut_iqd = 500;
         snap.mandoub_name = None;
+        let err = v.lock(Uuid::now_v7(), snap, Utc::now());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lock_mandoub_visit_with_zeroed_cut_base_is_rejected_clearly() {
+        let mut input = draft_input();
+        input.doctor_id = Some(Uuid::now_v7());
+        input.mandoub_id = Some(Uuid::now_v7());
+        let v = Visit::create_draft(input).unwrap();
+        // Snapshot the engine would produce when base==0: mandoub cut 0.
+        let mut snap = snap_doctor(50_000, "Dr");
+        snap.mandoub_cut_iqd = 0;
+        snap.mandoub_name = Some("Rep".into());
         let err = v.lock(Uuid::now_v7(), snap, Utc::now());
         assert!(err.is_err());
     }
