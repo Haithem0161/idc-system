@@ -116,6 +116,7 @@ export function useVisitCreateDraft () {
           dye: input.dye ?? false,
           report: input.report ?? false,
           discount: input.discount ?? false,
+          price_override_iqd: input.price_override_iqd ?? null,
         },
       }),
     // Invalidate on settle (success AND error): a failed mutation is exactly
@@ -142,6 +143,7 @@ export function useVisitUpdateDraft () {
           dye: input.dye,
           report: input.report,
           discount: input.discount,
+          price_override_iqd: input.price_override_iqd,
         },
       }),
     onSettled: () => {

@@ -113,19 +113,29 @@ export default function NewVisitTabbedPage () {
   const priceIqd = effectivePrice ?? localSubtypePrice
   const dyeApplied = Boolean(activeForm?.dye) && Boolean(checkType?.dye_supported)
 
+  // The receptionist may edit the per-visit price away from the catalog
+  // default (e.g. a negotiated rate). When set, it replaces `priceIqd` in the
+  // total AND is what gets sent on the draft, so the backend's paid-basis cut
+  // math sees the same number the receptionist and patient see here.
+  const priceOverrideIqd = activeForm?.priceOverrideIqd
+  const effectivePriceIqd =
+    priceOverrideIqd !== null && priceOverrideIqd !== undefined && priceOverrideIqd !== ""
+      ? Number(priceOverrideIqd)
+      : (priceIqd ?? 0)
+
   const totalLines = useMemo<RunningTotalLine[]>(() => {
     if (priceIqd == null) return []
     const lines: RunningTotalLine[] = [
-      { label: localizedCheckName, amountIqd: priceIqd, emphasis: true },
+      { label: localizedCheckName, amountIqd: effectivePriceIqd, emphasis: true },
     ]
     if (dyeApplied) {
       lines.push({ label: t("reception.new_visit.dye"), amountIqd: dyeCostIqd })
     }
     return lines
-  }, [priceIqd, localizedCheckName, dyeApplied, dyeCostIqd, t])
+  }, [priceIqd, effectivePriceIqd, localizedCheckName, dyeApplied, dyeCostIqd, t])
 
 
-  const totalIqd = (priceIqd ?? 0) + (dyeApplied ? dyeCostIqd : 0)
+  const totalIqd = effectivePriceIqd + (dyeApplied ? dyeCostIqd : 0)
   const hasPrice = priceIqd != null
   // Pending only when we have nothing to show yet but a fetch is in flight.
   const estimating = priceFetching && priceIqd == null && subtypeChosen
@@ -198,6 +208,13 @@ export default function NewVisitTabbedPage () {
       // doctor. Gate it the same way so the draft never sends a discount the
       // engine would reject (the entity would auto-clear it anyway).
       const discount = referringDoctorId != null ? tab.form.discount : false
+      // Send the receptionist's price edit only when a numeric value is
+      // present; a blank field means "not editing right now" and must not
+      // clobber whatever price the draft already carries.
+      const priceOverrideIqd =
+        tab.form.priceOverrideIqd === "" || tab.form.priceOverrideIqd == null
+          ? null
+          : Number(tab.form.priceOverrideIqd)
       if (!tab.draftVisitId) {
         const visit = await visitCreate.mutateAsync({
           patient_id: tab.form.patientId,
@@ -209,6 +226,7 @@ export default function NewVisitTabbedPage () {
           dye: checkType?.dye_supported ? tab.form.dye : false,
           report: tab.form.report,
           discount,
+          price_override_iqd: priceOverrideIqd,
         })
         attachDraft(tab.tabId, visit.id)
       } else {
@@ -226,6 +244,7 @@ export default function NewVisitTabbedPage () {
           dye: checkType?.dye_supported ? tab.form.dye : false,
           report: tab.form.report,
           discount,
+          price_override_iqd: priceOverrideIqd,
         })
       }
       setSaveStatus("saved")
@@ -421,6 +440,38 @@ export default function NewVisitTabbedPage () {
               </select>
             </FieldLabel>
           ) : null}
+
+          <FieldLabel label={t("reception.new_visit.price")}>
+            <div className="space-y-1">
+              <input
+                id="price-override"
+                type="number"
+                min={0}
+                step={1}
+                inputMode="numeric"
+                className="input input-sm w-full font-mono tabular-nums"
+                placeholder={priceIqd != null ? String(priceIqd) : undefined}
+                value={form.priceOverrideIqd ?? ""}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  if (raw === "") {
+                    // Blank = fall back to the catalog price.
+                    patchForm({ priceOverrideIqd: null })
+                    return
+                  }
+                  const n = Math.floor(Number(raw))
+                  // Ignore non-numeric / negative input; 0 is allowed.
+                  if (Number.isFinite(n) && n >= 0) {
+                    patchForm({ priceOverrideIqd: n })
+                  }
+                }}
+                data-testid="price-override"
+              />
+              <p className="text-[11px] text-ink-3">
+                {t("reception.new_visit.price_hint")}
+              </p>
+            </div>
+          </FieldLabel>
 
           <FieldLabel label={t("reception.new_visit.doctor")}>
             <DoctorCombobox

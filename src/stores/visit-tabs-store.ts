@@ -40,6 +40,14 @@ export interface VisitTabForm {
   /** Amount actually paid when `overrideEnabled`. `""` while the field is blank;
    * 0 is a valid value (the patient could not pay). */
   amountPaidOverrideIqd: number | ""
+  /**
+   * Receptionist-editable per-visit price. `null` (the default) means "use
+   * the catalog's effective price" (subtype/base + doctor override); `""`
+   * while the field is blank and the receptionist hasn't typed a value yet.
+   * Unlike `amountPaidOverrideIqd` (what the patient actually paid), this
+   * edits the billed price itself and feeds the paid-basis doctor-cut math.
+   */
+  priceOverrideIqd: number | "" | null
 }
 
 export interface VisitTab {
@@ -95,6 +103,7 @@ const emptyForm: VisitTabForm = {
   discount: false,
   overrideEnabled: false,
   amountPaidOverrideIqd: "",
+  priceOverrideIqd: null,
 }
 
 function makeTabId (): string {

@@ -403,6 +403,9 @@ export type CommandMap = {
         // Optional referring representative (mandoub). Only valid alongside a
         // real referring doctor; the chosen cut is captured at lock time.
         mandoub_id?: string | null
+        // Receptionist per-visit price edit. Null/omitted = use the catalog's
+        // effective price. Feeds the paid-basis doctor-cut math.
+        price_override_iqd?: number | null
       }
     }
     result: VisitRecord
@@ -422,6 +425,8 @@ export type CommandMap = {
         discount?: boolean
         // Optional referring representative (mandoub). See create-draft note.
         mandoub_id?: string | null
+        // Receptionist per-visit price edit. See create-draft note.
+        price_override_iqd?: number | null
       }
     }
     result: VisitRecord

@@ -131,6 +131,39 @@ describe("VisitCreateDraftSchema", () => {
       VisitCreateDraftSchema.parse({ ...base, dalal: true, discount: true })
     ).toThrow(/discount_requires_doctor/)
   })
+
+  it("omits price_override_iqd when not provided", () => {
+    const parsed = VisitCreateDraftSchema.parse(base)
+    expect(parsed.price_override_iqd).toBeUndefined()
+  })
+
+  it("accepts an explicit null price_override_iqd", () => {
+    const parsed = VisitCreateDraftSchema.parse({
+      ...base,
+      price_override_iqd: null,
+    })
+    expect(parsed.price_override_iqd).toBeNull()
+  })
+
+  it("accepts a non-negative integer price_override_iqd", () => {
+    const parsed = VisitCreateDraftSchema.parse({
+      ...base,
+      price_override_iqd: 15000,
+    })
+    expect(parsed.price_override_iqd).toBe(15000)
+  })
+
+  it("rejects a negative price_override_iqd", () => {
+    expect(() =>
+      VisitCreateDraftSchema.parse({ ...base, price_override_iqd: -1 })
+    ).toThrow()
+  })
+
+  it("rejects a non-integer price_override_iqd", () => {
+    expect(() =>
+      VisitCreateDraftSchema.parse({ ...base, price_override_iqd: 15000.5 })
+    ).toThrow()
+  })
 })
 
 describe("VisitUpdateDraftSchema", () => {
@@ -179,6 +212,28 @@ describe("VisitUpdateDraftSchema", () => {
         mandoub_id: "01913d3a-7c70-7c00-a000-0000000000aa",
       })
     ).toThrow(/mandoub_requires_doctor/)
+  })
+
+  it("accepts clearing price_override_iqd with an explicit null", () => {
+    const parsed = VisitUpdateDraftSchema.parse({
+      visit_id,
+      price_override_iqd: null,
+    })
+    expect(parsed.price_override_iqd).toBeNull()
+  })
+
+  it("accepts patching price_override_iqd to a new value", () => {
+    const parsed = VisitUpdateDraftSchema.parse({
+      visit_id,
+      price_override_iqd: 5000,
+    })
+    expect(parsed.price_override_iqd).toBe(5000)
+  })
+
+  it("rejects a negative price_override_iqd patch", () => {
+    expect(() =>
+      VisitUpdateDraftSchema.parse({ visit_id, price_override_iqd: -5 })
+    ).toThrow()
   })
 })
 

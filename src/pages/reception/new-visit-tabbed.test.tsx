@@ -458,6 +458,117 @@ describe("NewVisitTabbedPage", () => {
     })
   })
 
+  it("renders the price override input prefilled with the catalog price as a placeholder", async () => {
+    installInvokeRouter(defaultResponses())
+    useVisitTabsStore.getState().openTab(CHECK_ID)
+    render(<NewVisitTabbedPage />, { wrapper })
+    await waitFor(() => {
+      const priceInput = screen.getByTestId("price-override") as HTMLInputElement
+      expect(priceInput.value).toBe("")
+    })
+  })
+
+  it("editing the price override updates the running total", async () => {
+    installInvokeRouter(
+      defaultResponses({
+        visits_checks_grid: [
+          {
+            check_type_id: CHECK_ID,
+            name_ar: "AR_ECHO",
+            name_en: "Echocardiogram",
+            has_subtypes: false,
+            dye_supported: false,
+            todays_visits: 0,
+          },
+        ],
+      }),
+    )
+    // pricing_effective resolves the base price for a no-subtype check.
+    const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "pricing_effective") return Promise.resolve(20000)
+      const responses = defaultResponses() as Record<string, unknown>
+      return Promise.resolve(responses[command] ?? null)
+    })
+    useVisitTabsStore.getState().openTab(CHECK_ID)
+    render(<NewVisitTabbedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("running-total").textContent).toMatch(/20,000|20000/)
+    })
+
+    fireEvent.change(screen.getByTestId("price-override"), {
+      target: { value: "5000" },
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("running-total").textContent).toMatch(/5,000|5000/)
+    })
+  })
+
+  it("sends the numeric price_override_iqd on the update-draft payload", async () => {
+    installInvokeRouter(defaultResponses())
+    const tabId = useVisitTabsStore.getState().openTab(CHECK_ID)
+    useVisitTabsStore.getState().updateTabForm(tabId, {
+      patientId: PATIENT_ID,
+      patientName: "Salma A.",
+      priceOverrideIqd: 12000,
+    })
+    useVisitTabsStore.getState().attachDraft(tabId, VISIT_ID)
+    render(<NewVisitTabbedPage />, { wrapper })
+
+    // Clicking Finish force-flushes the pending autosave synchronously
+    // (scheduleFlush.flush()) before opening the operator picker -- the same
+    // path the existing "Finish flow" test exercises, so no fake timers
+    // needed here.
+    let finish: HTMLButtonElement
+    await waitFor(() => {
+      finish = screen.getByTestId("finish-btn") as HTMLButtonElement
+      expect(finish.disabled).toBe(false)
+    })
+    await act(async () => {
+      fireEvent.click(finish!)
+    })
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "visits_update_draft",
+        expect.objectContaining({
+          args: expect.objectContaining({ price_override_iqd: 12000 }),
+        }),
+      )
+    })
+  })
+
+  it("sends null price_override_iqd when the field is left blank", async () => {
+    installInvokeRouter(defaultResponses())
+    const tabId = useVisitTabsStore.getState().openTab(CHECK_ID)
+    useVisitTabsStore.getState().updateTabForm(tabId, {
+      patientId: PATIENT_ID,
+      patientName: "Salma A.",
+    })
+    useVisitTabsStore.getState().attachDraft(tabId, VISIT_ID)
+    render(<NewVisitTabbedPage />, { wrapper })
+
+    let finish: HTMLButtonElement
+    await waitFor(() => {
+      finish = screen.getByTestId("finish-btn") as HTMLButtonElement
+      expect(finish.disabled).toBe(false)
+    })
+    await act(async () => {
+      fireEvent.click(finish!)
+    })
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+        "visits_update_draft",
+        expect.objectContaining({
+          args: expect.objectContaining({ price_override_iqd: null }),
+        }),
+      )
+    })
+  })
+
   it("without the override, visits_lock sends a null amount", async () => {
     installInvokeRouter(defaultResponses())
     const tabId = useVisitTabsStore.getState().openTab(CHECK_ID)
