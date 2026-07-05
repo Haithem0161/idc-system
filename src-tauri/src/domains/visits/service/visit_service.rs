@@ -709,6 +709,11 @@ impl VisitService {
             discount: visit.discount,
             mandoub_cut_iqd: effective_mandoub_cut,
             mandoub_name,
+            // Price/paid override threading is a later task; the engine defaults
+            // to the catalog price and full payment when these are None, so the
+            // service keeps its current behaviour until that task wires them.
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
             settings,
         })?;
         Ok((
