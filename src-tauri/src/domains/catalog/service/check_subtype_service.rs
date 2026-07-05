@@ -32,6 +32,7 @@ pub struct CheckSubtypeCreateInput {
     pub name_ar: String,
     pub name_en: Option<String>,
     pub price_iqd: i64,
+    pub dye_price_iqd: Option<i64>,
     #[serde(default)]
     pub sort_order: i64,
 }
@@ -41,6 +42,7 @@ pub struct CheckSubtypeUpdateInput {
     pub name_ar: Option<String>,
     pub name_en: Option<Option<String>>,
     pub price_iqd: Option<i64>,
+    pub dye_price_iqd: Option<Option<i64>>,
     pub sort_order: Option<i64>,
 }
 
@@ -127,6 +129,7 @@ impl<R: tauri::Runtime> CheckSubtypeService<R> {
             name_ar: input.name_ar,
             name_en: input.name_en,
             price_iqd: input.price_iqd,
+            dye_price_iqd: input.dye_price_iqd,
             sort_order: input.sort_order,
             entity_id: entity_id.to_string(),
             origin_device_id: Some(self.device_id.clone()),
@@ -178,6 +181,7 @@ impl<R: tauri::Runtime> CheckSubtypeService<R> {
             name_ar: input.name_ar,
             name_en: input.name_en,
             price_iqd: input.price_iqd,
+            dye_price_iqd: input.dye_price_iqd,
             sort_order: input.sort_order,
         })?;
         let write = UpsertCheckSubtypeWrite {

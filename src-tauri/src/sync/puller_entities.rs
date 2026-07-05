@@ -183,7 +183,7 @@ pub(crate) async fn apply_check_types_change(
     sqlx::query(
         "INSERT INTO check_types ( \
             id, name_ar, name_en, has_subtypes, base_price_iqd, \
-            dye_supported, sort_order, is_active, \
+            dye_price_iqd, sort_order, is_active, \
             created_at, updated_at, deleted_at, version, dirty, \
             last_synced_at, origin_device_id, entity_id \
          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?) \
@@ -192,7 +192,7 @@ pub(crate) async fn apply_check_types_change(
             name_en = excluded.name_en, \
             has_subtypes = excluded.has_subtypes, \
             base_price_iqd = excluded.base_price_iqd, \
-            dye_supported = excluded.dye_supported, \
+            dye_price_iqd = excluded.dye_price_iqd, \
             sort_order = excluded.sort_order, \
             is_active = excluded.is_active, \
             updated_at = excluded.updated_at, \
@@ -214,11 +214,7 @@ pub(crate) async fn apply_check_types_change(
             .unwrap_or(false) as i64,
     )
     .bind(p.get("base_price_iqd").and_then(|v| v.as_i64()))
-    .bind(
-        p.get("dye_supported")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false) as i64,
-    )
+    .bind(p.get("dye_price_iqd").and_then(|v| v.as_i64()))
     .bind(p.get("sort_order").and_then(|v| v.as_i64()).unwrap_or(0))
     .bind(p.get("is_active").and_then(|v| v.as_bool()).unwrap_or(true) as i64)
     .bind(
@@ -255,15 +251,16 @@ pub(crate) async fn apply_check_subtypes_change(
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO check_subtypes ( \
-            id, check_type_id, name_ar, name_en, price_iqd, sort_order, \
+            id, check_type_id, name_ar, name_en, price_iqd, dye_price_iqd, sort_order, \
             created_at, updated_at, deleted_at, version, dirty, \
             last_synced_at, origin_device_id, entity_id \
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?) \
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?) \
          ON CONFLICT(id) DO UPDATE SET \
             check_type_id = excluded.check_type_id, \
             name_ar = excluded.name_ar, \
             name_en = excluded.name_en, \
             price_iqd = excluded.price_iqd, \
+            dye_price_iqd = excluded.dye_price_iqd, \
             sort_order = excluded.sort_order, \
             updated_at = excluded.updated_at, \
             deleted_at = excluded.deleted_at, \
@@ -284,6 +281,7 @@ pub(crate) async fn apply_check_subtypes_change(
     .bind(p.get("name_ar").and_then(|v| v.as_str()).unwrap_or(""))
     .bind(p.get("name_en").and_then(|v| v.as_str()))
     .bind(p.get("price_iqd").and_then(|v| v.as_i64()).unwrap_or(0))
+    .bind(p.get("dye_price_iqd").and_then(|v| v.as_i64()))
     .bind(p.get("sort_order").and_then(|v| v.as_i64()).unwrap_or(0))
     .bind(
         p.get("created_at")
@@ -1271,9 +1269,9 @@ mod secondary_unique_collision_tests {
     async fn seed_check_type(pool: &sqlx::SqlitePool, id: &str) {
         sqlx::query(
             "INSERT INTO check_types (id, name_ar, has_subtypes, base_price_iqd, \
-             dye_supported, sort_order, is_active, \
+             dye_price_iqd, sort_order, is_active, \
              created_at, updated_at, version, dirty, entity_id) \
-             VALUES (?, 'فحص', 0, 1000, 0, 0, 1, \
+             VALUES (?, 'فحص', 0, 1000, NULL, 0, 1, \
              '2026-06-26T09:00:00Z', '2026-06-26T09:00:00Z', 1, 0, ?)",
         )
         .bind(id)
