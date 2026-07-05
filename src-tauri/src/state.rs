@@ -21,6 +21,7 @@ use crate::domains::reports::ReportsService;
 use crate::domains::settings::service::SettingsService;
 use crate::domains::shifts::ShiftService;
 use crate::domains::visits::VisitService;
+use crate::error::AppResult;
 use crate::sync::SyncEngineHandle;
 
 /// User context populated by the auth flow (Phase 2).
@@ -381,6 +382,40 @@ impl AppState {
 
     pub async fn get_setting(&self, key: &str) -> Option<SettingValue> {
         self.settings_cache.read().await.get(key).cloned()
+    }
+
+    /// Fold any stale `'unscoped'` settings into `tenant_entity_id`, then re-warm
+    /// the in-memory cache from the tenant scope so the money engine reads the
+    /// tenant's configured values for the rest of the session. Called right after
+    /// `set_current_user`. A reconcile failure is logged and swallowed (login must
+    /// not fail on a settings fold); the tenant re-warm still runs.
+    pub async fn reconcile_and_warm_settings(&self, tenant_entity_id: &str) -> AppResult<()> {
+        let Some(svc) = self.settings_service() else {
+            tracing::warn!("settings service unavailable; scope reconcile skipped");
+            return Ok(());
+        };
+        match svc.reconcile_scope(tenant_entity_id).await {
+            Ok(out) => tracing::info!(
+                repointed = out.repointed,
+                tombstoned = out.tombstoned,
+                tenant = %tenant_entity_id,
+                "settings scope reconciled"
+            ),
+            Err(e) => {
+                tracing::warn!(error = %e, "settings scope reconcile failed; re-warming anyway")
+            }
+        }
+        match svc.list(tenant_entity_id).await {
+            Ok(settings) => {
+                for s in &settings {
+                    self.set_setting(s.key.clone(), s.value.to_cache_json())
+                        .await;
+                }
+                tracing::info!(count = settings.len(), tenant = %tenant_entity_id, "settings cache re-warmed for tenant");
+            }
+            Err(e) => tracing::warn!(error = %e, "tenant settings re-warm failed"),
+        }
+        Ok(())
     }
 
     pub async fn settings_snapshot(&self) -> Arc<HashMap<String, SettingValue>> {

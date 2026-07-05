@@ -592,3 +592,37 @@ async fn reconcile_scope_enqueues_one_outbox_op_per_changed_row() {
         .unwrap();
     assert_eq!(count.0 as usize, changed, "one settings op per changed row");
 }
+
+/// Guard test for Task 4 (`AppState::reconcile_and_warm_settings`): confirms
+/// the service-level contract the cache re-warm loop depends on -- after
+/// `reconcile_scope`, `list(tenant)` carries the tenant money values (not
+/// seed defaults) and the unscoped scope is left empty.
+#[tokio::test]
+async fn reconcile_then_list_yields_tenant_scoped_money_values() {
+    let pool = fresh_pool().await;
+    let (svc, _repo) = make_service(&pool, "dev-A");
+    let actor = Uuid::now_v7();
+    let tenant = "tenant-1";
+
+    for (k, v) in [
+        ("dye_cost_iqd", 60_000),
+        ("report_pct", 25),
+        ("internal_doctor_pct", 25),
+    ] {
+        svc.update(actor, UserRole::Superadmin, tenant, k, SettingValue::Int(v))
+            .await
+            .unwrap();
+    }
+
+    svc.reconcile_scope(tenant).await.unwrap();
+
+    // What the cache-warm loop reads after login: list(tenant) must carry the
+    // tenant money values AND the re-pointed config keys, with no unscoped rows.
+    let rows = svc.list(tenant).await.unwrap();
+    let get = |k: &str| rows.iter().find(|s| s.key == k).map(|s| s.value.clone());
+    assert_eq!(get("dye_cost_iqd"), Some(SettingValue::Int(60_000)));
+    assert_eq!(get("report_pct"), Some(SettingValue::Int(25)));
+    assert_eq!(get("internal_doctor_pct"), Some(SettingValue::Int(25)));
+    assert_eq!(get("arabic_numerals"), Some(SettingValue::Bool(false)));
+    assert!(svc.list("unscoped").await.unwrap().is_empty());
+}
