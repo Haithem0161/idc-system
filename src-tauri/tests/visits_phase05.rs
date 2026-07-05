@@ -354,10 +354,12 @@ async fn create_draft_and_lock_produces_receipt_and_consumption() {
 
     assert_eq!(lock_result.visit.status, VisitStatus::Locked);
     let snap = lock_result.visit.snapshots.as_ref().unwrap();
-    // 50000 base price * 25% cut = 12500 doctor cut; dye=true => 2000.
+    // Paid-basis cut: no override so collected = price = 50000; dye=true => 2000,
+    // and dye is covered first, so cut_base = 50000 - 2000 = 48000.
+    // doctor_cut = 48000 * 25% = 12000 (was 12500 when the cut was off full price).
     assert_eq!(snap.price_iqd, 50_000);
     assert_eq!(snap.dye_cost_iqd, 2_000);
-    assert_eq!(snap.doctor_cut_iqd, 12_500);
+    assert_eq!(snap.doctor_cut_iqd, 12_000);
     assert_eq!(snap.total_amount_iqd, 52_000);
     assert!(lock_result.visit.locked_at.is_some());
     // Both receipt files exist.
