@@ -791,29 +791,91 @@ git -c user.name="Haithem" -c user.email="cloud.torchcorp@gmail.com" \
 
 Add to `src-tauri/tests/settings_phase02.rs`:
 
+Two tests: one proves migration 024 no-ops on a fresh install (no user), and one proves the fold branch by replaying the two migration UPDATEs against a pool seeded with a user. To avoid duplicating the migration SQL in the test, load the migration file's text and execute it, so the test exercises the EXACT statements that ship.
+
 ```rust
+/// Migration 024 must NO-OP on a fresh install: fresh_pool runs ALL migrations
+/// (incl. 024) before any user exists, so the 'unscoped' seed rows stay live.
 #[tokio::test]
-async fn migration_024_folds_unscoped_when_a_user_exists() {
-    // fresh_pool runs ALL migrations incl. 024. On a fresh DB there is NO user,
-    // so 024 no-ops and the unscoped seed rows remain live.
+async fn migration_024_noops_when_no_user_exists() {
     let pool = fresh_pool().await;
-    let repo = std::sync::Arc::new(
-        app_lib::domains::settings::infrastructure::SqliteSettingRepo::new(pool.clone()),
-    );
-    let unscoped = SettingRepo::list_live_by_entity(&*repo, "unscoped")
+    let repo = app_lib::domains::settings::infrastructure::SqliteSettingRepo::new(pool.clone());
+    let unscoped = SettingRepo::list_live_by_entity(&repo, "unscoped")
         .await
         .unwrap();
     assert!(
         !unscoped.is_empty(),
         "no user at migration time -> 024 no-ops, unscoped seed stays live"
     );
+    // And no rows were spuriously moved to any tenant.
+    let any_tenant: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM settings WHERE entity_id <> 'unscoped' AND deleted_at IS NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(any_tenant.0, 0, "fresh install has no tenant-scoped settings");
+}
 
-    // Now simulate an existing tenant device: insert a user under a tenant, then
-    // run the 024 fold statements directly and assert convergence.
+/// Migration 024 fold branch: with a user present, replaying the migration's
+/// exact SQL tombstones unscoped money dupes and re-points unscoped singletons.
+#[tokio::test]
+async fn migration_024_folds_unscoped_into_tenant_when_user_present() {
+    let pool = fresh_pool().await;
     let tenant = "3627804e-3594-4d6f-9e8c-b157e460e7f4";
-    // Minimal user row satisfying NOT NULL columns is heavy; instead assert the
-    // fold SQL is correct via the code path (reconcile_scope), which Task 3
-    // already covers. This test's job is only the "no user -> no-op" guard.
+
+    // Seed a user under the tenant (satisfies every NOT NULL users column).
+    sqlx::query(
+        "INSERT INTO users (id, email, name, password_hash, role, created_at, updated_at, entity_id) \
+         VALUES (?, 'a@b.co', 'Admin', 'x', 'superadmin', \
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?)",
+    )
+    .bind(Uuid::now_v7().to_string())
+    .bind(tenant)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Create a tenant-scoped dye row so dye is the "dupe -> tombstone" case;
+    // every other seed key has no tenant row -> "re-point" case.
+    let (svc, repo) = make_service(&pool, "dev-A");
+    svc.update(
+        Uuid::now_v7(),
+        UserRole::Superadmin,
+        tenant,
+        "dye_cost_iqd",
+        SettingValue::Int(60_000),
+    )
+    .await
+    .unwrap();
+
+    // Replay the SHIPPING migration SQL (no duplication of statements in-test).
+    let sql = include_str!("../migrations/024_settings_tenant_reconcile.sql");
+    for stmt in sql.split(';') {
+        let stmt = stmt.trim();
+        if stmt.is_empty() || stmt.starts_with("--") {
+            continue;
+        }
+        sqlx::query(stmt).execute(&pool).await.unwrap();
+    }
+
+    // No live 'unscoped' rows remain.
+    let unscoped = SettingRepo::list_live_by_entity(&repo, "unscoped")
+        .await
+        .unwrap();
+    assert!(unscoped.is_empty(), "unscoped folded, got {unscoped:?}");
+
+    // dye kept the tenant's edited value (tombstone won, not re-point).
+    let dye = repo.get_by_key("dye_cost_iqd", tenant).await.unwrap().unwrap();
+    assert_eq!(dye.value, SettingValue::Int(60_000));
+
+    // A config-only seed key was re-pointed to the tenant with its value.
+    let an = repo
+        .get_by_key("arabic_numerals", tenant)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(an.value, SettingValue::Bool(false));
 }
 
 #[test]
@@ -821,6 +883,8 @@ fn schema_version_is_24() {
     assert_eq!(app_lib::db::migrations::SYNC_SCHEMA_VERSION, 24);
 }
 ```
+
+Note: the `include_str!` path is relative to `src-tauri/tests/settings_phase02.rs`, so `../migrations/024_settings_tenant_reconcile.sql` resolves to `src-tauri/migrations/024_settings_tenant_reconcile.sql`. The naive `split(';')` statement loop is acceptable here because migration 024 contains no semicolons inside string literals or comments on the same line as a statement terminator (verify when writing 024 — keep each `strftime(...)` and subquery free of a trailing `;` except the real statement terminators).
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -929,9 +993,10 @@ Also update the drifting comment just above it (`:53-56`) from "currently 23 ...
 
 ```
 cargo test --test settings_phase02 schema_version_is_24
-cargo test --test settings_phase02 migration_024_folds_unscoped_when_a_user_exists
+cargo test --test settings_phase02 migration_024_noops_when_no_user_exists
+cargo test --test settings_phase02 migration_024_folds_unscoped_into_tenant_when_user_present
 ```
-Expected: PASS both. The migration-count assertion in `migrations.rs` unit tests (`:264`) also validates all 24 apply cleanly:
+Expected: PASS all three. The migration-count assertion in `migrations.rs` unit tests (`:264`) also validates all 24 apply cleanly:
 ```
 cargo test --lib db::migrations
 ```
