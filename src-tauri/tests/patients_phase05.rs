@@ -349,6 +349,7 @@ async fn soft_delete_rejected_when_referenced_by_live_visit() {
         report: false,
         dalal: false,
         discount: false,
+        price_override_iqd: None,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
     })
@@ -489,6 +490,7 @@ async fn seed_visit_for(f: &Fixture, patient_id: Uuid) -> Uuid {
         report: false,
         dalal: false,
         discount: false,
+        price_override_iqd: None,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
     })
