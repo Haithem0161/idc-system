@@ -51,10 +51,10 @@ export const SERVER_VERSION: string = resolveVersion()
  * shape, and set `MIN_CLIENT_SCHEMA_VERSION` to enforce the floor.
  *
  * Lockstep note: the desktop client's `SYNC_SCHEMA_VERSION` is the count of
- * migration files in `src-tauri/src/db/migrations.rs` (currently 23, incl.
- * migration 023 which adds the editable `price_override_iqd` visit column).
+ * migration files in `src-tauri/src/db/migrations.rs` (currently 24, incl.
+ * migration 024 which folds stale 'unscoped' settings into the tenant scope).
  * This constant MUST match the highest migration that changed a synced
  * column. A drift makes a newer client's push fail with opaque per-field
  * validation errors instead of a clean signal.
  */
-export const SERVER_SCHEMA_VERSION = 23
+export const SERVER_SCHEMA_VERSION = 24
