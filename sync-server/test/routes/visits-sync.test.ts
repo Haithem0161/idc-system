@@ -270,6 +270,95 @@ test('POST /sync/push rejects locked visit with mismatched total snapshot', asyn
   assert.strictEqual(body.rejected[0].status_code, 422)
 })
 
+test('POST /sync/push rejects a visit with negative price_override_iqd', async (t) => {
+  const app = await build(t)
+  const token = authToken(app as unknown as FastifyAppLike)
+  const patientId = '01900000-0000-7000-8000-000000000105'
+  const visitId = '01900000-0000-7000-8000-000000000203'
+  await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-v1' },
+    payload: {
+      ops: [
+        jsonOp(
+          '01HZVP00000000000000000007',
+          'patients',
+          patientId,
+          patientPayload(patientId)
+        ),
+      ],
+    },
+  })
+  const res = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-v1' },
+    payload: {
+      ops: [
+        jsonOp(
+          '01HZVP00000000000000000008',
+          'visits',
+          visitId,
+          lockedVisitPayload(visitId, patientId, {
+            price_override_iqd: -1,
+          })
+        ),
+      ],
+    },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].op_id, '01HZVP00000000000000000008')
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
+})
+
+test('POST /sync/push accepts a locked visit with a valid price_override_iqd', async (t) => {
+  const app = await build(t)
+  const token = authToken(app as unknown as FastifyAppLike)
+  const patientId = '01900000-0000-7000-8000-000000000106'
+  const visitId = '01900000-0000-7000-8000-000000000204'
+  await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-v1' },
+    payload: {
+      ops: [
+        jsonOp(
+          '01HZVP00000000000000000009',
+          'patients',
+          patientId,
+          patientPayload(patientId)
+        ),
+      ],
+    },
+  })
+  const res = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-v1' },
+    payload: {
+      ops: [
+        jsonOp(
+          '01HZVP0000000000000000000A',
+          'visits',
+          visitId,
+          lockedVisitPayload(visitId, patientId, {
+            price_override_iqd: 40000,
+          })
+        ),
+      ],
+    },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 1)
+  assert.strictEqual(body.accepted[0].status, 'applied')
+})
+
 test('POST /sync/push parks manual visit conflict on version divergence', async (t) => {
   const app = await build(t)
   const token = authToken(app as unknown as FastifyAppLike)

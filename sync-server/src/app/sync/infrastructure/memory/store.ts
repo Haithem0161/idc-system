@@ -234,6 +234,11 @@ export interface VisitSyncRecord {
   voided_by_user_id: string | null
   void_reason: string | null
   price_snapshot_iqd: number | null
+  /** Editable per-visit price the receptionist set on the draft, before it is
+   *  frozen into `price_snapshot_iqd` at lock. Decoupled from the check
+   *  type's default price; kept for audit/edit-history, not used in cut math
+   *  (the snapshot at lock is authoritative for cuts and the total invariant). */
+  price_override_iqd: number | null
   dye_cost_snapshot_iqd: number | null
   report_amount_snapshot_iqd: number | null
   report_pct_snapshot: number | null
@@ -523,6 +528,7 @@ export class MemorySyncStore implements
       'dalal',
       'discount',
       'price_snapshot_iqd',
+      'price_override_iqd',
       'dye_cost_snapshot_iqd',
       'report_amount_snapshot_iqd',
       'report_pct_snapshot',

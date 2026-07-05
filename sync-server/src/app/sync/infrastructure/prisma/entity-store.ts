@@ -529,6 +529,7 @@ export class PrismaEntityStore implements SyncEntityStore {
           voidedByUserId: row.voided_by_user_id,
           voidReason: row.void_reason,
           priceSnapshotIqd: row.price_snapshot_iqd,
+          priceOverrideIqd: row.price_override_iqd,
           dyeCostSnapshotIqd: row.dye_cost_snapshot_iqd,
           reportAmountSnapshotIqd: row.report_amount_snapshot_iqd,
           reportPctSnapshot: row.report_pct_snapshot,
@@ -572,6 +573,7 @@ export class PrismaEntityStore implements SyncEntityStore {
       'dalal',
       'discount',
       'price_snapshot_iqd',
+      'price_override_iqd',
       'dye_cost_snapshot_iqd',
       'report_amount_snapshot_iqd',
       'report_pct_snapshot',
@@ -1378,6 +1380,7 @@ function toVisitSyncRecord (r: {
   voidedByUserId: string | null
   voidReason: string | null
   priceSnapshotIqd: number | null
+  priceOverrideIqd: number | null
   dyeCostSnapshotIqd: number | null
   reportAmountSnapshotIqd: number | null
   reportPctSnapshot: number | null
@@ -1422,6 +1425,7 @@ function toVisitSyncRecord (r: {
     voided_by_user_id: r.voidedByUserId,
     void_reason: r.voidReason,
     price_snapshot_iqd: r.priceSnapshotIqd,
+    price_override_iqd: r.priceOverrideIqd,
     dye_cost_snapshot_iqd: r.dyeCostSnapshotIqd,
     report_amount_snapshot_iqd: r.reportAmountSnapshotIqd,
     report_pct_snapshot: r.reportPctSnapshot,
