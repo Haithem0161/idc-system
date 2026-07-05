@@ -316,6 +316,7 @@ async fn perf_create_draft_under_50ms() {
                     report: false,
                     dalal: false,
                     discount: false,
+                    price_override_iqd: None,
                 },
             )
             .await
@@ -354,6 +355,7 @@ async fn perf_lock_typical_case_under_200ms() {
                     report: false,
                     dalal: false,
                     discount: false,
+                    price_override_iqd: None,
                 },
             )
             .await
@@ -397,6 +399,7 @@ async fn perf_pricing_resolve_under_30ms() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -474,6 +477,7 @@ async fn perf_list_today_by_check_50_rows_under_30ms() {
                     report: false,
                     dalal: false,
                     discount: false,
+                    price_override_iqd: None,
                 },
             )
             .await

@@ -331,6 +331,7 @@ async fn create_draft_and_lock_produces_receipt_and_consumption() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -417,6 +418,7 @@ async fn discount_visit_locks_with_zero_doctor_cut_and_persists_flag() {
                 report: false,
                 dalal: false,
                 discount: true,
+                price_override_iqd: None,
             },
         )
         .await
@@ -477,6 +479,7 @@ async fn create_draft_rejects_discount_without_referring_doctor() {
                 report: false,
                 dalal: false,
                 discount: true,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -516,6 +519,7 @@ async fn lock_rejected_when_no_qualified_operator_on_shift() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -556,6 +560,7 @@ async fn void_offsets_inventory_and_marks_visit_voided() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -629,6 +634,7 @@ async fn discard_locked_visit_is_rejected() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -673,6 +679,7 @@ async fn discard_draft_soft_deletes_and_emits_audit() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -773,6 +780,7 @@ async fn create_and_lock_visit(f: &Fixture) -> Uuid {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -852,6 +860,7 @@ async fn lock_house_visit_records_internal_pct_and_null_doctor_snapshot() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -879,6 +888,58 @@ async fn lock_house_visit_records_internal_pct_and_null_doctor_snapshot() {
     assert!(row.0.is_some());
     assert!(row.1.is_none());
     assert!(row.2.is_none());
+}
+
+#[tokio::test]
+async fn lock_house_visit_with_price_override_and_partial_paid_scales_doctor_cut() {
+    // House visit (no referring doctor -> internal_doctor_pct applies), editable
+    // price overridden to 100000, but the receptionist only collected 40000.
+    // cut_base = collected (40000), no dye => doctor_cut = 40000 * 40% = 16000,
+    // NOT 40000 (40% of the full 100000 override price).
+    let f = seed().await;
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: None,
+                mandoub_id: None,
+                dye: false,
+                report: false,
+                dalal: false,
+                discount: false,
+                price_override_iqd: Some(100_000),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(draft.price_override_iqd, Some(100_000));
+
+    let lock_result = f
+        .visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            Some(40_000),
+            None,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await
+        .unwrap();
+
+    let snap = lock_result.visit.snapshots.as_ref().unwrap();
+    assert_eq!(snap.price_iqd, 100_000);
+    assert_eq!(snap.amount_paid_override_iqd, Some(40_000));
+    assert_eq!(snap.dye_cost_iqd, 0);
+    assert_eq!(snap.doctor_cut_iqd, 16_000);
 }
 
 #[tokio::test]
@@ -922,6 +983,7 @@ async fn update_draft_rejected_on_locked_visit() {
                 report: None,
                 dalal: None,
                 discount: None,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -947,6 +1009,7 @@ async fn lock_rejects_when_operator_not_in_qualified_set() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -1111,6 +1174,7 @@ async fn create_draft_rejects_subtype_when_check_type_lacks_subtypes() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -1142,6 +1206,7 @@ async fn create_draft_rejects_unsupported_dye() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -1167,6 +1232,7 @@ async fn create_draft_rejected_for_accountant_role() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await;
@@ -1302,6 +1368,7 @@ async fn pricing_resolve_returns_fresh_snapshot_without_mutating_visit() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -1348,6 +1415,7 @@ async fn lock_increments_visit_version_monotonically_from_create() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await

@@ -71,6 +71,10 @@ pub struct CreateDraftInput {
     /// a real referring doctor.
     #[serde(default)]
     pub discount: bool,
+    /// Editable per-visit price. `None` keeps the catalog/doctor-pricing price;
+    /// `Some(n)` overrides it (e.g. a negotiated or house-call price).
+    #[serde(default)]
+    pub price_override_iqd: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -92,6 +96,9 @@ pub struct UpdateDraftInput {
     /// `Some(true)`/`Some(false)` sets the discount flag; `None` leaves it
     /// unchanged. Auto-cleared by the entity when the doctor ends up None.
     pub discount: Option<bool>,
+    /// `Some(Some(n))` sets the editable price override, `Some(None)` clears it
+    /// back to the catalog/doctor-pricing price, `None` leaves it unchanged.
+    pub price_override_iqd: Option<Option<i64>>,
 }
 
 /// Resolved snapshot bundle returned to UI from `pricing::resolve` and used
@@ -416,7 +423,7 @@ impl VisitService {
             report: input.report,
             dalal: input.dalal,
             discount: input.discount,
-            price_override_iqd: None,
+            price_override_iqd: input.price_override_iqd,
             entity_id: entity_id.to_string(),
             origin_device_id: Some(self.device_id.clone()),
         })?;
@@ -480,7 +487,7 @@ impl VisitService {
             report: input.report,
             dalal: input.dalal,
             discount: input.discount,
-            price_override_iqd: None,
+            price_override_iqd: input.price_override_iqd,
         })?;
         // Re-validate dye against parent. Report is universally available now.
         let ct = self
@@ -593,9 +600,11 @@ impl VisitService {
         }
         // Dryrun: no operator and no lock-time مندوب cut yet. The cut is 0; the
         // snapshot surfaces the مندوب name (if any) for the form, and the actual
-        // 500/1000 cut lands only at lock.
+        // 500/1000 cut lands only at lock. No collected-cash override either --
+        // a draft has no collected amount yet, so the preview shows the full
+        // editable price.
         let bundle = self
-            .resolve_bundle(visit, &visit_operator_id_placeholder(), 0, settings)
+            .resolve_bundle(visit, &visit_operator_id_placeholder(), 0, None, settings)
             .await?;
         Ok(ResolvedSnapshots {
             snapshots: bundle.0,
@@ -607,6 +616,7 @@ impl VisitService {
         visit: Visit,
         operator_id: &Option<Uuid>,
         mandoub_cut_iqd: i64,
+        amount_paid_override_iqd: Option<i64>,
         settings: MoneySettings,
     ) -> AppResult<(VisitSnapshots, LockBundle)> {
         let patient = self
@@ -711,11 +721,11 @@ impl VisitService {
             discount: visit.discount,
             mandoub_cut_iqd: effective_mandoub_cut,
             mandoub_name,
-            // Price/paid override threading is a later task; the engine defaults
-            // to the catalog price and full payment when these are None, so the
-            // service keeps its current behaviour until that task wires them.
-            price_override_iqd: None,
-            amount_paid_override_iqd: None,
+            // The engine defaults to the catalog price and full payment when
+            // these are None; the caller decides what "collected" means for
+            // its context (dry-run preview vs. an actual lock).
+            price_override_iqd: visit.price_override_iqd,
+            amount_paid_override_iqd,
             settings,
         })?;
         Ok((
@@ -804,14 +814,19 @@ impl VisitService {
             }
             0
         };
-        // Resolve snapshots + bundle (catalog references).
-        let (mut snap, bundle) = self
-            .resolve_bundle(current.clone(), &Some(operator_id), mandoub_cut, settings)
+        // Resolve snapshots + bundle (catalog references). The money engine
+        // itself computes cut_base off the collected amount (§ cuts-paid-basis)
+        // and sets amount_paid_override_iqd on the returned snapshot -- no
+        // after-the-fact overlay needed.
+        let (snap, bundle) = self
+            .resolve_bundle(
+                current.clone(),
+                &Some(operator_id),
+                mandoub_cut,
+                amount_paid_override_iqd,
+                settings,
+            )
             .await?;
-        // Overlay the collected-cash override onto the billed snapshot. This is
-        // deliberately applied AFTER the money engine: it never touches price,
-        // total, or the doctor/operator cut -- only what was actually collected.
-        snap.amount_paid_override_iqd = amount_paid_override_iqd;
 
         let locked_at = Utc::now();
         let entity_id = current.entity_id.clone();

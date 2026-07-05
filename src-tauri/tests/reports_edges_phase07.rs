@@ -338,6 +338,7 @@ async fn lock_visit(r: &Rig, dye: bool, doctor: Option<Uuid>) -> Uuid {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -431,6 +432,7 @@ async fn s6_2_mixed_direction_patient_names_round_trip_via_visits_report() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await

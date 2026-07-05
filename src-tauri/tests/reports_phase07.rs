@@ -341,6 +341,7 @@ async fn lock_visit(f: &Fixture, dye: bool, doctor: Option<Uuid>) -> Uuid {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -380,6 +381,7 @@ async fn lock_visit_with_override(f: &Fixture, paid: i64) -> Uuid {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -420,6 +422,7 @@ async fn lock_report_visit(f: &Fixture) -> Uuid {
                 report: true,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -522,6 +525,7 @@ async fn lock_mandoub_visit(f: &Fixture, mandoub_id: Uuid, cut: i64) -> Uuid {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
@@ -638,21 +642,23 @@ async fn dashboard_kpis_aggregate_locked_visits() {
         .dashboard_kpis(ENTITY_ID, range, false)
         .await
         .unwrap();
-    // Doctor visit: price 50000 + dye 2000 = 52000; doctor cut = 15000 (30%);
-    // operator cut = 4000.
-    // House visit: price 50000 + 0 = 50000; internal_pct = 40 of 50000 =
-    // 20000 doctor cut; operator cut = 4000.
-    // Totals: revenue = 52000 + 50000 = 102000; doctor cuts = 35000;
-    // operator cuts = 8000.
+    // Paid-basis cut (cuts-paid-basis): no collected override on either visit,
+    // so collected = price and cut_base = collected - dye (dye covered first).
+    // Doctor visit: price 50000 + dye 2000 = 52000 billed; cut_base = 50000 -
+    // 2000 = 48000; doctor cut = 48000 * 30% = 14400; operator cut = 4000.
+    // House visit: price 50000 + 0 dye = 50000 billed; cut_base = 50000;
+    // internal_pct = 40 of 50000 = 20000 doctor cut; operator cut = 4000.
+    // Totals: revenue = 52000 + 50000 = 102000; doctor cuts = 14400 + 20000 =
+    // 34400; operator cuts = 8000.
     assert_eq!(kpis.revenue_iqd, 102_000);
-    assert_eq!(kpis.doctor_cuts_iqd, 35_000);
+    assert_eq!(kpis.doctor_cuts_iqd, 34_400);
     assert_eq!(kpis.operator_cuts_iqd, 8_000);
     // No report, no مندوب on these two visits -> both carve-outs surface as 0.
     assert_eq!(kpis.report_cuts_iqd, 0);
     assert_eq!(kpis.mandoub_cuts_iqd, 0);
     // Inventory consumption: 1 unit per visit x 2 visits = 2 IQD-equivalent.
     assert_eq!(kpis.inventory_consumption_value_iqd, 2);
-    assert_eq!(kpis.net_iqd, 102_000 - 35_000 - 8_000 - 2);
+    assert_eq!(kpis.net_iqd, 102_000 - 34_400 - 8_000 - 2);
 }
 
 #[tokio::test]
@@ -835,12 +841,14 @@ async fn daily_close_tracks_collected_discount_and_collected_net() {
     assert_eq!(close.total_revenue_iqd, 50_000);
     assert_eq!(close.total_collected_iqd, 30_000);
     assert_eq!(close.total_discount_iqd, 20_000);
-    // House mode: doctor cut = 40% of the BILLED price (override does not move
-    // it), operator cut = 4_000, inventory = 1 unit consumed.
-    assert_eq!(close.total_doctor_cuts_iqd, 20_000);
+    // Paid-basis cut (cuts-paid-basis): no dye, so cut_base = collected =
+    // 30_000. House mode: doctor cut = 40% of 30_000 = 12_000 (NOT 40% of the
+    // billed 50_000). Operator cut is a flat per-check amount and is
+    // unaffected by the collected override: 4_000. Inventory = 1 unit consumed.
+    assert_eq!(close.total_doctor_cuts_iqd, 12_000);
     assert_eq!(close.total_operator_cuts_iqd, 4_000);
-    // Net is on the COLLECTED basis: 30_000 - 20_000 - 4_000 - inventory.
-    let expected_net = 30_000 - 20_000 - 4_000 - close.total_inventory_consumption_value_iqd;
+    // Net is on the COLLECTED basis: 30_000 - doctor_cut(12_000) - operator_cut(4_000) - inventory.
+    let expected_net = 30_000 - 12_000 - 4_000 - close.total_inventory_consumption_value_iqd;
     assert_eq!(close.net_iqd, expected_net);
 }
 
@@ -1739,6 +1747,7 @@ async fn freezing_blocks_further_locks_until_reopened() {
                 report: false,
                 dalal: false,
                 discount: false,
+                price_override_iqd: None,
             },
         )
         .await
