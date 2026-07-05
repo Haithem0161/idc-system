@@ -1,0 +1,22 @@
+-- Phase 13: receptionist-editable per-visit price.
+--
+-- Catalog / subtype prices turned out not to be fixed. The receptionist may now
+-- set the actual price for a visit at draft time. `price_override_iqd` holds that
+-- chosen price; NULL means "use the catalog/subtype default" (the historical
+-- behaviour). At lock the effective price is snapshotted into the existing
+-- `price_snapshot_iqd` exactly as before, so the locked-state CHECK
+-- (total = price + dye) is unchanged.
+--
+-- This value also becomes an INPUT to the money engine: the doctor-side cuts now
+-- scale off what the patient paid, and the editable price is what "paid" defaults
+-- to (see the money_math change in the same feature). The column is legal in
+-- every status (draft/locked/voided), so no locked-CHECK clause references it and
+-- a plain additive ADD COLUMN suffices -- no table rebuild.
+--
+-- Forward-only, idempotent: nullable add, no backfill. Existing rows get NULL
+-- (= catalog default), the correct historical value.
+--
+-- Conflict policy: unchanged. `visits` stays manual/version-based; the editable
+-- price rides inside the same versioned visit row alongside dye/report/dalal/
+-- discount.
+ALTER TABLE visits ADD COLUMN price_override_iqd INTEGER NULL;

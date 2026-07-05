@@ -100,6 +100,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "022_visits_discount.sql",
         include_str!("../../migrations/022_visits_discount.sql"),
     ),
+    (
+        "023_visit_price_override.sql",
+        include_str!("../../migrations/023_visit_price_override.sql"),
+    ),
 ];
 
 /// The local sync schema version: the count of embedded migrations. Sent to the
