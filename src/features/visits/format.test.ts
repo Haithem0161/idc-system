@@ -63,6 +63,50 @@ describe("computeRunningTotal", () => {
     )
   })
 
+  it("house dye visit: cuts run on price (collected price+dye, dye subtracted)", () => {
+    // collected defaults to price + dye = 50_000 + 2_000 = 52_000.
+    // cutBase = 52_000 - 2_000 = 50_000. Doctor 40% = 20_000.
+    const snap = computeRunningTotal({ ...baseInputs, dye: true })
+    expect(snap.dye_cost_iqd).toBe(2_000)
+    expect(snap.doctor_cut_iqd).toBe(20_000)
+    expect(snap.patient_total_iqd).toBe(52_000)
+  })
+
+  it("underpayment: dye taken first, cuts scale off the remaining service", () => {
+    // price 50_000, dye 2_000, patient pays 30_000 total.
+    // cutBase = max(0, 30_000 - 2_000) = 28_000. Doctor 40% = 11_200.
+    const snap = computeRunningTotal({
+      ...baseInputs,
+      dye: true,
+      amount_paid_override_iqd: 30_000,
+    })
+    expect(snap.doctor_cut_iqd).toBe(11_200)
+  })
+
+  it("underpayment below the dye price zeroes every cut", () => {
+    // pays 1_500 < dye 2_000 -> cutBase = 0 -> all cuts zero.
+    const snap = computeRunningTotal({
+      ...baseInputs,
+      dye: true,
+      amount_paid_override_iqd: 1_500,
+    })
+    expect(snap.doctor_cut_iqd).toBe(0)
+    expect(snap.operator_cut_iqd).toBe(0)
+    expect(snap.report_amount_iqd).toBe(0)
+  })
+
+  it("report floors at zero when a fixed doctor cut exceeds the cut base", () => {
+    // Fixed cut 60_000 > cutBase 50_000. Report base = max(0, 50_000 - 60_000)
+    // = 0, so report is 0 (never negative). Mirrors the Rust engine.
+    const snap = computeRunningTotal({
+      ...baseInputs,
+      report: true,
+      doctor_pricing: { cut_kind: "fixed", cut_value: 60_000 },
+    })
+    expect(snap.doctor_cut_iqd).toBe(60_000)
+    expect(snap.report_amount_iqd).toBe(0)
+  })
+
   it("throws when dye is requested but no dye price is resolved", () => {
     expect(() =>
       computeRunningTotal({

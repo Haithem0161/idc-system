@@ -56,8 +56,9 @@ pub struct MoneyMathInputs<'a> {
     /// Becomes the snapshot `price_iqd` and the default "collected" basis.
     pub price_override_iqd: Option<i64>,
     /// Cash actually collected. `Some(c)` (incl. 0) is the collected amount;
-    /// `None` means the patient paid the full price. The doctor-side cuts scale
-    /// off `max(0, collected - dye)`.
+    /// `None` means the patient paid the full patient total (price + dye). The
+    /// doctor-side cuts scale off `max(0, collected - dye)`, i.e. the collected
+    /// service revenue after the dye is secured off the top.
     pub amount_paid_override_iqd: Option<i64>,
     pub settings: MoneySettings,
 }
@@ -117,14 +118,19 @@ pub fn compute(inputs: &MoneyMathInputs<'_>) -> AppResult<VisitSnapshots> {
         0
     };
 
-    // Collected cash defaults to the (editable) price when no override is set.
-    let collected = inputs.amount_paid_override_iqd.unwrap_or(price_iqd);
+    // Collected cash defaults to the full patient total (price + dye) when no
+    // override is set. Dye is profit secured off the top, so subtracting it
+    // below leaves the full service price as the cut base.
+    let collected = inputs
+        .amount_paid_override_iqd
+        .unwrap_or(price_iqd + dye_cost);
     if collected < 0 {
         return Err(AppError::Validation(
             "amount_paid_override_iqd must be >= 0".into(),
         ));
     }
-    // Cut base: collected minus dye (dye is a material cost, covered first).
+    // Cut base: collected minus dye. Dye is profit secured off the top; what
+    // remains is the collected service revenue every cut is measured against.
     // When this hits 0, EVERY cut zeroes -- fixed and scaled alike.
     let base = cut_base(price_iqd, collected, dye_cost);
 
@@ -254,10 +260,11 @@ fn effective_price(base: i64, pricing: Option<&DoctorCheckPricing>) -> i64 {
     }
 }
 
-/// The base every cut is measured against: collected cash net of dye, floored
-/// at zero. When it is zero, no cut (fixed or scaled) is paid. `price_iqd` is
-/// accepted for signature symmetry with the design spec but is not needed for
-/// the computation (the base is purely collected - dye).
+/// The base every cut is measured against: collected cash net of the dye that
+/// is secured off the top, floored at zero. When it is zero, no cut (fixed or
+/// scaled) is paid. `price_iqd` is accepted for signature symmetry with the
+/// design spec but is not needed for the computation (the base is purely
+/// collected - dye).
 fn cut_base(_price_iqd: i64, collected: i64, dye_cost: i64) -> i64 {
     (collected - dye_cost).max(0)
 }
@@ -518,9 +525,10 @@ mod tests {
         assert_eq!(snap.report_amount_iqd, 0);
         assert_eq!(snap.report_pct, None);
         assert_eq!(snap.reporting_doctor_name, None);
-        // Paid basis: dye now reduces the cut base, so cut_base = 50000 - 2000
-        // = 48000 and doctor_cut = 48000*40/100 = 19200 (was 20000 off price).
-        assert_eq!(snap.doctor_cut_iqd, 19_200);
+        // Dye is profit off the top: collected defaults to price + dye
+        // (50000 + 2000 = 52000), so cut_base = 52000 - 2000 = 50000 and
+        // doctor_cut = 50000 * 40 / 100 = 20000 (the full off-service value).
+        assert_eq!(snap.doctor_cut_iqd, 20_000);
         assert_eq!(snap.internal_pct, Some(40));
         assert_eq!(snap.operator_cut_iqd, 5_000);
         // Patient total = price + dye only.
@@ -645,14 +653,15 @@ mod tests {
     }
 
     #[test]
-    fn report_base_uses_cut_base_which_dye_reduces() {
-        // Paid basis: dye now comes out of the collected cash first, so it
-        // reduces the cut base and therefore the report base too.
-        //   with dye:    cut_base = 50000-2000 = 48000; doctor_cut = 19200;
-        //                report = 20% * (48000-19200) = 20% * 28800 = 5760.
-        //   without dye: cut_base = 50000; doctor_cut = 20000;
+    fn report_base_is_unaffected_by_dye_since_dye_is_off_the_top() {
+        // Dye is profit off the top: collected defaults to price + dye, so
+        // subtracting dye leaves the full service price as the cut base. The
+        // report base is therefore identical with or without dye.
+        //   with dye:    collected = 52000; cut_base = 52000 - 2000 = 50000;
+        //                doctor_cut = 20000; report = 20% * (50000-20000) = 6000.
+        //   without dye: collected = 50000; cut_base = 50000; doctor_cut = 20000;
         //                report = 20% * (50000-20000) = 6000.
-        // The two DIVERGE (the legacy invariant that they matched is gone).
+        // The two now MATCH (dye stopped reducing the base).
         let ct = ct(false, Some(50_000));
         let op = operator();
         let with_dye = compute(&MoneyMathInputs {
@@ -691,9 +700,46 @@ mod tests {
             settings: settings(),
         })
         .unwrap();
-        assert_eq!(with_dye.report_amount_iqd, 5_760);
+        assert_eq!(with_dye.report_amount_iqd, 6_000);
         assert_eq!(without_dye.report_amount_iqd, 6_000);
-        assert_ne!(with_dye.report_amount_iqd, without_dye.report_amount_iqd);
+        assert_eq!(with_dye.report_amount_iqd, without_dye.report_amount_iqd);
+    }
+
+    #[test]
+    fn dye_visit_cuts_run_on_full_service_price_not_price_minus_dye() {
+        // Reproduces the reported bug: price 100k, dye 60k, external doctor 25%.
+        // Before the fix: collected defaulted to price (100k), cut_base =
+        // 100000 - 60000 = 40000, doctor_cut = 40000 * 25% = 10000 (WRONG).
+        // After: collected defaults to price + dye = 160000, cut_base =
+        // 160000 - 60000 = 100000, doctor_cut = 100000 * 25% = 25000 (RIGHT).
+        let ct = ct_dye(false, Some(100_000), Some(60_000));
+        let op = operator();
+        let doc = doctor();
+        let pr = pricing(doc.id, ct.id, CutKind::Pct, 25, None);
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: Some(&doc),
+            doctor_pricing: Some(&pr),
+            operator: &op,
+            patient_name: "p",
+            dye: true,
+            report: true,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.dye_cost_iqd, 60_000);
+        assert_eq!(snap.total_amount_iqd, 160_000);
+        // cut_base = 100000, doctor 25% = 25000.
+        assert_eq!(snap.doctor_cut_iqd, 25_000);
+        // report_pct from settings() is 20%: 20% * (100000 - 25000) = 15000.
+        assert_eq!(snap.report_amount_iqd, 15_000);
     }
 
     #[test]
