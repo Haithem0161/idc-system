@@ -19,6 +19,7 @@ use app_lib::domains::auth::domain::entities::User;
 use app_lib::domains::auth::domain::repositories::UserRepo;
 use app_lib::domains::auth::domain::value_objects::UserRole;
 use app_lib::domains::auth::infrastructure::SqliteUserRepo;
+use app_lib::domains::catalog::domain::entities::check_subtype::CheckSubtypeNewInput;
 use app_lib::domains::catalog::domain::entities::check_type::CheckTypeNewInput;
 use app_lib::domains::catalog::domain::entities::doctor::DoctorNewInput;
 use app_lib::domains::catalog::domain::entities::doctor_pricing::DoctorPricingNewInput;
@@ -59,7 +60,9 @@ use app_lib::domains::visits::domain::entities::{
 use app_lib::domains::visits::domain::repositories::{InventoryAdjustmentRepo, VisitRepo};
 use app_lib::domains::visits::domain::services::MoneySettings;
 use app_lib::domains::visits::infrastructure::{SqliteInventoryAdjustmentRepo, SqliteVisitRepo};
-use app_lib::domains::visits::service::{CreateDraftInput, VisitService, VisitServiceConfig};
+use app_lib::domains::visits::service::{
+    CreateDraftInput, UpdateDraftInput, VisitService, VisitServiceConfig,
+};
 use chrono::Datelike;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
@@ -153,7 +156,7 @@ async fn seed() -> Fixture {
         name_en: Some("Test".into()),
         has_subtypes: false,
         base_price_iqd: Some(50_000),
-        dye_supported: true,
+        dye_price_iqd: Some(10_000),
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
@@ -305,7 +308,6 @@ async fn seed() -> Fixture {
 
 fn settings() -> MoneySettings {
     MoneySettings {
-        dye_cost_iqd: 2_000,
         report_pct: 20,
         reporting_doctor_name: String::new(),
         internal_doctor_pct: 40,
@@ -1184,12 +1186,14 @@ async fn create_draft_rejects_subtype_when_check_type_lacks_subtypes() {
 #[tokio::test]
 async fn create_draft_rejects_unsupported_dye() {
     let f = seed().await;
-    // Mark the seed check type as dye_supported=0 via raw SQL.
-    sqlx::query("UPDATE check_types SET dye_supported = 0 WHERE id = ?")
-        .bind(f.check_type.id.to_string())
-        .execute(&f.pool)
-        .await
-        .unwrap();
+    // Clear the seed check type's resolved dye price so `dye = true` has
+    // nothing to resolve against.
+    let ct_repo: Arc<dyn CheckTypeRepo> = Arc::new(SqliteCheckTypeRepo::new(f.pool.clone()));
+    let mut no_dye = f.check_type.clone();
+    no_dye.dye_price_iqd = None;
+    let mut tx = f.pool.begin().await.unwrap();
+    ct_repo.upsert(&mut tx, &no_dye).await.unwrap();
+    tx.commit().await.unwrap();
     let err = f
         .visit_service
         .create_draft(
@@ -1211,6 +1215,147 @@ async fn create_draft_rejects_unsupported_dye() {
         )
         .await;
     assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn create_draft_accepts_dye_when_check_type_has_dye_price() {
+    let f = seed().await;
+    // Seed check type already has dye_price_iqd = Some(10_000) (see `seed()`).
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: None,
+                mandoub_id: None,
+                dye: true,
+                report: false,
+                dalal: false,
+                discount: false,
+                price_override_iqd: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(draft.dye);
+}
+
+#[tokio::test]
+async fn create_draft_rejects_dye_when_only_subtype_has_no_dye_price() {
+    let f = seed().await;
+    // A subtyped check type whose own dye_price_iqd is None (subtypes carry
+    // dye pricing individually) and a subtype that also has no dye price.
+    let ct_repo: Arc<dyn CheckTypeRepo> = Arc::new(SqliteCheckTypeRepo::new(f.pool.clone()));
+    let cs_repo: Arc<dyn CheckSubtypeRepo> = Arc::new(SqliteCheckSubtypeRepo::new(f.pool.clone()));
+    let subtyped_ct = CheckType::try_new(CheckTypeNewInput {
+        name_ar: "اختبار فرعي".into(),
+        name_en: Some("Subtyped".into()),
+        has_subtypes: true,
+        base_price_iqd: None,
+        dye_price_iqd: None,
+        sort_order: 1,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    })
+    .unwrap();
+    let subtype = CheckSubtype::try_new(CheckSubtypeNewInput {
+        check_type_id: subtyped_ct.id,
+        name_ar: "فرعي أ".into(),
+        name_en: None,
+        price_iqd: 30_000,
+        dye_price_iqd: None,
+        sort_order: 0,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    })
+    .unwrap();
+    let mut tx = f.pool.begin().await.unwrap();
+    ct_repo.upsert(&mut tx, &subtyped_ct).await.unwrap();
+    cs_repo.upsert(&mut tx, &subtype).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let err = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: subtyped_ct.id,
+                check_subtype_id: Some(subtype.id),
+                doctor_id: None,
+                mandoub_id: None,
+                dye: true,
+                report: false,
+                dalal: false,
+                discount: false,
+                price_override_iqd: None,
+            },
+        )
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn create_draft_accepts_dye_when_subtype_has_dye_price() {
+    let f = seed().await;
+    let ct_repo: Arc<dyn CheckTypeRepo> = Arc::new(SqliteCheckTypeRepo::new(f.pool.clone()));
+    let cs_repo: Arc<dyn CheckSubtypeRepo> = Arc::new(SqliteCheckSubtypeRepo::new(f.pool.clone()));
+    let subtyped_ct = CheckType::try_new(CheckTypeNewInput {
+        name_ar: "اختبار فرعي٢".into(),
+        name_en: Some("Subtyped2".into()),
+        has_subtypes: true,
+        base_price_iqd: None,
+        dye_price_iqd: None,
+        sort_order: 2,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    })
+    .unwrap();
+    let subtype = CheckSubtype::try_new(CheckSubtypeNewInput {
+        check_type_id: subtyped_ct.id,
+        name_ar: "فرعي ب".into(),
+        name_en: None,
+        price_iqd: 40_000,
+        dye_price_iqd: Some(5_000),
+        sort_order: 0,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    })
+    .unwrap();
+    let mut tx = f.pool.begin().await.unwrap();
+    ct_repo.upsert(&mut tx, &subtyped_ct).await.unwrap();
+    cs_repo.upsert(&mut tx, &subtype).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: subtyped_ct.id,
+                check_subtype_id: Some(subtype.id),
+                doctor_id: None,
+                mandoub_id: None,
+                dye: true,
+                report: false,
+                dalal: false,
+                discount: false,
+                price_override_iqd: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(draft.dye);
 }
 
 #[tokio::test]
@@ -1578,4 +1723,197 @@ async fn price_override_round_trips_through_repo() {
         .unwrap()
         .unwrap();
     assert_eq!(loaded_none.price_override_iqd, None);
+}
+
+#[tokio::test]
+async fn update_draft_rejects_dye_when_check_type_has_no_dye_price() {
+    let f = seed().await;
+    // Draft created without dye on the seed check type (which has a dye
+    // price), then the catalog is edited to remove the dye price, then the
+    // draft is patched to turn dye on -- update_draft must re-validate
+    // against the current catalog state, not just accept the flip.
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: None,
+                mandoub_id: None,
+                dye: false,
+                report: false,
+                dalal: false,
+                discount: false,
+                price_override_iqd: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let ct_repo: Arc<dyn CheckTypeRepo> = Arc::new(SqliteCheckTypeRepo::new(f.pool.clone()));
+    let mut no_dye = f.check_type.clone();
+    no_dye.dye_price_iqd = None;
+    let mut tx = f.pool.begin().await.unwrap();
+    ct_repo.upsert(&mut tx, &no_dye).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let err = f
+        .visit_service
+        .update_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            UpdateDraftInput {
+                visit_id: draft.id,
+                dye: Some(true),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn update_draft_accepts_dye_when_check_type_has_dye_price() {
+    let f = seed().await;
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: None,
+                mandoub_id: None,
+                dye: false,
+                report: false,
+                dalal: false,
+                discount: false,
+                price_override_iqd: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let updated = f
+        .visit_service
+        .update_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            UpdateDraftInput {
+                visit_id: draft.id,
+                dye: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(updated.dye);
+}
+
+#[tokio::test]
+async fn checks_grid_reports_dye_available_from_subtype_when_check_type_has_none() {
+    let f = seed().await;
+    let ct_repo: Arc<dyn CheckTypeRepo> = Arc::new(SqliteCheckTypeRepo::new(f.pool.clone()));
+    let cs_repo: Arc<dyn CheckSubtypeRepo> = Arc::new(SqliteCheckSubtypeRepo::new(f.pool.clone()));
+    let subtyped_ct = CheckType::try_new(CheckTypeNewInput {
+        name_ar: "شبكة اختبار".into(),
+        name_en: Some("GridSubtyped".into()),
+        has_subtypes: true,
+        base_price_iqd: None,
+        dye_price_iqd: None,
+        sort_order: 3,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    })
+    .unwrap();
+    let subtype = CheckSubtype::try_new(CheckSubtypeNewInput {
+        check_type_id: subtyped_ct.id,
+        name_ar: "فرعي ج".into(),
+        name_en: None,
+        price_iqd: 20_000,
+        dye_price_iqd: Some(3_000),
+        sort_order: 0,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: Some(DEVICE_ID.into()),
+    })
+    .unwrap();
+    let mut tx = f.pool.begin().await.unwrap();
+    ct_repo.upsert(&mut tx, &subtyped_ct).await.unwrap();
+    cs_repo.upsert(&mut tx, &subtype).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let grid = f.visit_service.checks_grid(ENTITY_ID).await.unwrap();
+    let card = grid
+        .iter()
+        .find(|c| c.check_type_id == subtyped_ct.id)
+        .unwrap();
+    assert!(card.dye_available);
+}
+
+#[tokio::test]
+async fn locked_visit_dye_cost_snapshot_is_immune_to_later_catalog_dye_price_changes() {
+    let f = seed().await;
+    let draft = f
+        .visit_service
+        .create_draft(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            ENTITY_ID,
+            CreateDraftInput {
+                patient_id: f.patient.id,
+                check_type_id: f.check_type.id,
+                check_subtype_id: None,
+                doctor_id: Some(f.doctor.id),
+                mandoub_id: None,
+                dye: true,
+                report: false,
+                dalal: false,
+                discount: false,
+                price_override_iqd: None,
+            },
+        )
+        .await
+        .unwrap();
+    f.visit_service
+        .lock(
+            f.receptionist.id,
+            UserRole::Receptionist,
+            draft.id,
+            f.operator.id,
+            None,
+            None,
+            settings(),
+            ReceiptRenderOptions::default(),
+        )
+        .await
+        .unwrap();
+    let locked = f.visit_service.get(draft.id).await.unwrap();
+    let snap_before = locked.snapshots.as_ref().unwrap().dye_cost_iqd;
+    assert_eq!(
+        snap_before, 10_000,
+        "seed check type carries dye_price_iqd = Some(10_000)"
+    );
+
+    // Mutate the catalog's dye price AFTER the lock froze the snapshot.
+    let ct_repo: Arc<dyn CheckTypeRepo> = Arc::new(SqliteCheckTypeRepo::new(f.pool.clone()));
+    let mut changed = f.check_type.clone();
+    changed.dye_price_iqd = Some(999_999);
+    let mut tx = f.pool.begin().await.unwrap();
+    ct_repo.upsert(&mut tx, &changed).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let reread = f.visit_service.get(draft.id).await.unwrap();
+    let snap_after = reread.snapshots.as_ref().unwrap().dye_cost_iqd;
+    assert_eq!(
+        snap_after, snap_before,
+        "the locked visit's dye_cost_snapshot must not change when the catalog's \
+         dye price changes later -- the snapshot froze the resolved amount at lock time"
+    );
 }
