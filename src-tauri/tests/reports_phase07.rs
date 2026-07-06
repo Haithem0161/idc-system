@@ -641,23 +641,24 @@ async fn dashboard_kpis_aggregate_locked_visits() {
         .dashboard_kpis(ENTITY_ID, range, false)
         .await
         .unwrap();
-    // Paid-basis cut (cuts-paid-basis): no collected override on either visit,
-    // so collected = price and cut_base = collected - dye (dye covered first).
-    // Doctor visit: price 50000 + dye 2000 = 52000 billed; cut_base = 50000 -
-    // 2000 = 48000; doctor cut = 48000 * 30% = 14400; operator cut = 4000.
+    // Dye is profit off the top: no collected override on either visit, so
+    // collected defaults to the full patient total (price + dye) and cut_base =
+    // collected - dye = price.
+    // Doctor visit: price 50000 + dye 2000 = 52000 billed; cut_base = 50000;
+    // doctor cut = 50000 * 30% = 15000; operator cut = 4000.
     // House visit: price 50000 + 0 dye = 50000 billed; cut_base = 50000;
     // internal_pct = 40 of 50000 = 20000 doctor cut; operator cut = 4000.
-    // Totals: revenue = 52000 + 50000 = 102000; doctor cuts = 14400 + 20000 =
-    // 34400; operator cuts = 8000.
+    // Totals: revenue = 52000 + 50000 = 102000; doctor cuts = 15000 + 20000 =
+    // 35000; operator cuts = 8000.
     assert_eq!(kpis.revenue_iqd, 102_000);
-    assert_eq!(kpis.doctor_cuts_iqd, 34_400);
+    assert_eq!(kpis.doctor_cuts_iqd, 35_000);
     assert_eq!(kpis.operator_cuts_iqd, 8_000);
     // No report, no مندوب on these two visits -> both carve-outs surface as 0.
     assert_eq!(kpis.report_cuts_iqd, 0);
     assert_eq!(kpis.mandoub_cuts_iqd, 0);
     // Inventory consumption: 1 unit per visit x 2 visits = 2 IQD-equivalent.
     assert_eq!(kpis.inventory_consumption_value_iqd, 2);
-    assert_eq!(kpis.net_iqd, 102_000 - 34_400 - 8_000 - 2);
+    assert_eq!(kpis.net_iqd, 102_000 - 35_000 - 8_000 - 2);
 }
 
 /// The dashboard net MUST reconcile with the daily-close net: both are on the
