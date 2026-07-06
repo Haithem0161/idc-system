@@ -205,6 +205,13 @@ export class PrismaEntityStore implements SyncEntityStore {
     }
   }
 
+  async anyLiveSubtypeHasDyePrice (checkTypeId: string): Promise<boolean> {
+    const count = await this.prisma.checkSubtype.count({
+      where: { checkTypeId, deletedAt: null, dyePriceIqd: { not: null } },
+    })
+    return count > 0
+  }
+
   async upsertCheckSubtype (row: CheckSubtypeSyncRecord): Promise<{ applied: boolean }> {
     return this.lwwUpsert<CheckSubtypeSyncRecord>(
       row,

@@ -400,6 +400,12 @@ export class MemorySyncStore implements
     return this.checkTypes.get(id) ?? null
   }
 
+  async anyLiveSubtypeHasDyePrice (checkTypeId: string): Promise<boolean> {
+    return [...this.checkSubtypes.values()].some(
+      (s) => s.check_type_id === checkTypeId && (s.deleted_at ?? null) == null && s.dye_price_iqd != null
+    )
+  }
+
   async listAllVisits (tenantId: string): Promise<VisitSyncRecord[]> {
     return [...this.visits.values()].filter(
       (v) => v.entity_id === tenantId && (v.deleted_at ?? null) == null
