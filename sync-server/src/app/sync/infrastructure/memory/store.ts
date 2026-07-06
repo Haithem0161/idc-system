@@ -49,7 +49,7 @@ export interface CheckTypeSyncRecord {
   name_en: string | null
   has_subtypes: boolean
   base_price_iqd: number | null
-  dye_supported: boolean
+  dye_price_iqd: number | null
   sort_order: number
   is_active: boolean
   entity_id: string
@@ -65,6 +65,7 @@ export interface CheckSubtypeSyncRecord {
   name_ar: string
   name_en: string | null
   price_iqd: number
+  dye_price_iqd: number | null
   sort_order: number
   entity_id: string
   version: number
