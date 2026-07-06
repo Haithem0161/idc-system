@@ -186,7 +186,7 @@ async fn seed_operator_with_specialty(
         name_en: Some("EKG".into()),
         has_subtypes: false,
         base_price_iqd: Some(25_000),
-        dye_supported: false,
+        dye_price_iqd: None,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
