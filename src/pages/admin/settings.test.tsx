@@ -46,7 +46,6 @@ const SETTINGS: SettingRecord[] = [
   row("clinic_display_name_ar", { valueType: "text", value: "Clinic-AR" }),
   row("clinic_display_name_en", { valueType: "text", value: "Clinic" }),
   row("currency_symbol", { valueType: "text", value: "د.ع" }),
-  row("dye_cost_iqd", { valueType: "int", value: 10000 }),
   row("report_pct", { valueType: "int", value: 20 }),
   row("reporting_doctor_name", { valueType: "text", value: "" }),
   row("internal_doctor_pct", { valueType: "int", value: 30 }),
@@ -117,11 +116,13 @@ describe.each(directions)("Settings page (dir=%s)", (dir) => {
     renderPage()
     await screen.findByRole("heading", { level: 1 })
 
-    // idle_lock_minutes is the only int in the Security group -> find by spinbutton.
-    const spin = screen.getAllByRole("spinbutton")
-    // Edit the first numeric field (a cost) to a new valid value.
-    await user.clear(spin[0])
-    await user.type(spin[0], "12345")
+    // idle_lock_minutes is the only unbounded int (no max) -> find by spinbutton.
+    const spin = screen
+      .getAllByRole("spinbutton")
+      .find((el) => el.getAttribute("max") === null)
+    expect(spin).toBeDefined()
+    await user.clear(spin!)
+    await user.type(spin!, "45")
 
     const saveBtn = await screen.findByRole("button", {
       name: i18n.t("admin.settings.save_changes"),

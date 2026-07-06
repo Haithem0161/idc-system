@@ -6,8 +6,9 @@
 //   (b) With an active tab, the form renders bound to the tab's form
 //       state. The check-type subtitle uses the localised name.
 //   (c) Dye + Report are rendered as `role="switch"` pill buttons
-//       (FeatureToggle). Dye respects dye_supported (rendered with
-//       aria-disabled); report applies to every check type.
+//       (FeatureToggle). Dye respects the resolved dye price (rendered
+//       with aria-disabled when unavailable); report applies to every
+//       check type.
 //   (d) Pressing the Dye toggle flips the tab form state.
 //   (e) The `Finish` button is disabled until a patient is entered
 //       (and a subtype, when the check has subtypes).
@@ -20,9 +21,9 @@
 //     test starts clean.
 //   - IPC is mocked at `@/lib/ipc`. We dispatch via a per-command
 //     handler so the same mock can answer multiple commands
-//     (visits_checks_grid, patients_search, patients_create,
-//     visits_create_draft, visits_qualified_operators, visits_lock,
-//     doctors_list, check_subtypes_list).
+//     (visits_checks_grid, check_types_get, patients_search,
+//     patients_create, visits_create_draft, visits_qualified_operators,
+//     visits_lock, doctors_list, check_subtypes_list).
 //   - The page uses `useDebouncedCallback(500ms)` for auto-save. We
 //     install fake timers and `advanceTimersByTime(600)` to fire it.
 
@@ -79,6 +80,7 @@ const ENTITY_ID = "tenant"
 
 interface InvokeResponses {
   visits_checks_grid?: unknown
+  check_types_get?: unknown
   patients_search?: unknown
   patients_create?: unknown
   visits_create_draft?: unknown
@@ -120,10 +122,25 @@ function defaultResponses (
         name_ar: "AR_ECHO",
         name_en: "Echocardiogram",
         has_subtypes: false,
-        dye_supported: true,
+        dye_available: true,
         todays_visits: 0,
       },
     ],
+    check_types_get: {
+      id: CHECK_ID,
+      name_ar: "AR_ECHO",
+      name_en: "Echocardiogram",
+      has_subtypes: false,
+      base_price_iqd: 20000,
+      dye_price_iqd: 2000,
+      sort_order: 0,
+      is_active: true,
+      created_at: "2026-05-19T10:00:00.000Z",
+      updated_at: "2026-05-19T10:00:00.000Z",
+      deleted_at: null,
+      version: 1,
+      entity_id: ENTITY_ID,
+    },
     patients_search: [
       {
         id: PATIENT_ID,
@@ -231,10 +248,25 @@ describe("NewVisitTabbedPage", () => {
             name_ar: "AR_X",
             name_en: "X-Ray",
             has_subtypes: false,
-            dye_supported: false,
+            dye_available: false,
             todays_visits: 0,
           },
         ],
+        check_types_get: {
+          id: CHECK_ID,
+          name_ar: "AR_X",
+          name_en: "X-Ray",
+          has_subtypes: false,
+          base_price_iqd: 15000,
+          dye_price_iqd: null,
+          sort_order: 0,
+          is_active: true,
+          created_at: "2026-05-19T10:00:00.000Z",
+          updated_at: "2026-05-19T10:00:00.000Z",
+          deleted_at: null,
+          version: 1,
+          entity_id: ENTITY_ID,
+        },
       }),
     )
     useVisitTabsStore.getState().openTab(CHECK_ID)
@@ -477,7 +509,7 @@ describe("NewVisitTabbedPage", () => {
             name_ar: "AR_ECHO",
             name_en: "Echocardiogram",
             has_subtypes: false,
-            dye_supported: false,
+            dye_available: false,
             todays_visits: 0,
           },
         ],

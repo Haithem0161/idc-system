@@ -608,7 +608,7 @@ export interface CheckTypeRecord {
   name_en: string | null
   has_subtypes: boolean
   base_price_iqd: number | null
-  dye_supported: boolean
+  dye_price_iqd: number | null
   sort_order: number
   is_active: boolean
   created_at: string
@@ -623,7 +623,7 @@ export interface CheckTypeCreateArgs {
   name_en?: string | null
   has_subtypes: boolean
   base_price_iqd?: number | null
-  dye_supported?: boolean
+  dye_price_iqd?: number | null
   sort_order?: number
 }
 
@@ -632,7 +632,7 @@ export interface CheckTypeUpdateArgs {
   name_ar?: string
   name_en?: string | null
   base_price_iqd?: number | null
-  dye_supported?: boolean
+  dye_price_iqd?: number | null
   sort_order?: number
   is_active?: boolean
 }
@@ -643,6 +643,7 @@ export interface CheckSubtypeRecord {
   name_ar: string
   name_en: string | null
   price_iqd: number
+  dye_price_iqd: number | null
   sort_order: number
   created_at: string
   updated_at: string
@@ -655,6 +656,7 @@ export interface CheckSubtypeCreateArgs {
   name_ar: string
   name_en?: string | null
   price_iqd: number
+  dye_price_iqd?: number | null
   sort_order?: number
 }
 
@@ -663,6 +665,7 @@ export interface CheckSubtypeUpdateArgs {
   name_ar?: string
   name_en?: string | null
   price_iqd?: number
+  dye_price_iqd?: number | null
   sort_order?: number
 }
 
@@ -1000,7 +1003,7 @@ export interface ChecksGridCardRecord {
   name_ar: string
   name_en: string | null
   has_subtypes: boolean
-  dye_supported: boolean
+  dye_available: boolean
   todays_visits: number
 }
 

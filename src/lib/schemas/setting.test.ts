@@ -48,14 +48,14 @@ describe("SettingSchema", () => {
   it("parses a full setting row with discriminated value", () => {
     const out = SettingSchema.parse({
       id: "0190a000-0000-7000-8000-000000000000",
-      key: "dye_cost_iqd",
-      value: { valueType: "int", value: 10_000 },
+      key: "report_pct",
+      value: { valueType: "int", value: 20 },
       updated_at: "2026-05-14T10:00:00.000Z",
       version: 1,
       entity_id: "tenant-1",
     })
     expect(out.value.valueType).toBe("int")
-    expect(out.key).toBe("dye_cost_iqd")
+    expect(out.key).toBe("report_pct")
   })
 
   it("rejects when value tag mismatches the actual data type", () => {

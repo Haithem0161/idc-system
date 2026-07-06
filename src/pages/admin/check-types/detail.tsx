@@ -34,6 +34,7 @@ export default function CheckTypeDetailPage () {
   const [newSubName, setNewSubName] = useState("")
   const [newSubNameEn, setNewSubNameEn] = useState("")
   const [newSubPrice, setNewSubPrice] = useState<number>(0)
+  const [newSubDyePrice, setNewSubDyePrice] = useState<number | null>(null)
 
   if (!detail.data) {
     return (
@@ -49,13 +50,18 @@ export default function CheckTypeDetailPage () {
     e.preventDefault()
     setError(null)
     const form = new FormData(e.currentTarget)
+    const rawDyePrice = form.get("dye_price_iqd")
+    const dyePriceIqd =
+      rawDyePrice == null || String(rawDyePrice).trim() === ""
+        ? null
+        : Number(rawDyePrice)
     try {
       await update.mutateAsync({
         id: ct.id,
         name_ar: String(form.get("name_ar") ?? ""),
         name_en: (form.get("name_en") as string) || null,
         base_price_iqd: ct.has_subtypes ? null : Number(form.get("base_price_iqd") ?? 0),
-        dye_supported: form.get("dye_supported") === "on",
+        dye_price_iqd: ct.has_subtypes ? null : dyePriceIqd,
         sort_order: Number(form.get("sort_order") ?? 0),
         is_active: form.get("is_active") === "on",
       })
@@ -89,10 +95,12 @@ export default function CheckTypeDetailPage () {
         name_ar: newSubName,
         name_en: newSubNameEn || null,
         price_iqd: newSubPrice,
+        dye_price_iqd: newSubDyePrice,
       })
       setNewSubName("")
       setNewSubNameEn("")
       setNewSubPrice(0)
+      setNewSubDyePrice(null)
       setAddingSubtype(false)
     } catch (err) {
       setError((err as { message?: string }).message ?? "Failed")
@@ -140,10 +148,18 @@ export default function CheckTypeDetailPage () {
             <FieldLabel label={t("admin.check_types.sort_order", { defaultValue: "Sort order" })}>
               <input type="number" name="sort_order" defaultValue={ct.sort_order} className="input font-mono" />
             </FieldLabel>
-            <label className="inline-flex items-center gap-2 text-[12px] font-medium text-ink-2">
-              <input type="checkbox" name="dye_supported" defaultChecked={ct.dye_supported} className="h-4 w-4 accent-ink" />
-              <span>{t("admin.check_types.dye_supported", { defaultValue: "Supports dye" })}</span>
-            </label>
+            {!ct.has_subtypes ? (
+              <FieldLabel label={t("admin.check_types.dye_price", { defaultValue: "Dye price (IQD)" })}>
+                <input
+                  type="number"
+                  name="dye_price_iqd"
+                  defaultValue={ct.dye_price_iqd ?? ""}
+                  min={0}
+                  placeholder={t("admin.check_types.dye_price_placeholder", { defaultValue: "Not offered" }) ?? ""}
+                  className="input font-mono"
+                />
+              </FieldLabel>
+            ) : null}
             <label className="inline-flex items-center gap-2 text-[12px] font-medium text-ink-2">
               <input type="checkbox" name="is_active" defaultChecked={ct.is_active} className="h-4 w-4 accent-ink" />
               <span>{t("admin.is_active", { defaultValue: "Active" })}</span>
@@ -184,6 +200,16 @@ export default function CheckTypeDetailPage () {
                 <FieldLabel label={t("admin.check_types.subtype_price", { defaultValue: "Price (IQD)" })}>
                   <input type="number" value={newSubPrice} onChange={(e) => setNewSubPrice(Number(e.target.value))} min={0} required className="input font-mono" />
                 </FieldLabel>
+                <FieldLabel label={t("admin.check_types.dye_price", { defaultValue: "Dye price (IQD)" })}>
+                  <input
+                    type="number"
+                    value={newSubDyePrice ?? ""}
+                    onChange={(e) => setNewSubDyePrice(e.target.value === "" ? null : Number(e.target.value))}
+                    min={0}
+                    placeholder={t("admin.check_types.dye_price_placeholder", { defaultValue: "Not offered" }) ?? ""}
+                    className="input font-mono"
+                  />
+                </FieldLabel>
               </div>
               <div className="flex justify-end gap-2">
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAddingSubtype(false)}>
@@ -200,6 +226,7 @@ export default function CheckTypeDetailPage () {
               <tr>
                 <th>{t("admin.check_types.name", { defaultValue: "Name" })}</th>
                 <th className="text-end">{t("admin.check_types.subtype_price", { defaultValue: "Price" })}</th>
+                <th className="text-end">{t("admin.check_types.dye_price", { defaultValue: "Dye price (IQD)" })}</th>
                 <th>{t("admin.check_types.sort_order_short", { defaultValue: "Order" })}</th>
                 <th className="text-end">{t("admin.actions", { defaultValue: "Actions" })}</th>
               </tr>
@@ -209,6 +236,9 @@ export default function CheckTypeDetailPage () {
                 <tr key={s.id}>
                   <td className="font-medium text-ink">{resolveLocaleName(s, locale)}</td>
                   <td className="text-end font-mono">{s.price_iqd.toLocaleString()}</td>
+                  <td className="text-end font-mono">
+                    {s.dye_price_iqd != null ? s.dye_price_iqd.toLocaleString() : "—"}
+                  </td>
                   <td className="text-[12px] text-ink-3">{s.sort_order}</td>
                   <td className="text-end">
                     <button
@@ -222,7 +252,7 @@ export default function CheckTypeDetailPage () {
                 </tr>
               ))}
               {subtypes.data && subtypes.data.length === 0 ? (
-                <EmptyRow colSpan={4} message={t("admin.check_types.no_subtypes", { defaultValue: "No subtypes yet" })} />
+                <EmptyRow colSpan={5} message={t("admin.check_types.no_subtypes", { defaultValue: "No subtypes yet" })} />
               ) : null}
             </tbody>
           </table>

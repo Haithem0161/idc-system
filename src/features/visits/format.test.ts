@@ -36,8 +36,7 @@ describe("computeRunningTotal", () => {
     base_price_iqd: 50_000,
     operator_base_cut_iqd: 5_000,
     dye: false,
-    dye_supported: true,
-    dye_cost_iqd: 2_000,
+    dye_price_iqd: 2_000,
     report: false,
     report_pct: 20,
     internal_doctor_pct: 40,
@@ -64,12 +63,12 @@ describe("computeRunningTotal", () => {
     )
   })
 
-  it("throws when dye is requested on an unsupported check type", () => {
+  it("throws when dye is requested but no dye price is resolved", () => {
     expect(() =>
       computeRunningTotal({
         ...baseInputs,
         dye: true,
-        dye_supported: false,
+        dye_price_iqd: null,
       })
     ).toThrow(/dye/)
   })

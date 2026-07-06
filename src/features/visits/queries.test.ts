@@ -123,7 +123,7 @@ function checksGridCard(): ChecksGridCardRecord {
     name_ar: "أشعة",
     name_en: "X-Ray",
     has_subtypes: false,
-    dye_supported: true,
+    dye_available: true,
     todays_visits: 3,
   }
 }
