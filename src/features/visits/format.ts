@@ -68,7 +68,7 @@ export interface MoneyMathInputs {
   dye_price_iqd: number | null
   report: boolean
   /**
-   * Percentage of the post-doctor-cut price paid to the internal reporting
+   * Percentage of the post-doctor-cut cut base paid to the internal reporting
    * doctor. Applied only when `report` is true. NOT charged to the patient.
    */
   report_pct: number
@@ -79,6 +79,11 @@ export interface MoneyMathInputs {
    * internal_pct path is skipped.
    */
   dalal: boolean
+  /**
+   * Cash actually collected. Defaults to the full patient total (price + dye)
+   * when omitted. Dye is secured off the top; cuts run on collected − dye.
+   */
+  amount_paid_override_iqd?: number | null
 }
 
 export interface MoneyMathSnapshot {
@@ -123,8 +128,32 @@ export function computeRunningTotal (
       ? inputs.doctor_pricing.price_override_iqd
       : base
   const dyeCost = inputs.dye ? (inputs.dye_price_iqd as number) : 0
+  // Dye is profit off the top: collected defaults to the full patient total,
+  // and the cut base is what remains after the dye is secured.
+  const collected =
+    inputs.amount_paid_override_iqd != null
+      ? inputs.amount_paid_override_iqd
+      : price + dyeCost
+  const cutBase = Math.max(0, collected - dyeCost)
   let doctorCut: number
   let internalPct: number | null
+  if (cutBase === 0) {
+    // Zero-guard: a collection that does not cover the dye leaves nothing to
+    // share; every cut (fixed and scaled alike) drops to zero.
+    internalPct =
+      !inputs.dalal && inputs.doctor_pricing == null
+        ? inputs.internal_doctor_pct
+        : null
+    return {
+      price_iqd: price,
+      dye_cost_iqd: dyeCost,
+      doctor_cut_iqd: 0,
+      operator_cut_iqd: 0,
+      internal_pct: internalPct,
+      report_amount_iqd: 0,
+      patient_total_iqd: price + dyeCost,
+    }
+  }
   if (inputs.dalal) {
     // Doctor-substitute mode: flat cut, no house percentage.
     doctorCut = DALAL_DOCTOR_CUT_IQD
@@ -135,7 +164,7 @@ export function computeRunningTotal (
         "computeRunningTotal: internal_doctor_pct must be in 0..=100"
       )
     }
-    doctorCut = Math.floor((price * inputs.internal_doctor_pct) / 100)
+    doctorCut = Math.floor((cutBase * inputs.internal_doctor_pct) / 100)
     internalPct = inputs.internal_doctor_pct
   } else if (inputs.doctor_pricing.cut_kind === "pct") {
     if (
@@ -146,7 +175,7 @@ export function computeRunningTotal (
         "computeRunningTotal: doctor cut percentage must be in 0..=100"
       )
     }
-    doctorCut = Math.floor((price * inputs.doctor_pricing.cut_value) / 100)
+    doctorCut = Math.floor((cutBase * inputs.doctor_pricing.cut_value) / 100)
     internalPct = null
   } else {
     doctorCut = Math.max(0, inputs.doctor_pricing.cut_value)
@@ -156,7 +185,7 @@ export function computeRunningTotal (
     throw new Error("computeRunningTotal: report_pct must be in 0..=100")
   }
   const reportAmount = inputs.report
-    ? Math.floor(((price - doctorCut) * inputs.report_pct) / 100)
+    ? Math.floor(((cutBase - doctorCut) * inputs.report_pct) / 100)
     : 0
   const patientTotal = price + dyeCost
   return {
