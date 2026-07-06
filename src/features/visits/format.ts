@@ -185,7 +185,7 @@ export function computeRunningTotal (
     throw new Error("computeRunningTotal: report_pct must be in 0..=100")
   }
   const reportAmount = inputs.report
-    ? Math.floor(((cutBase - doctorCut) * inputs.report_pct) / 100)
+    ? Math.floor((Math.max(0, cutBase - doctorCut) * inputs.report_pct) / 100)
     : 0
   const patientTotal = price + dyeCost
   return {

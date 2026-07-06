@@ -95,6 +95,18 @@ describe("computeRunningTotal", () => {
     expect(snap.report_amount_iqd).toBe(0)
   })
 
+  it("report floors at zero when a fixed doctor cut exceeds the cut base", () => {
+    // Fixed cut 60_000 > cutBase 50_000. Report base = max(0, 50_000 - 60_000)
+    // = 0, so report is 0 (never negative). Mirrors the Rust engine.
+    const snap = computeRunningTotal({
+      ...baseInputs,
+      report: true,
+      doctor_pricing: { cut_kind: "fixed", cut_value: 60_000 },
+    })
+    expect(snap.doctor_cut_iqd).toBe(60_000)
+    expect(snap.report_amount_iqd).toBe(0)
+  })
+
   it("throws when dye is requested but no dye price is resolved", () => {
     expect(() =>
       computeRunningTotal({
