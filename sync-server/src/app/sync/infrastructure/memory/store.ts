@@ -49,7 +49,7 @@ export interface CheckTypeSyncRecord {
   name_en: string | null
   has_subtypes: boolean
   base_price_iqd: number | null
-  dye_supported: boolean
+  dye_price_iqd: number | null
   sort_order: number
   is_active: boolean
   entity_id: string
@@ -65,6 +65,7 @@ export interface CheckSubtypeSyncRecord {
   name_ar: string
   name_en: string | null
   price_iqd: number
+  dye_price_iqd: number | null
   sort_order: number
   entity_id: string
   version: number
@@ -397,6 +398,12 @@ export class MemorySyncStore implements
 
   async getCheckType (id: string): Promise<CheckTypeSyncRecord | null> {
     return this.checkTypes.get(id) ?? null
+  }
+
+  async anyLiveSubtypeHasDyePrice (checkTypeId: string): Promise<boolean> {
+    return [...this.checkSubtypes.values()].some(
+      (s) => s.check_type_id === checkTypeId && (s.deleted_at ?? null) == null && s.dye_price_iqd != null
+    )
   }
 
   async listAllVisits (tenantId: string): Promise<VisitSyncRecord[]> {

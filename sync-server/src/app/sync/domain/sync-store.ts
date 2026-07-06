@@ -59,6 +59,15 @@ export interface SyncEntityStore {
    */
   getCheckType (id: string): Promise<CheckTypeSyncRecord | null> | CheckTypeSyncRecord | null
 
+  /**
+   * True when at least one non-deleted subtype of the given check_type has a
+   * dye price set. Mirrors base-price resolution: a subtyped check_type
+   * carries no dye_price_iqd of its own -- the price (and dye availability)
+   * lives on its subtypes. Used by push-service to decide whether an
+   * `on_dye_only` consumption row is valid for a subtyped parent.
+   */
+  anyLiveSubtypeHasDyePrice (checkTypeId: string): Promise<boolean> | boolean
+
   // ---- Reports read-side (phase-09 follow-up: reports-service port) -------
   /**
    * All non-deleted visits for the tenant. Reports filter in-memory; the

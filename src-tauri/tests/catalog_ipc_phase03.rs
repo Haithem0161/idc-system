@@ -142,7 +142,7 @@ fn check_type_create_input(
         name_en: None,
         has_subtypes,
         base_price_iqd: base,
-        dye_supported: false,
+        dye_price_iqd: None,
         sort_order: 0,
     }
 }
@@ -292,6 +292,7 @@ async fn check_types_toggle_one_to_zero_blocked_when_live_subtypes_exist() {
                 name_ar: "Brain".into(),
                 name_en: None,
                 price_iqd: 70_000,
+                dye_price_iqd: None,
                 sort_order: 0,
             },
         )
@@ -395,6 +396,7 @@ async fn check_subtypes_create_requires_subtyped_parent() {
                 name_ar: "X".into(),
                 name_en: None,
                 price_iqd: 1000,
+                dye_price_iqd: None,
                 sort_order: 0,
             },
         )
@@ -427,6 +429,7 @@ async fn check_subtypes_update_bumps_version_and_audits() {
                 name_ar: "Brain".into(),
                 name_en: None,
                 price_iqd: 70_000,
+                dye_price_iqd: None,
                 sort_order: 0,
             },
         )

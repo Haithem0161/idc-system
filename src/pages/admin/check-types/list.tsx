@@ -27,7 +27,7 @@ export default function CheckTypesListPage () {
     name_en: "",
     has_subtypes: false,
     base_price_iqd: 0,
-    dye_supported: false,
+    dye_price_iqd: null,
     sort_order: 0,
   })
   const [error, setError] = useState<string | null>(null)
@@ -36,7 +36,7 @@ export default function CheckTypesListPage () {
   const total = list.data?.length ?? 0
 
   const reset = () => {
-    setForm({ name_ar: "", name_en: "", has_subtypes: false, base_price_iqd: 0, dye_supported: false, sort_order: 0 })
+    setForm({ name_ar: "", name_en: "", has_subtypes: false, base_price_iqd: 0, dye_price_iqd: null, sort_order: 0 })
     setError(null)
     setCreating(false)
   }
@@ -49,6 +49,7 @@ export default function CheckTypesListPage () {
         ...form,
         name_en: form.name_en && form.name_en.trim().length > 0 ? form.name_en : null,
         base_price_iqd: form.has_subtypes ? null : (form.base_price_iqd ?? 0),
+        dye_price_iqd: form.has_subtypes ? null : (form.dye_price_iqd ?? null),
       }
       await create.mutateAsync(payload)
       reset()
@@ -139,15 +140,23 @@ export default function CheckTypesListPage () {
                   />
                 </FieldLabel>
               ) : null}
-              <label className="inline-flex items-center gap-2 text-[12px] font-medium text-ink-2">
-                <input
-                  type="checkbox"
-                  checked={form.dye_supported}
-                  onChange={(e) => setForm((f) => ({ ...f, dye_supported: e.target.checked }))}
-                  className="h-4 w-4 accent-ink"
-                />
-                <span>{t("admin.check_types.dye_supported", { defaultValue: "Supports dye" })}</span>
-              </label>
+              {!form.has_subtypes ? (
+                <FieldLabel label={t("admin.check_types.dye_price", { defaultValue: "Dye price (IQD)" })}>
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.dye_price_iqd ?? ""}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        dye_price_iqd: e.target.value === "" ? null : Number(e.target.value),
+                      }))
+                    }
+                    placeholder={t("admin.check_types.dye_price_placeholder", { defaultValue: "Not offered" }) ?? ""}
+                    className="input font-mono"
+                  />
+                </FieldLabel>
+              ) : null}
             </div>
             <ErrorBanner message={error} />
             <div className="flex justify-end gap-2">
@@ -188,7 +197,7 @@ export default function CheckTypesListPage () {
                   {ct.base_price_iqd != null ? ct.base_price_iqd.toLocaleString() : "—"}
                 </td>
                 <td className="text-[12px] text-ink-3">
-                  {ct.dye_supported ? t("admin.check_types.dye", { defaultValue: "Dye" }) : "—"}
+                  {ct.dye_price_iqd != null ? t("admin.check_types.dye", { defaultValue: "Dye" }) : "—"}
                 </td>
                 <td className="text-end">
                   <Link

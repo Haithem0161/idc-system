@@ -100,8 +100,8 @@ describe("Phase-02 §3.2 IPC shape contract -- Rust <-> Zod parity", () => {
     //   version (i64), entity_id (str).
     const sample = {
       id: "0190a000-0000-7000-8000-000000000000",
-      key: "dye_cost_iqd",
-      value: { valueType: "int", value: 10_000 },
+      key: "report_pct",
+      value: { valueType: "int", value: 20 },
       updated_at: "2026-05-14T10:00:00.000Z",
       version: 1,
       entity_id: "unscoped",

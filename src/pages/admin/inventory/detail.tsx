@@ -77,7 +77,7 @@ export default function InventoryItemDetailPage () {
       setError(t("admin.inventory.consumption_subtype_picker", { defaultValue: "Subtype mapping is not supported in this form. Pick a flat check type." }) ?? "")
       return
     }
-    if (consumptionForm.on_dye_only && !parent.dye_supported) {
+    if (consumptionForm.on_dye_only && parent.dye_price_iqd == null) {
       setError(t("admin.inventory.consumption_dye_unsupported", { defaultValue: "Selected check type does not support dye." }) ?? "")
       return
     }

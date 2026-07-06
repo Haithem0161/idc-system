@@ -11,7 +11,9 @@ use uuid::Uuid;
 use crate::domains::auth::domain::value_objects::UserRole;
 use crate::domains::catalog::domain::entities::inventory_consumption::ConsumptionMapNewInput;
 use crate::domains::catalog::domain::entities::InventoryConsumptionMap;
-use crate::domains::catalog::domain::repositories::{CheckTypeRepo, InventoryConsumptionRepo};
+use crate::domains::catalog::domain::repositories::{
+    CheckSubtypeRepo, CheckTypeRepo, InventoryConsumptionRepo,
+};
 use crate::domains::catalog::service::push_payloads::ConsumptionPushPayload;
 use crate::domains::sync::domain::entities::OutboxOp;
 use crate::domains::sync::domain::repositories::{AuditRepo, OutboxRepo};
@@ -40,6 +42,7 @@ pub struct ConsumptionUpdateInput {
 pub struct ConsumptionService {
     pool: sqlx::SqlitePool,
     check_type_repo: Arc<dyn CheckTypeRepo>,
+    subtype_repo: Arc<dyn CheckSubtypeRepo>,
     repo: Arc<dyn InventoryConsumptionRepo>,
     writer: AuditWriter,
     device_id: String,
@@ -49,6 +52,7 @@ impl ConsumptionService {
     pub fn new(
         pool: sqlx::SqlitePool,
         check_type_repo: Arc<dyn CheckTypeRepo>,
+        subtype_repo: Arc<dyn CheckSubtypeRepo>,
         repo: Arc<dyn InventoryConsumptionRepo>,
         audit_repo: Arc<dyn AuditRepo>,
         outbox_repo: Arc<dyn OutboxRepo>,
@@ -57,6 +61,7 @@ impl ConsumptionService {
         Self {
             pool,
             check_type_repo,
+            subtype_repo,
             repo,
             writer: AuditWriter::new(audit_repo, outbox_repo, device_id.clone()),
             device_id,
@@ -113,11 +118,20 @@ impl ConsumptionService {
             }
             _ => {}
         }
-        if on_dye_only && !ct.dye_supported {
-            return Err(AppError::Validation(
-                "parent check_type does not support dye (errors:consumption.dye_not_supported_on_parent)"
-                    .into(),
-            ));
+        if on_dye_only {
+            let dye_available = ct.dye_price_iqd.is_some()
+                || self
+                    .subtype_repo
+                    .list_by_type(ct.id)
+                    .await?
+                    .iter()
+                    .any(|s| s.dye_price_iqd.is_some());
+            if !dye_available {
+                return Err(AppError::Validation(
+                    "parent check_type does not support dye (errors:consumption.dye_not_supported_on_parent)"
+                        .into(),
+                ));
+            }
         }
         Ok(())
     }

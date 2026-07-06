@@ -83,7 +83,7 @@ export default function ChecksGridPage () {
                   })}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {card.dye_supported ? (
+                  {card.dye_available ? (
                     <span className="status-pill is-info">
                       {t("reception.new_visit.dye")}
                     </span>

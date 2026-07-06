@@ -165,7 +165,7 @@ model CheckType {
   nameEn          String?   @map("name_en")
   hasSubtypes     Boolean   @map("has_subtypes")
   basePriceIqd    Int?      @map("base_price_iqd")
-  dyeSupported    Boolean   @default(false) @map("dye_supported")
+  dyePriceIqd     Int?      @map("dye_price_iqd")
   sortOrder       Int       @default(0) @map("sort_order")
   isActive        Boolean   @default(true) @map("is_active")
   createdAt       DateTime  @map("created_at") @db.Timestamptz
@@ -193,6 +193,7 @@ model CheckSubtype {
   nameAr          String    @map("name_ar")
   nameEn          String?   @map("name_en")
   priceIqd        Int       @map("price_iqd")
+  dyePriceIqd     Int?      @map("dye_price_iqd")
   sortOrder       Int       @default(0) @map("sort_order")
   createdAt       DateTime  @map("created_at") @db.Timestamptz
   updatedAt       DateTime  @map("updated_at") @db.Timestamptz

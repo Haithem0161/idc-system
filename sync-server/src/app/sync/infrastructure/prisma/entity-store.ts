@@ -166,7 +166,7 @@ export class PrismaEntityStore implements SyncEntityStore {
           nameEn: row.name_en,
           hasSubtypes: row.has_subtypes,
           basePriceIqd: row.base_price_iqd,
-          dyeSupported: row.dye_supported,
+          dyePriceIqd: row.dye_price_iqd,
           sortOrder: row.sort_order,
           isActive: row.is_active,
           createdAt: new Date(row.updated_at),
@@ -194,7 +194,7 @@ export class PrismaEntityStore implements SyncEntityStore {
       name_en: row.nameEn,
       has_subtypes: row.hasSubtypes,
       base_price_iqd: row.basePriceIqd,
-      dye_supported: row.dyeSupported,
+      dye_price_iqd: row.dyePriceIqd,
       sort_order: row.sortOrder,
       is_active: row.isActive,
       entity_id: row.entityId,
@@ -203,6 +203,13 @@ export class PrismaEntityStore implements SyncEntityStore {
       deleted_at: row.deletedAt ? row.deletedAt.toISOString() : null,
       origin_device_id: row.originDeviceId,
     }
+  }
+
+  async anyLiveSubtypeHasDyePrice (checkTypeId: string): Promise<boolean> {
+    const count = await this.prisma.checkSubtype.count({
+      where: { checkTypeId, deletedAt: null, dyePriceIqd: { not: null } },
+    })
+    return count > 0
   }
 
   async upsertCheckSubtype (row: CheckSubtypeSyncRecord): Promise<{ applied: boolean }> {
@@ -216,6 +223,7 @@ export class PrismaEntityStore implements SyncEntityStore {
           nameAr: row.name_ar,
           nameEn: row.name_en,
           priceIqd: row.price_iqd,
+          dyePriceIqd: row.dye_price_iqd,
           sortOrder: row.sort_order,
           createdAt: new Date(row.updated_at),
           updatedAt: new Date(row.updated_at),
@@ -1047,7 +1055,7 @@ function toCheckTypeSyncRecord (r: {
   nameEn: string | null
   hasSubtypes: boolean
   basePriceIqd: number | null
-  dyeSupported: boolean
+  dyePriceIqd: number | null
   sortOrder: number
   isActive: boolean
   entityId: string
@@ -1062,7 +1070,7 @@ function toCheckTypeSyncRecord (r: {
     name_en: r.nameEn,
     has_subtypes: r.hasSubtypes,
     base_price_iqd: r.basePriceIqd,
-    dye_supported: r.dyeSupported,
+    dye_price_iqd: r.dyePriceIqd,
     sort_order: r.sortOrder,
     is_active: r.isActive,
     entity_id: r.entityId,
@@ -1079,6 +1087,7 @@ function toCheckSubtypeSyncRecord (r: {
   nameAr: string
   nameEn: string | null
   priceIqd: number
+  dyePriceIqd: number | null
   sortOrder: number
   entityId: string
   version: number
@@ -1092,6 +1101,7 @@ function toCheckSubtypeSyncRecord (r: {
     name_ar: r.nameAr,
     name_en: r.nameEn,
     price_iqd: r.priceIqd,
+    dye_price_iqd: r.dyePriceIqd,
     sort_order: r.sortOrder,
     entity_id: r.entityId,
     version: r.version,

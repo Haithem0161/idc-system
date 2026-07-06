@@ -74,6 +74,7 @@ struct CheckType {
     has_subtypes: bool,
     base_price_iqd: Option<i64>,
     dye: bool,
+    dye_price_iqd: Option<i64>,
     report: bool,
 }
 
@@ -84,6 +85,7 @@ struct Subtype {
     name_ar: &'static str,
     name_en: &'static str,
     price_iqd: i64,
+    dye_price_iqd: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -285,6 +287,7 @@ fn check_types() -> Vec<CheckType> {
             has_subtypes: true,
             base_price_iqd: None,
             dye: true,
+            dye_price_iqd: Some(10_000),
             report: true,
         },
         CheckType {
@@ -294,6 +297,7 @@ fn check_types() -> Vec<CheckType> {
             has_subtypes: true,
             base_price_iqd: None,
             dye: true,
+            dye_price_iqd: Some(10_000),
             report: true,
         },
         CheckType {
@@ -303,6 +307,7 @@ fn check_types() -> Vec<CheckType> {
             has_subtypes: true,
             base_price_iqd: None,
             dye: false,
+            dye_price_iqd: None,
             report: true,
         },
         CheckType {
@@ -312,6 +317,7 @@ fn check_types() -> Vec<CheckType> {
             has_subtypes: false,
             base_price_iqd: Some(25_000),
             dye: false,
+            dye_price_iqd: None,
             report: true,
         },
         CheckType {
@@ -321,6 +327,7 @@ fn check_types() -> Vec<CheckType> {
             has_subtypes: false,
             base_price_iqd: Some(80_000),
             dye: false,
+            dye_price_iqd: None,
             report: true,
         },
         CheckType {
@@ -330,6 +337,7 @@ fn check_types() -> Vec<CheckType> {
             has_subtypes: false,
             base_price_iqd: Some(20_000),
             dye: false,
+            dye_price_iqd: None,
             report: false,
         },
     ]
@@ -352,6 +360,7 @@ fn subtypes(cts: &[CheckType]) -> Vec<Subtype> {
             name_ar: ar,
             name_en: en,
             price_iqd: *p,
+            dye_price_iqd: Some(10_000),
         });
     }
     // MRI (idx 1)
@@ -367,6 +376,7 @@ fn subtypes(cts: &[CheckType]) -> Vec<Subtype> {
             name_ar: ar,
             name_en: en,
             price_iqd: *p,
+            dye_price_iqd: Some(10_000),
         });
     }
     // US (idx 2)
@@ -383,6 +393,7 @@ fn subtypes(cts: &[CheckType]) -> Vec<Subtype> {
             name_ar: ar,
             name_en: en,
             price_iqd: *p,
+            dye_price_iqd: None,
         });
     }
     out
@@ -752,7 +763,7 @@ async fn insert_users(pool: &SqlitePool, ps: &[Persona], at: DateTime<Utc>) -> R
 async fn insert_check_types(pool: &SqlitePool, cts: &[CheckType], at: DateTime<Utc>) -> R<()> {
     for (i, c) in cts.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO check_types (id, name_ar, name_en, has_subtypes, base_price_iqd, dye_supported, sort_order, is_active, created_at, updated_at, version, dirty, entity_id) \
+            "INSERT INTO check_types (id, name_ar, name_en, has_subtypes, base_price_iqd, dye_price_iqd, sort_order, is_active, created_at, updated_at, version, dirty, entity_id) \
              VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1, 0, ?)",
         )
         .bind(&c.id)
@@ -760,7 +771,7 @@ async fn insert_check_types(pool: &SqlitePool, cts: &[CheckType], at: DateTime<U
         .bind(c.name_en)
         .bind(c.has_subtypes as i32)
         .bind(c.base_price_iqd)
-        .bind(c.dye as i32)
+        .bind(c.dye_price_iqd)
         .bind(i as i32)
         .bind(rfc(at))
         .bind(rfc(at))
@@ -774,14 +785,15 @@ async fn insert_check_types(pool: &SqlitePool, cts: &[CheckType], at: DateTime<U
 async fn insert_subtypes(pool: &SqlitePool, subs: &[Subtype], at: DateTime<Utc>) -> R<()> {
     for (i, s) in subs.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO check_subtypes (id, check_type_id, name_ar, name_en, price_iqd, sort_order, created_at, updated_at, version, dirty, entity_id) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)",
+            "INSERT INTO check_subtypes (id, check_type_id, name_ar, name_en, price_iqd, dye_price_iqd, sort_order, created_at, updated_at, version, dirty, entity_id) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)",
         )
         .bind(&s.id)
         .bind(&s.check_type_id)
         .bind(s.name_ar)
         .bind(s.name_en)
         .bind(s.price_iqd)
+        .bind(s.dye_price_iqd)
         .bind(i as i32)
         .bind(rfc(at))
         .bind(rfc(at))

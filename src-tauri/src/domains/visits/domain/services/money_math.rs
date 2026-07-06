@@ -17,7 +17,6 @@ const DALAL_CUT_IQD: i64 = 10_000;
 
 #[derive(Debug, Clone)]
 pub struct MoneySettings {
-    pub dye_cost_iqd: i64,
     /// Percentage (0..=100) carved out of the price-after-doctor-cut and paid
     /// to the internal reporting doctor when the visit's `report` flag is on.
     pub report_pct: i64,
@@ -67,9 +66,9 @@ pub struct MoneyMathInputs<'a> {
 /// dye / report consistency at the entity level; this function is strict
 /// about money invariants only.
 pub fn compute(inputs: &MoneyMathInputs<'_>) -> AppResult<VisitSnapshots> {
-    if inputs.dye && !inputs.check_type.dye_supported {
+    if inputs.dye && dye_price(inputs).is_none() {
         return Err(AppError::Validation(
-            "check type does not support dye".into(),
+            "dye not available for this check".into(),
         ));
     }
     if inputs.check_type.has_subtypes && inputs.check_subtype.is_none() {
@@ -112,7 +111,8 @@ pub fn compute(inputs: &MoneyMathInputs<'_>) -> AppResult<VisitSnapshots> {
     }
 
     let dye_cost = if inputs.dye {
-        inputs.settings.dye_cost_iqd
+        dye_price(inputs)
+            .ok_or_else(|| AppError::Validation("dye not available for this check".into()))?
     } else {
         0
     };
@@ -236,6 +236,17 @@ fn base_price(inputs: &MoneyMathInputs<'_>) -> AppResult<i64> {
     })
 }
 
+/// Resolve the catalog dye price: the subtype's `dye_price_iqd` when a
+/// subtype is chosen, else the check type's. `None` is a legal "no dye
+/// offered for this check" answer, not an error -- callers decide what to do
+/// with it (reject dye-on, or treat as unavailable).
+fn dye_price(inputs: &MoneyMathInputs<'_>) -> Option<i64> {
+    match inputs.check_subtype {
+        Some(sub) => sub.dye_price_iqd,
+        None => inputs.check_type.dye_price_iqd,
+    }
+}
+
 fn effective_price(base: i64, pricing: Option<&DoctorCheckPricing>) -> i64 {
     match pricing {
         Some(p) => p.price_override_iqd.unwrap_or(base),
@@ -335,6 +346,12 @@ mod tests {
     use uuid::Uuid;
 
     fn ct(has_subtypes: bool, base: Option<i64>) -> CheckType {
+        ct_dye(has_subtypes, base, Some(2_000))
+    }
+
+    /// Like `ct`, but with an explicit catalog dye price (`None` = dye not
+    /// offered for this check type).
+    fn ct_dye(has_subtypes: bool, base: Option<i64>, dye_price_iqd: Option<i64>) -> CheckType {
         let now = Utc::now();
         CheckType {
             id: Uuid::now_v7(),
@@ -342,7 +359,7 @@ mod tests {
             name_en: Some("Test".into()),
             has_subtypes,
             base_price_iqd: base,
-            dye_supported: true,
+            dye_price_iqd,
             sort_order: 0,
             is_active: true,
             created_at: now,
@@ -378,7 +395,6 @@ mod tests {
 
     fn settings() -> MoneySettings {
         MoneySettings {
-            dye_cost_iqd: 2000,
             report_pct: 20,
             reporting_doctor_name: "Dr Report".into(),
             internal_doctor_pct: 40,
@@ -420,6 +436,11 @@ mod tests {
     }
 
     fn sub(check_type_id: Uuid, price: i64) -> CheckSubtype {
+        sub_dye(check_type_id, price, None)
+    }
+
+    /// Like `sub`, but with an explicit subtype-level dye price override.
+    fn sub_dye(check_type_id: Uuid, price: i64, dye_price_iqd: Option<i64>) -> CheckSubtype {
         let now = Utc::now();
         CheckSubtype {
             id: Uuid::now_v7(),
@@ -427,6 +448,7 @@ mod tests {
             name_ar: "فرعي".into(),
             name_en: Some("Sub".into()),
             price_iqd: price,
+            dye_price_iqd,
             sort_order: 0,
             created_at: now,
             updated_at: now,
@@ -541,7 +563,7 @@ mod tests {
     #[test]
     fn rejects_dye_when_unsupported() {
         let mut t = ct(false, Some(50_000));
-        t.dye_supported = false;
+        t.dye_price_iqd = None;
         let op = operator();
         let err = compute(&MoneyMathInputs {
             check_type: &t,
@@ -1230,7 +1252,7 @@ mod tests {
     #[test]
     fn dye_unsupported_rejects_with_validation_err() {
         let mut t = ct(false, Some(50_000));
-        t.dye_supported = false;
+        t.dye_price_iqd = None;
         let op = operator();
         let err = compute(&MoneyMathInputs {
             check_type: &t,
@@ -1253,6 +1275,138 @@ mod tests {
             Err(AppError::Validation(m)) => assert!(m.contains("dye")),
             _ => panic!("expected Validation"),
         }
+    }
+
+    // ---- dye price resolution from the catalog (check type / subtype) ----
+
+    #[test]
+    fn dye_cost_comes_from_check_type_price_when_flat() {
+        let ct = ct_dye(false, Some(50_000), Some(3_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: true,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.dye_cost_iqd, 3_000);
+        assert_eq!(snap.total_amount_iqd, snap.price_iqd + 3_000);
+    }
+
+    #[test]
+    fn dye_cost_comes_from_subtype_price_when_subtyped() {
+        // Subtyped check type: the subtype's own dye price wins, not the
+        // check type's (which here is deliberately different / absent).
+        let ct = ct_dye(true, None, None);
+        let s = sub_dye(ct.id, 70_000, Some(4_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: Some(&s),
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: true,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.dye_cost_iqd, 4_000);
+    }
+
+    #[test]
+    fn dye_price_zero_is_free_dye_not_unavailable() {
+        let ct = ct_dye(false, Some(50_000), Some(0));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: true,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.dye_cost_iqd, 0);
+        assert_eq!(snap.total_amount_iqd, snap.price_iqd);
+    }
+
+    #[test]
+    fn dye_on_without_resolvable_price_errors() {
+        let ct = ct_dye(false, Some(50_000), None);
+        let op = operator();
+        let err = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: true,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
+            settings: settings(),
+        })
+        .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn dye_off_ignores_price() {
+        let ct = ct_dye(false, Some(50_000), Some(5_000));
+        let op = operator();
+        let snap = compute(&MoneyMathInputs {
+            check_type: &ct,
+            check_subtype: None,
+            doctor: None,
+            doctor_pricing: None,
+            operator: &op,
+            patient_name: "p",
+            dye: false,
+            report: false,
+            dalal: false,
+            discount: false,
+            mandoub_cut_iqd: 0,
+            mandoub_name: None,
+            price_override_iqd: None,
+            amount_paid_override_iqd: None,
+            settings: settings(),
+        })
+        .unwrap();
+        assert_eq!(snap.dye_cost_iqd, 0);
     }
 
     #[test]
@@ -1393,7 +1547,6 @@ mod tests {
         let ct = ct(false, Some(50_000));
         let op = operator();
         let bad = MoneySettings {
-            dye_cost_iqd: 0,
             report_pct: 0,
             reporting_doctor_name: String::new(),
             internal_doctor_pct: 250,

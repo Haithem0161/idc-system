@@ -22,15 +22,10 @@ import {
   useVisitLock,
   useVisitUpdateDraft,
 } from "@/features/visits/queries"
-import {
-  getSettingByKey,
-  settingValueAsNumber,
-  useSettings,
-} from "@/features/settings/queries"
 import { invoke } from "@/lib/ipc"
 import { cn } from "@/lib/utils"
 import { formatIpcError } from "@/lib/errors"
-import { useCheckSubtypes } from "@/features/catalog/queries"
+import { useCheckSubtypes, useCheckType } from "@/features/catalog/queries"
 import { DoctorCombobox } from "@/components/catalog/doctor-combobox"
 import { MandoubCombobox } from "@/components/catalog/mandoub-combobox"
 import {
@@ -76,18 +71,18 @@ export default function NewVisitTabbedPage () {
   // Mirror the canonical Rust money_math: the patient total = price + dye.
   // The price is the authoritative effective price from `pricing_effective`
   // (subtype/base + doctor override), so the displayed total is byte-identical
-  // to what Finish will charge. The dye cost comes from settings. The report is
-  // NOT charged to the patient: it is an internal share paid to the reporting
+  // to what Finish will charge. The dye price is resolved from the catalog
+  // (subtype's dye_price_iqd when has_subtypes, else the check type's) --
+  // there is no per-visit override, it is read-only. The report is NOT
+  // charged to the patient: it is an internal share paid to the reporting
   // doctor out of net, surfaced separately below the patient total.
   const activeForm = activeTab?.form
   const needsSubtype = Boolean(checkType?.has_subtypes)
   const subtypeChosen = !needsSubtype || Boolean(activeForm?.subtypeId)
 
-  const { data: settings } = useSettings()
-  const dyeCostIqd = settingValueAsNumber(
-    getSettingByKey(settings, "dye_cost_iqd"),
-    0,
-  )
+  // The grid card only carries `dye_available`; the actual dye price (needed
+  // for the running total) lives on the full catalog record.
+  const { data: checkTypeDetail } = useCheckType(activeTab?.checkTypeId ?? null)
 
   const {
     data: effectivePrice,
@@ -111,7 +106,20 @@ export default function NewVisitTabbedPage () {
   }, [subtypes, activeForm?.subtypeId])
 
   const priceIqd = effectivePrice ?? localSubtypePrice
-  const dyeApplied = Boolean(activeForm?.dye) && Boolean(checkType?.dye_supported)
+
+  // Dye price resolution mirrors the base-price resolution: the subtype's
+  // dye_price_iqd when the check type has subtypes, else the check type's
+  // own dye_price_iqd. Availability is derived from presence (non-null).
+  const resolvedDyePrice = useMemo(() => {
+    if (needsSubtype) {
+      const sid = activeForm?.subtypeId
+      if (!sid) return null
+      return (subtypes ?? []).find((s) => s.id === sid)?.dye_price_iqd ?? null
+    }
+    return checkTypeDetail?.dye_price_iqd ?? null
+  }, [needsSubtype, activeForm?.subtypeId, subtypes, checkTypeDetail?.dye_price_iqd])
+
+  const dyeApplied = Boolean(activeForm?.dye) && resolvedDyePrice != null
 
   // The receptionist may edit the per-visit price away from the catalog
   // default (e.g. a negotiated rate). When set, it replaces `priceIqd` in the
@@ -129,13 +137,13 @@ export default function NewVisitTabbedPage () {
       { label: localizedCheckName, amountIqd: effectivePriceIqd, emphasis: true },
     ]
     if (dyeApplied) {
-      lines.push({ label: t("reception.new_visit.dye"), amountIqd: dyeCostIqd })
+      lines.push({ label: t("reception.new_visit.dye"), amountIqd: resolvedDyePrice as number })
     }
     return lines
-  }, [priceIqd, effectivePriceIqd, localizedCheckName, dyeApplied, dyeCostIqd, t])
+  }, [priceIqd, effectivePriceIqd, localizedCheckName, dyeApplied, resolvedDyePrice, t])
 
 
-  const totalIqd = effectivePriceIqd + (dyeApplied ? dyeCostIqd : 0)
+  const totalIqd = effectivePriceIqd + (dyeApplied ? (resolvedDyePrice as number) : 0)
   const hasPrice = priceIqd != null
   // Pending only when we have nothing to show yet but a fetch is in flight.
   const estimating = priceFetching && priceIqd == null && subtypeChosen
@@ -223,7 +231,7 @@ export default function NewVisitTabbedPage () {
           doctor_id: referringDoctorId,
           dalal: tab.form.dalal,
           mandoub_id: mandoubId,
-          dye: checkType?.dye_supported ? tab.form.dye : false,
+          dye: resolvedDyePrice != null ? tab.form.dye : false,
           report: tab.form.report,
           discount,
           price_override_iqd: priceOverrideIqd,
@@ -241,7 +249,7 @@ export default function NewVisitTabbedPage () {
           doctor_id: referringDoctorId,
           dalal: tab.form.dalal,
           mandoub_id: mandoubId,
-          dye: checkType?.dye_supported ? tab.form.dye : false,
+          dye: resolvedDyePrice != null ? tab.form.dye : false,
           report: tab.form.report,
           discount,
           price_override_iqd: priceOverrideIqd,
@@ -559,7 +567,7 @@ export default function NewVisitTabbedPage () {
               label={t("reception.new_visit.dye")}
               pressed={form.dye}
               onPressedChange={(p) => patchForm({ dye: p })}
-              disabled={!checkType?.dye_supported}
+              disabled={resolvedDyePrice == null}
               disabledHint={t("reception.new_visit.dye_unsupported")}
             />
             <FeatureToggle

@@ -49,6 +49,10 @@
       "consumption_subtype_picker": "Subtype mapping is not supported in this form. Pick a flat check type.",
       "consumption_dye_unsupported": "Selected check type does not support dye."
     },
+    "check_types": {
+      "dye_price": "Dye price (IQD)",
+      "dye_price_placeholder": "Not offered"
+    },
     "settings": {
       "title": "Settings",
       "subtitle": "Configure clinic operations.",
@@ -66,7 +70,6 @@
         "clinic_display_name_ar": "Clinic name (Arabic)",
         "clinic_display_name_en": "Clinic name (English)",
         "currency_symbol": "Currency symbol",
-        "dye_cost_iqd": "Dye cost (IQD)",
         "report_pct": "Report percentage (%)",
         "reporting_doctor_name": "Reporting doctor",
         "internal_doctor_pct": "Internal doctor share (%)",
@@ -110,7 +113,6 @@
         "clinic_display_name_ar": "Arabic name printed on receipts and the daily-close PDF.",
         "clinic_display_name_en": "English name printed on receipts and the daily-close PDF.",
         "currency_symbol": "Symbol shown next to every money amount.",
-        "dye_cost_iqd": "Added to a visit when dye is used. Applies to days locked from now on.",
         "report_pct": "Percentage of the post-doctor-cut price paid to the internal reporting doctor. Applies to days locked from now on.",
         "reporting_doctor_name": "Name of the internal doctor who receives the reporting share.",
         "internal_doctor_pct": "Share of the price paid to an in-house doctor when no per-check rate is set.",

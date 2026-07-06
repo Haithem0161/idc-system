@@ -27,13 +27,14 @@ impl CheckSubtypeRepo for SqliteCheckSubtypeRepo {
     async fn upsert(&self, tx: &mut Tx<'_>, sub: &CheckSubtype) -> AppResult<()> {
         sqlx::query(
             "INSERT INTO check_subtypes (\
-                id, check_type_id, name_ar, name_en, price_iqd, sort_order, \
+                id, check_type_id, name_ar, name_en, price_iqd, dye_price_iqd, sort_order, \
                 created_at, updated_at, deleted_at, version, dirty, last_synced_at, \
                 origin_device_id, entity_id\
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) \
+             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) \
              ON CONFLICT(id) DO UPDATE SET \
                name_ar = excluded.name_ar, name_en = excluded.name_en, \
-               price_iqd = excluded.price_iqd, sort_order = excluded.sort_order, \
+               price_iqd = excluded.price_iqd, dye_price_iqd = excluded.dye_price_iqd, \
+               sort_order = excluded.sort_order, \
                updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, \
                version = excluded.version, dirty = excluded.dirty, \
                last_synced_at = excluded.last_synced_at",
@@ -43,6 +44,7 @@ impl CheckSubtypeRepo for SqliteCheckSubtypeRepo {
         .bind(&sub.name_ar)
         .bind(sub.name_en.as_deref())
         .bind(sub.price_iqd)
+        .bind(sub.dye_price_iqd)
         .bind(sub.sort_order)
         .bind(dt_to_str(sub.created_at))
         .bind(dt_to_str(sub.updated_at))
@@ -93,6 +95,7 @@ struct CheckSubtypeRow {
     name_ar: String,
     name_en: Option<String>,
     price_iqd: i64,
+    dye_price_iqd: Option<i64>,
     sort_order: i64,
     created_at: String,
     updated_at: String,
@@ -112,6 +115,7 @@ impl CheckSubtypeRow {
             name_ar: self.name_ar,
             name_en: self.name_en,
             price_iqd: self.price_iqd,
+            dye_price_iqd: self.dye_price_iqd,
             sort_order: self.sort_order,
             created_at: parse_dt(&self.created_at)?,
             updated_at: parse_dt(&self.updated_at)?,

@@ -292,6 +292,161 @@ test('inventory: note longer than 500 chars is rejected', async (t) => {
   assert.strictEqual(body.rejected[0].status_code, 422)
 })
 
+// --- Dye-price guard: subtype-resolved dye availability ---------------------
+
+test('inventory: on_dye_only consumption is accepted when parent has no dye price but a live subtype does', async (t) => {
+  const app = await build(t)
+  const store = (app as unknown as FastifyAppLike & {
+    entityStore: {
+      checkTypes: Map<string, Record<string, unknown>>
+      checkSubtypes: Map<string, Record<string, unknown>>
+    }
+  }).entityStore
+  const token = authToken(app as unknown as FastifyAppLike, 'superadmin')
+  const now = new Date().toISOString()
+
+  const checkTypeId = '01900000-0000-7000-8000-0000000005A1'
+  const checkSubtypeId = '01900000-0000-7000-8000-0000000005A2'
+  const itemId = '01900000-0000-7000-8000-0000000005A3'
+  const consumptionId = '01900000-0000-7000-8000-0000000005A4'
+
+  // Parent check_type is subtyped: no dye_price_iqd of its own.
+  store.checkTypes.set(checkTypeId, {
+    id: checkTypeId,
+    name_ar: 'فحص',
+    name_en: 'Check',
+    has_subtypes: true,
+    base_price_iqd: null,
+    dye_price_iqd: null,
+    sort_order: 0,
+    is_active: true,
+    entity_id: TENANT,
+    version: 1,
+    updated_at: now,
+    deleted_at: null,
+    origin_device_id: 'dev-i1',
+  })
+  // Live subtype carries the dye price -- this is what makes on_dye_only valid.
+  store.checkSubtypes.set(checkSubtypeId, {
+    id: checkSubtypeId,
+    check_type_id: checkTypeId,
+    name_ar: 'نوع فرعي',
+    name_en: 'Subtype',
+    price_iqd: 30_000,
+    dye_price_iqd: 5_000,
+    sort_order: 0,
+    entity_id: TENANT,
+    version: 1,
+    updated_at: now,
+    deleted_at: null,
+    origin_device_id: 'dev-i1',
+  })
+
+  const consumption = {
+    id: consumptionId,
+    check_type_id: checkTypeId,
+    check_subtype_id: checkSubtypeId,
+    item_id: itemId,
+    quantity_per_check: 2,
+    on_dye_only: true,
+    entity_id: TENANT,
+    version: 1,
+    updated_at: now,
+    deleted_at: null,
+    origin_device_id: 'dev-i1',
+  }
+
+  const res = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-i1' },
+    payload: {
+      ops: [jsonOp('01HZWP0000000000000000A001', 'inventory_consumption_map', consumptionId, consumption)],
+    },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.rejected.length, 0, JSON.stringify(body.rejected))
+  assert.strictEqual(body.accepted[0].status, 'applied')
+})
+
+test('inventory: on_dye_only consumption is rejected when neither parent nor any live subtype has a dye price', async (t) => {
+  const app = await build(t)
+  const store = (app as unknown as FastifyAppLike & {
+    entityStore: {
+      checkTypes: Map<string, Record<string, unknown>>
+      checkSubtypes: Map<string, Record<string, unknown>>
+    }
+  }).entityStore
+  const token = authToken(app as unknown as FastifyAppLike, 'superadmin')
+  const now = new Date().toISOString()
+
+  const checkTypeId = '01900000-0000-7000-8000-0000000005B1'
+  const checkSubtypeId = '01900000-0000-7000-8000-0000000005B2'
+  const itemId = '01900000-0000-7000-8000-0000000005B3'
+  const consumptionId = '01900000-0000-7000-8000-0000000005B4'
+
+  store.checkTypes.set(checkTypeId, {
+    id: checkTypeId,
+    name_ar: 'فحص',
+    name_en: 'Check',
+    has_subtypes: true,
+    base_price_iqd: null,
+    dye_price_iqd: null,
+    sort_order: 0,
+    is_active: true,
+    entity_id: TENANT,
+    version: 1,
+    updated_at: now,
+    deleted_at: null,
+    origin_device_id: 'dev-i1',
+  })
+  // Subtype exists but has no dye price -- dye is unavailable everywhere.
+  store.checkSubtypes.set(checkSubtypeId, {
+    id: checkSubtypeId,
+    check_type_id: checkTypeId,
+    name_ar: 'نوع فرعي',
+    name_en: 'Subtype',
+    price_iqd: 30_000,
+    dye_price_iqd: null,
+    sort_order: 0,
+    entity_id: TENANT,
+    version: 1,
+    updated_at: now,
+    deleted_at: null,
+    origin_device_id: 'dev-i1',
+  })
+
+  const consumption = {
+    id: consumptionId,
+    check_type_id: checkTypeId,
+    check_subtype_id: checkSubtypeId,
+    item_id: itemId,
+    quantity_per_check: 2,
+    on_dye_only: true,
+    entity_id: TENANT,
+    version: 1,
+    updated_at: now,
+    deleted_at: null,
+    origin_device_id: 'dev-i1',
+  }
+
+  const res = await app.inject({
+    method: 'POST',
+    url: '/sync/push',
+    headers: { authorization: `Bearer ${token}`, 'x-device-id': 'dev-i1' },
+    payload: {
+      ops: [jsonOp('01HZWP0000000000000000B002', 'inventory_consumption_map', consumptionId, consumption)],
+    },
+  })
+  assert.strictEqual(res.statusCode, 200, res.payload)
+  const body = JSON.parse(res.payload)
+  assert.strictEqual(body.accepted.length, 0)
+  assert.strictEqual(body.rejected.length, 1)
+  assert.strictEqual(body.rejected[0].code, 'VALIDATION_ERROR')
+  assert.strictEqual(body.rejected[0].status_code, 422)
+})
+
 // --- Phase-10 T11: cross-tenant inventory isolation -------------------------
 
 test('T11: an adjustment from tenant B cannot read or overwrite tenant A inventory', async (t) => {

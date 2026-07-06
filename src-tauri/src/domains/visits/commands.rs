@@ -57,7 +57,6 @@ async fn money_settings(state: &AppState) -> AppResult<MoneySettings> {
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_default();
     Ok(MoneySettings {
-        dye_cost_iqd: required_i64(state, "dye_cost_iqd").await?,
         report_pct: required_i64(state, "report_pct").await?,
         reporting_doctor_name,
         internal_doctor_pct: required_i64(state, "internal_doctor_pct").await?,

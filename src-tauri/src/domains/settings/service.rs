@@ -297,12 +297,6 @@ impl SettingsService {
 
 fn validate_value_for_key(key: &str, value: &SettingValue) -> AppResult<()> {
     match key {
-        "dye_cost_iqd" => match value {
-            SettingValue::Int(n) if *n >= 0 => Ok(()),
-            _ => Err(AppError::Validation(format!(
-                "{key} must be a non-negative integer"
-            ))),
-        },
         "report_pct" => match value {
             SettingValue::Int(n) if (0..=100).contains(n) => Ok(()),
             _ => Err(AppError::Validation(
@@ -428,19 +422,6 @@ impl<'a> From<&'a Setting> for SettingPushPayload<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn dye_cost_accepts_non_negative_int() {
-        assert!(validate_value_for_key("dye_cost_iqd", &SettingValue::Int(0)).is_ok());
-        assert!(validate_value_for_key("dye_cost_iqd", &SettingValue::Int(10_000)).is_ok());
-    }
-
-    #[test]
-    fn dye_cost_rejects_negative_and_wrong_type() {
-        assert!(validate_value_for_key("dye_cost_iqd", &SettingValue::Int(-1)).is_err());
-        assert!(validate_value_for_key("dye_cost_iqd", &SettingValue::Text("10".into())).is_err());
-        assert!(validate_value_for_key("dye_cost_iqd", &SettingValue::Bool(true)).is_err());
-    }
 
     #[test]
     fn report_pct_accepts_0_to_100_and_rejects_out_of_range() {

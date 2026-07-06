@@ -38,7 +38,6 @@ function checkTypePayload (id: string, overrides: Record<string, unknown> = {}) 
     name_en: 'Ultrasound',
     has_subtypes: false,
     base_price_iqd: 30_000,
-    dye_supported: false,
     sort_order: 0,
     is_active: true,
     entity_id: TENANT,

@@ -65,8 +65,7 @@ export interface MoneyMathInputs {
   } | null
   operator_base_cut_iqd: number
   dye: boolean
-  dye_supported: boolean
-  dye_cost_iqd: number
+  dye_price_iqd: number | null
   report: boolean
   /**
    * Percentage of the post-doctor-cut price paid to the internal reporting
@@ -99,8 +98,8 @@ export interface MoneyMathSnapshot {
 
 /**
  * Pure TS port of the Rust `money_math::compute`. Throws when invariants
- * the Rust side enforces are violated (e.g. dye flagged but check type
- * does not support dye). Always returns integer IQD amounts.
+ * the Rust side enforces are violated (e.g. dye flagged but no dye price is
+ * resolved for this check type/subtype). Always returns integer IQD amounts.
  *
  * Patient total = price + dye. The report is an internal figure: a percentage
  * of the post-doctor-cut price paid to the reporting doctor out of net, never
@@ -109,8 +108,8 @@ export interface MoneyMathSnapshot {
 export function computeRunningTotal (
   inputs: MoneyMathInputs
 ): MoneyMathSnapshot {
-  if (inputs.dye && !inputs.dye_supported) {
-    throw new Error("computeRunningTotal: check type does not support dye")
+  if (inputs.dye && inputs.dye_price_iqd == null) {
+    throw new Error("computeRunningTotal: dye not available for this check")
   }
   const base =
     inputs.subtype_price_iqd != null
@@ -123,7 +122,7 @@ export function computeRunningTotal (
     inputs.doctor_pricing?.price_override_iqd != null
       ? inputs.doctor_pricing.price_override_iqd
       : base
-  const dyeCost = inputs.dye ? inputs.dye_cost_iqd : 0
+  const dyeCost = inputs.dye ? (inputs.dye_price_iqd as number) : 0
   let doctorCut: number
   let internalPct: number | null
   if (inputs.dalal) {

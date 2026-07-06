@@ -108,7 +108,7 @@ async fn p3_mariam_superadmin_catalog_day_walks_every_phase_03_ipc() {
                 name_en: Some("ECG".into()),
                 has_subtypes: false,
                 base_price_iqd: Some(20_000),
-                dye_supported: false,
+                dye_price_iqd: None,
                 sort_order: 1,
             },
         )
@@ -125,7 +125,7 @@ async fn p3_mariam_superadmin_catalog_day_walks_every_phase_03_ipc() {
                 name_en: Some("MRI".into()),
                 has_subtypes: true,
                 base_price_iqd: None,
-                dye_supported: true,
+                dye_price_iqd: None,
                 sort_order: 2,
             },
         )
@@ -144,6 +144,7 @@ async fn p3_mariam_superadmin_catalog_day_walks_every_phase_03_ipc() {
                 name_ar: "دماغ".into(),
                 name_en: Some("Brain".into()),
                 price_iqd: 70_000,
+                dye_price_iqd: None,
                 sort_order: 0,
             },
         )
@@ -160,6 +161,7 @@ async fn p3_mariam_superadmin_catalog_day_walks_every_phase_03_ipc() {
                 name_ar: "عمود فقري".into(),
                 name_en: Some("Spine".into()),
                 price_iqd: 65_000,
+                dye_price_iqd: None,
                 sort_order: 1,
             },
         )

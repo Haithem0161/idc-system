@@ -575,7 +575,11 @@ export class SyncPushService {
         { op_id: opId }
       )
     }
-    if (row.on_dye_only && !parent.dye_supported) {
+    if (
+      row.on_dye_only &&
+      parent.dye_price_iqd == null &&
+      !(await this.store.anyLiveSubtypeHasDyePrice(row.check_type_id))
+    ) {
       throw new DomainError(
         'VALIDATION_ERROR',
         'parent check_type does not support dye',

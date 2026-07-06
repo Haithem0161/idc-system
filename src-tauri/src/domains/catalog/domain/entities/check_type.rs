@@ -18,7 +18,7 @@ pub struct CheckType {
     pub name_en: Option<String>,
     pub has_subtypes: bool,
     pub base_price_iqd: Option<i64>,
-    pub dye_supported: bool,
+    pub dye_price_iqd: Option<i64>,
     pub sort_order: i64,
     pub is_active: bool,
     pub created_at: DateTime<Utc>,
@@ -37,7 +37,7 @@ pub struct CheckTypeNewInput {
     pub name_en: Option<String>,
     pub has_subtypes: bool,
     pub base_price_iqd: Option<i64>,
-    pub dye_supported: bool,
+    pub dye_price_iqd: Option<i64>,
     pub sort_order: i64,
     pub entity_id: String,
     pub origin_device_id: Option<String>,
@@ -48,7 +48,7 @@ pub struct CheckTypeUpdate {
     pub name_ar: Option<String>,
     pub name_en: Option<Option<String>>,
     pub base_price_iqd: Option<Option<i64>>,
-    pub dye_supported: Option<bool>,
+    pub dye_price_iqd: Option<Option<i64>>,
     pub sort_order: Option<i64>,
     pub is_active: Option<bool>,
 }
@@ -64,6 +64,11 @@ impl CheckType {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
         validate_xor(input.has_subtypes, input.base_price_iqd)?;
+        if let Some(n) = input.dye_price_iqd {
+            if n < 0 {
+                return Err(AppError::Validation("dye_price_iqd must be >= 0".into()));
+            }
+        }
 
         let now = Utc::now();
         Ok(Self {
@@ -72,7 +77,7 @@ impl CheckType {
             name_en,
             has_subtypes: input.has_subtypes,
             base_price_iqd: input.base_price_iqd,
-            dye_supported: input.dye_supported,
+            dye_price_iqd: input.dye_price_iqd,
             sort_order: input.sort_order,
             is_active: true,
             created_at: now,
@@ -103,8 +108,13 @@ impl CheckType {
             validate_xor(self.has_subtypes, base)?;
             self.base_price_iqd = base;
         }
-        if let Some(d) = patch.dye_supported {
-            self.dye_supported = d;
+        if let Some(dye) = patch.dye_price_iqd {
+            if let Some(n) = dye {
+                if n < 0 {
+                    return Err(AppError::Validation("dye_price_iqd must be >= 0".into()));
+                }
+            }
+            self.dye_price_iqd = dye;
         }
         if let Some(s) = patch.sort_order {
             self.sort_order = s;
@@ -118,8 +128,8 @@ impl CheckType {
         Ok(self)
     }
 
-    /// Apply the §7.1 toggle: 0 -> 1 zeroes `base_price_iqd`; 1 -> 0 sets it
-    /// from the provided value. Cross-row invariants (no live subtypes when
+    /// Apply the §7.1 toggle: 0 -> 1 zeroes `base_price_iqd` and `dye_price_iqd`;
+    /// 1 -> 0 sets it from the provided value. Cross-row invariants (no live subtypes when
     /// flipping 1 -> 0) are enforced in the service layer.
     pub fn toggled_has_subtypes(
         mut self,
@@ -129,6 +139,7 @@ impl CheckType {
         if to_value {
             self.has_subtypes = true;
             self.base_price_iqd = None;
+            self.dye_price_iqd = None;
         } else {
             let price = new_base_price.ok_or_else(|| {
                 AppError::Validation(
@@ -186,7 +197,7 @@ mod tests {
             name_en: None,
             has_subtypes,
             base_price_iqd: base,
-            dye_supported: false,
+            dye_price_iqd: None,
             sort_order: 0,
             entity_id: "unscoped".into(),
             origin_device_id: None,
@@ -231,11 +242,70 @@ mod tests {
     // --- phase-03 §1.1 expanded coverage ---
 
     #[test]
-    fn try_new_preserves_dye_flag() {
+    fn try_new_accepts_dye_price_and_defaults_none() {
         let mut i = input("X", false, Some(0));
-        i.dye_supported = true;
+        i.dye_price_iqd = Some(5_000);
         let ct = CheckType::try_new(i).unwrap();
-        assert!(ct.dye_supported);
+        assert_eq!(ct.dye_price_iqd, Some(5_000));
+
+        let ct2 = CheckType::try_new(input("X", false, Some(0))).unwrap();
+        assert_eq!(ct2.dye_price_iqd, None, "default is no dye offered");
+    }
+
+    #[test]
+    fn try_new_rejects_negative_dye_price() {
+        let mut i = input("X", false, Some(0));
+        i.dye_price_iqd = Some(-1);
+        assert!(CheckType::try_new(i).is_err());
+    }
+
+    #[test]
+    fn try_new_accepts_zero_dye_price_free_dye() {
+        let mut i = input("X", false, Some(0));
+        i.dye_price_iqd = Some(0);
+        assert_eq!(CheckType::try_new(i).unwrap().dye_price_iqd, Some(0));
+    }
+
+    #[test]
+    fn update_sets_and_clears_dye_price() {
+        let ct = CheckType::try_new({
+            let mut i = input("X", false, Some(0));
+            i.dye_price_iqd = Some(3_000);
+            i
+        })
+        .unwrap();
+        let set = ct
+            .clone()
+            .with_updated_fields(CheckTypeUpdate {
+                dye_price_iqd: Some(Some(7_000)),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(set.dye_price_iqd, Some(7_000));
+        let cleared = set
+            .with_updated_fields(CheckTypeUpdate {
+                dye_price_iqd: Some(None),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(cleared.dye_price_iqd, None, "inner None clears to NULL");
+    }
+
+    #[test]
+    fn toggling_to_subtyped_clears_dye_price() {
+        let ct = CheckType::try_new({
+            let mut i = input("X", true, None);
+            i.dye_price_iqd = Some(6_000);
+            i
+        })
+        .unwrap();
+        let subtyped = ct.toggled_has_subtypes(true, None).unwrap();
+        assert!(subtyped.has_subtypes);
+        assert_eq!(subtyped.base_price_iqd, None);
+        assert_eq!(
+            subtyped.dye_price_iqd, None,
+            "subtyped types carry dye on subtypes, not the check type"
+        );
     }
 
     #[test]
@@ -245,7 +315,7 @@ mod tests {
             name_en: Some("  Brain  ".into()),
             has_subtypes: false,
             base_price_iqd: Some(1000),
-            dye_supported: false,
+            dye_price_iqd: None,
             sort_order: 0,
             entity_id: "e".into(),
             origin_device_id: None,
@@ -262,7 +332,7 @@ mod tests {
             name_en: Some("   ".into()),
             has_subtypes: false,
             base_price_iqd: Some(1000),
-            dye_supported: false,
+            dye_price_iqd: None,
             sort_order: 0,
             entity_id: "e".into(),
             origin_device_id: None,

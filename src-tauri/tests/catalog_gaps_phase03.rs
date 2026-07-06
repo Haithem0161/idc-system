@@ -140,7 +140,7 @@ async fn p03_g04_check_type_update_audit_delta_contains_before_and_after_json() 
                 name_en: None,
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
-                dye_supported: false,
+                dye_price_iqd: None,
                 sort_order: 0,
             },
         )
@@ -224,7 +224,7 @@ async fn p03_g08_check_type_create_enqueues_one_outbox_row() {
                 name_en: None,
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
-                dye_supported: false,
+                dye_price_iqd: None,
                 sort_order: 0,
             },
         )
@@ -252,7 +252,7 @@ async fn p03_g08_doctor_pricing_upsert_enqueues_outbox_row() {
                 name_en: None,
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
-                dye_supported: false,
+                dye_price_iqd: None,
                 sort_order: 0,
             },
         )
@@ -352,7 +352,7 @@ async fn p03_g23_check_types_list_can_include_soft_deleted_when_flag_true() {
                 name_en: None,
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
-                dye_supported: false,
+                dye_price_iqd: None,
                 sort_order: 0,
             },
         )
@@ -427,7 +427,7 @@ async fn p03_g33_check_type_create_sets_dirty_and_version_one() {
                 name_en: None,
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
-                dye_supported: false,
+                dye_price_iqd: None,
                 sort_order: 0,
             },
         )
@@ -504,7 +504,7 @@ async fn p03_g34_operator_specialty_double_upsert_no_op_returns_same_row() {
                 name_en: None,
                 has_subtypes: false,
                 base_price_iqd: Some(1000),
-                dye_supported: false,
+                dye_price_iqd: None,
                 sort_order: 0,
             },
         )
@@ -607,7 +607,7 @@ async fn p03_g07_check_types_list_like_prefix_matches_from_start_of_name() {
             name_en: None,
             has_subtypes: false,
             base_price_iqd: Some(1000),
-            dye_supported: false,
+            dye_price_iqd: None,
             sort_order: 0,
             entity_id: ENTITY_ID.into(),
             origin_device_id: None,
@@ -650,7 +650,7 @@ async fn p03_g14_doctor_pricing_cut_kind_round_trips_via_lowercase_wire_format()
         name_en: None,
         has_subtypes: false,
         base_price_iqd: Some(1000),
-        dye_supported: false,
+        dye_price_iqd: None,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,

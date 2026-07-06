@@ -133,7 +133,7 @@ async fn rig() -> Rig {
         name_en: Some("Test".into()),
         has_subtypes: false,
         base_price_iqd: Some(50_000),
-        dye_supported: true,
+        dye_price_iqd: None,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: Some(DEVICE_ID.into()),
@@ -276,7 +276,6 @@ async fn rig() -> Rig {
 
 fn money() -> MoneySettings {
     MoneySettings {
-        dye_cost_iqd: 2_000,
         report_pct: 20,
         reporting_doctor_name: String::new(),
         internal_doctor_pct: 40,

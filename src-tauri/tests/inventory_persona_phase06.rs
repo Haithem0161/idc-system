@@ -346,10 +346,10 @@ async fn insert_dummy_visit(pool: &SqlitePool, user_id: Uuid, visit_id: Uuid) {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO check_types (id, name_ar, has_subtypes, base_price_iqd, dye_supported, \
+        "INSERT INTO check_types (id, name_ar, has_subtypes, base_price_iqd, \
          sort_order, is_active, created_at, updated_at, version, dirty, \
          entity_id) \
-         VALUES (?, 'ct', 0, 10000, 0, 0, 1, ?, ?, 1, 1, ?)",
+         VALUES (?, 'ct', 0, 10000, 0, 1, ?, ?, 1, 1, ?)",
     )
     .bind(check_type_id.to_string())
     .bind(&now)

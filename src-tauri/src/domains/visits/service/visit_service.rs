@@ -120,7 +120,7 @@ pub struct ChecksGridCard {
     pub name_ar: String,
     pub name_en: Option<String>,
     pub has_subtypes: bool,
-    pub dye_supported: bool,
+    pub dye_available: bool,
     pub todays_visits: i64,
 }
 
@@ -241,6 +241,16 @@ impl VisitService {
             .ok_or_else(|| AppError::NotFound(format!("visit {id}")))
     }
 
+    /// Resolve the catalog dye price the same way `money_math::dye_price`
+    /// does: the subtype's `dye_price_iqd` when a subtype is chosen, else the
+    /// check type's. `None` means dye is not available for this check.
+    fn resolve_dye_price(ct: &CheckType, sub: Option<&CheckSubtype>) -> Option<i64> {
+        match sub {
+            Some(s) => s.dye_price_iqd,
+            None => ct.dye_price_iqd,
+        }
+    }
+
     /// Immutability guard: reject a mutation that would change the totals of a
     /// frozen day. `instant` is the UTC moment whose local day is affected -- for
     /// a lock it's "now" (the lock adds revenue to today's close); for a void
@@ -328,12 +338,23 @@ impl VisitService {
                 .visits
                 .count_today_by_check(entity_id, ct.id, start, end)
                 .await?;
+            // Dye is available for the card when the check type itself has a
+            // dye price, OR any of its live subtypes carries one -- a
+            // subtyped check type always has a None dye price on itself
+            // (§3 catalog invariant), so subtypes are the only source there.
+            let dye_available = ct.dye_price_iqd.is_some()
+                || self
+                    .check_subtypes
+                    .list_by_type(ct.id)
+                    .await?
+                    .iter()
+                    .any(|s| s.dye_price_iqd.is_some());
             out.push(ChecksGridCard {
                 check_type_id: ct.id,
                 name_ar: ct.name_ar,
                 name_en: ct.name_en,
                 has_subtypes: ct.has_subtypes,
-                dye_supported: ct.dye_supported,
+                dye_available,
                 todays_visits: todays,
             });
         }
@@ -369,7 +390,7 @@ impl VisitService {
                 "check type does not allow a subtype".into(),
             ));
         }
-        if let Some(sub_id) = input.check_subtype_id {
+        let subtype = if let Some(sub_id) = input.check_subtype_id {
             let sub = self
                 .check_subtypes
                 .get_by_id(sub_id)
@@ -380,10 +401,13 @@ impl VisitService {
                     "subtype does not belong to this check type".into(),
                 ));
             }
-        }
-        if input.dye && !ct.dye_supported {
+            Some(sub)
+        } else {
+            None
+        };
+        if input.dye && Self::resolve_dye_price(&ct, subtype.as_ref()).is_none() {
             return Err(AppError::Validation(
-                "check type does not support dye".into(),
+                "dye not available for this check".into(),
             ));
         }
         // A discount zeroes the referring doctor's cut, so it requires a real
@@ -495,9 +519,19 @@ impl VisitService {
             .get_by_id(updated.check_type_id)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("check_type {}", updated.check_type_id)))?;
-        if updated.dye && !ct.dye_supported {
+        let subtype = if let Some(sub_id) = updated.check_subtype_id {
+            Some(
+                self.check_subtypes
+                    .get_by_id(sub_id)
+                    .await?
+                    .ok_or_else(|| AppError::NotFound(format!("check_subtype {sub_id}")))?,
+            )
+        } else {
+            None
+        };
+        if updated.dye && Self::resolve_dye_price(&ct, subtype.as_ref()).is_none() {
             return Err(AppError::Validation(
-                "check type does not support dye".into(),
+                "dye not available for this check".into(),
             ));
         }
         let write = UpsertVisitWrite {
