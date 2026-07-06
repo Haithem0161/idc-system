@@ -62,7 +62,6 @@ impl SettingValue {
 
 /// Keys whose deletion is forbidden by PRD §6.1.11 invariant 3.
 pub const REQUIRED_KEYS: &[&str] = &[
-    "dye_cost_iqd",
     "report_pct",
     "internal_doctor_pct",
     "idle_lock_minutes",
@@ -145,10 +144,9 @@ mod tests {
     }
 
     #[test]
-    fn required_keys_list_has_exactly_the_ten_v1_keys() {
-        assert_eq!(REQUIRED_KEYS.len(), 10);
+    fn required_keys_list_has_exactly_the_nine_v1_keys() {
+        assert_eq!(REQUIRED_KEYS.len(), 9);
         for k in [
-            "dye_cost_iqd",
             "report_pct",
             "internal_doctor_pct",
             "idle_lock_minutes",
