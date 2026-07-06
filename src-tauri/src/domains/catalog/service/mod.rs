@@ -204,6 +204,7 @@ impl<R: tauri::Runtime> CatalogServices<R> {
         let consumption = Arc::new(ConsumptionService::new(
             pool,
             check_type_repo.clone(),
+            check_subtype_repo.clone(),
             consumption_repo.clone(),
             audit_repo,
             outbox_repo,

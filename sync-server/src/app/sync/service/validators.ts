@@ -16,7 +16,6 @@ import type {
  * removed.
  */
 export const PROTECTED_SETTING_KEYS = new Set([
-  'dye_cost_iqd',
   'report_pct',
   'internal_doctor_pct',
   'idle_lock_minutes',

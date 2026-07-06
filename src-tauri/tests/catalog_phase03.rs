@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use app_lib::db::migrations;
+use app_lib::domains::auth::domain::value_objects::UserRole;
 use app_lib::domains::catalog::domain::entities::check_subtype::CheckSubtypeNewInput;
 use app_lib::domains::catalog::domain::entities::check_type::CheckTypeNewInput;
 use app_lib::domains::catalog::domain::entities::doctor::DoctorNewInput;
@@ -31,8 +32,11 @@ use app_lib::domains::catalog::infrastructure::{
     SqliteInventoryConsumptionRepo, SqliteInventoryItemRepo, SqliteOperatorRepo,
     SqliteOperatorSpecialtyRepo,
 };
+use app_lib::domains::catalog::service::{ConsumptionCreateInput, ConsumptionService};
+use app_lib::domains::sync::infrastructure::{SqliteAuditRepo, SqliteOutboxRepo};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
+use uuid::Uuid;
 
 const ENTITY_ID: &str = "tenant-x";
 
@@ -55,7 +59,7 @@ fn new_flat_check_type(name: &str, price: i64) -> CheckType {
         name_en: None,
         has_subtypes: false,
         base_price_iqd: Some(price),
-        dye_supported: false,
+        dye_price_iqd: None,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
@@ -63,13 +67,13 @@ fn new_flat_check_type(name: &str, price: i64) -> CheckType {
     .unwrap()
 }
 
-fn new_subtyped_check_type(name: &str, dye_supported: bool) -> CheckType {
+fn new_subtyped_check_type(name: &str, dye_price_iqd: Option<i64>) -> CheckType {
     CheckType::try_new(CheckTypeNewInput {
         name_ar: name.into(),
         name_en: None,
         has_subtypes: true,
         base_price_iqd: None,
-        dye_supported,
+        dye_price_iqd,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
@@ -121,7 +125,7 @@ async fn check_type_repo_roundtrip() {
 #[tokio::test]
 async fn check_subtype_requires_known_parent() {
     let pool = fresh_pool().await;
-    let parent = new_subtyped_check_type("MRI", false);
+    let parent = new_subtyped_check_type("MRI", None);
     let pid = parent.id;
     let ct_repo = SqliteCheckTypeRepo::new(pool.clone());
     let mut tx = pool.begin().await.unwrap();
@@ -133,6 +137,7 @@ async fn check_subtype_requires_known_parent() {
         name_ar: "Brain".into(),
         name_en: None,
         price_iqd: 75_000,
+        dye_price_iqd: None,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
@@ -237,12 +242,13 @@ async fn effective_price_resolver_walks_fallback_chain() {
     let doc_repo = SqliteDoctorRepo::new(pool.clone());
 
     let flat = new_flat_check_type("Flat", 20_000);
-    let parent = new_subtyped_check_type("MRI", false);
+    let parent = new_subtyped_check_type("MRI", None);
     let sub = CheckSubtype::try_new(CheckSubtypeNewInput {
         check_type_id: parent.id,
         name_ar: "Brain".into(),
         name_en: None,
         price_iqd: 70_000,
+        dye_price_iqd: None,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
@@ -508,12 +514,13 @@ async fn check_type_count_live_references_excludes_soft_deleted_subtypes() {
     let ct_repo = SqliteCheckTypeRepo::new(pool.clone());
     let sub_repo = SqliteCheckSubtypeRepo::new(pool.clone());
 
-    let parent = new_subtyped_check_type("MRI", false);
+    let parent = new_subtyped_check_type("MRI", None);
     let sub = CheckSubtype::try_new(CheckSubtypeNewInput {
         check_type_id: parent.id,
         name_ar: "Brain".into(),
         name_en: None,
         price_iqd: 1000,
+        dye_price_iqd: None,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
@@ -538,12 +545,13 @@ async fn check_subtype_list_excludes_soft_deleted() {
     let pool = fresh_pool().await;
     let ct_repo = SqliteCheckTypeRepo::new(pool.clone());
     let sub_repo = SqliteCheckSubtypeRepo::new(pool.clone());
-    let parent = new_subtyped_check_type("CT", false);
+    let parent = new_subtyped_check_type("CT", None);
     let live = CheckSubtype::try_new(CheckSubtypeNewInput {
         check_type_id: parent.id,
         name_ar: "Live".into(),
         name_en: None,
         price_iqd: 1000,
+        dye_price_iqd: None,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
@@ -554,6 +562,7 @@ async fn check_subtype_list_excludes_soft_deleted() {
         name_ar: "Dead".into(),
         name_en: None,
         price_iqd: 1000,
+        dye_price_iqd: None,
         sort_order: 1,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
@@ -692,12 +701,13 @@ async fn doctor_pricing_unique_allows_subtype_null_and_specific_subtype() {
     let doc_repo = SqliteDoctorRepo::new(pool.clone());
     let price_repo = SqliteDoctorPricingRepo::new(pool.clone());
 
-    let ct = new_subtyped_check_type("MRI", false);
+    let ct = new_subtyped_check_type("MRI", None);
     let sub = CheckSubtype::try_new(CheckSubtypeNewInput {
         check_type_id: ct.id,
         name_ar: "Brain".into(),
         name_en: None,
         price_iqd: 70_000,
+        dye_price_iqd: None,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
@@ -834,12 +844,13 @@ async fn effective_price_doctor_with_no_override_falls_back_to_subtype_price() {
         Arc::new(SqliteDoctorPricingRepo::new(pool.clone()));
     let doc_repo = SqliteDoctorRepo::new(pool.clone());
 
-    let parent = new_subtyped_check_type("MRI", false);
+    let parent = new_subtyped_check_type("MRI", None);
     let sub = CheckSubtype::try_new(CheckSubtypeNewInput {
         check_type_id: parent.id,
         name_ar: "Brain".into(),
         name_en: None,
         price_iqd: 70_000,
+        dye_price_iqd: None,
         sort_order: 0,
         entity_id: ENTITY_ID.into(),
         origin_device_id: None,
@@ -948,7 +959,7 @@ async fn effective_price_rejects_subtyped_type_without_subtype() {
     let sub_repo: Arc<dyn CheckSubtypeRepo> = Arc::new(SqliteCheckSubtypeRepo::new(pool.clone()));
     let price_repo: Arc<dyn DoctorPricingRepo> =
         Arc::new(SqliteDoctorPricingRepo::new(pool.clone()));
-    let parent = new_subtyped_check_type("MRI", false);
+    let parent = new_subtyped_check_type("MRI", None);
     let mut tx = pool.begin().await.unwrap();
     ct_repo.upsert(&mut tx, &parent).await.unwrap();
     tx.commit().await.unwrap();
@@ -1391,5 +1402,215 @@ async fn doctors_fts_external_content_mode_declared_in_schema() {
     assert!(
         s.contains("content_rowid='rowid'"),
         "missing content_rowid='rowid': {s}"
+    );
+}
+
+#[test]
+fn schema_version_is_25() {
+    assert_eq!(migrations::SYNC_SCHEMA_VERSION, 25);
+}
+
+#[tokio::test]
+async fn migration_025_adds_dye_price_columns_drops_dye_supported_tombstones_setting() {
+    let pool = fresh_pool().await;
+
+    // check_types: dye_price_iqd exists, dye_supported is gone.
+    let (has_dye_price,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pragma_table_info('check_types') WHERE name = 'dye_price_iqd'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(has_dye_price, 1);
+
+    let (has_dye_supported,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pragma_table_info('check_types') WHERE name = 'dye_supported'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(has_dye_supported, 0);
+
+    // check_subtypes: dye_price_iqd exists.
+    let (sub_has_dye_price,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pragma_table_info('check_subtypes') WHERE name = 'dye_price_iqd'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(sub_has_dye_price, 1);
+
+    // The global dye_cost_iqd setting is tombstoned, not removed.
+    let (deleted_at,): (Option<String>,) =
+        sqlx::query_as("SELECT deleted_at FROM settings WHERE key = 'dye_cost_iqd'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        deleted_at.is_some(),
+        "dye_cost_iqd setting must be tombstoned by migration 025"
+    );
+}
+
+fn make_consumption_service(
+    pool: &SqlitePool,
+    check_type_repo: Arc<dyn CheckTypeRepo>,
+    subtype_repo: Arc<dyn CheckSubtypeRepo>,
+) -> ConsumptionService {
+    ConsumptionService::new(
+        pool.clone(),
+        check_type_repo,
+        subtype_repo,
+        Arc::new(SqliteInventoryConsumptionRepo::new(pool.clone())),
+        Arc::new(SqliteAuditRepo::new(pool.clone())),
+        Arc::new(SqliteOutboxRepo::new(pool.clone())),
+        "dev-A".into(),
+    )
+}
+
+#[tokio::test]
+async fn consumption_dye_only_rejected_when_no_dye_price_anywhere() {
+    let pool = fresh_pool().await;
+    let ct_repo: Arc<dyn CheckTypeRepo> = Arc::new(SqliteCheckTypeRepo::new(pool.clone()));
+    let sub_repo: Arc<dyn CheckSubtypeRepo> = Arc::new(SqliteCheckSubtypeRepo::new(pool.clone()));
+    let item_repo = SqliteInventoryItemRepo::new(pool.clone());
+
+    // Flat check type with no dye price at all.
+    let ct = new_flat_check_type("Echo", 30_000);
+    let item = InventoryItem::try_new(InventoryItemNewInput {
+        name_ar: "Gel".into(),
+        name_en: None,
+        unit: "ml".into(),
+        low_stock_threshold: 0,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: None,
+    })
+    .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    ct_repo.upsert(&mut tx, &ct).await.unwrap();
+    item_repo.upsert(&mut tx, &item).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let service = make_consumption_service(&pool, ct_repo.clone(), sub_repo.clone());
+    let result = service
+        .create(
+            Uuid::now_v7(),
+            UserRole::Superadmin,
+            ENTITY_ID,
+            ConsumptionCreateInput {
+                check_type_id: ct.id,
+                check_subtype_id: None,
+                item_id: item.id,
+                quantity_per_check: 5,
+                on_dye_only: true,
+            },
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "dye-only consumption rule must be rejected when the check type has no dye price"
+    );
+}
+
+#[tokio::test]
+async fn consumption_dye_only_accepted_when_check_type_has_dye_price() {
+    let pool = fresh_pool().await;
+    let ct_repo: Arc<dyn CheckTypeRepo> = Arc::new(SqliteCheckTypeRepo::new(pool.clone()));
+    let sub_repo: Arc<dyn CheckSubtypeRepo> = Arc::new(SqliteCheckSubtypeRepo::new(pool.clone()));
+    let item_repo = SqliteInventoryItemRepo::new(pool.clone());
+
+    let mut ct = new_flat_check_type("Echo", 30_000);
+    ct.dye_price_iqd = Some(2_000);
+    let item = InventoryItem::try_new(InventoryItemNewInput {
+        name_ar: "Gel".into(),
+        name_en: None,
+        unit: "ml".into(),
+        low_stock_threshold: 0,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: None,
+    })
+    .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    ct_repo.upsert(&mut tx, &ct).await.unwrap();
+    item_repo.upsert(&mut tx, &item).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let service = make_consumption_service(&pool, ct_repo.clone(), sub_repo.clone());
+    let result = service
+        .create(
+            Uuid::now_v7(),
+            UserRole::Superadmin,
+            ENTITY_ID,
+            ConsumptionCreateInput {
+                check_type_id: ct.id,
+                check_subtype_id: None,
+                item_id: item.id,
+                quantity_per_check: 5,
+                on_dye_only: true,
+            },
+        )
+        .await;
+    assert!(
+        result.is_ok(),
+        "dye-only consumption rule must be accepted when the check type has a dye price: {:?}",
+        result.err()
+    );
+}
+
+#[tokio::test]
+async fn consumption_dye_only_accepted_when_only_a_subtype_has_dye_price() {
+    let pool = fresh_pool().await;
+    let ct_repo: Arc<dyn CheckTypeRepo> = Arc::new(SqliteCheckTypeRepo::new(pool.clone()));
+    let sub_repo: Arc<dyn CheckSubtypeRepo> = Arc::new(SqliteCheckSubtypeRepo::new(pool.clone()));
+    let item_repo = SqliteInventoryItemRepo::new(pool.clone());
+
+    // Subtyped parent with no dye price of its own; one live subtype carries one.
+    let parent = new_subtyped_check_type("MRI", None);
+    let mut sub = CheckSubtype::try_new(CheckSubtypeNewInput {
+        check_type_id: parent.id,
+        name_ar: "Brain".into(),
+        name_en: None,
+        price_iqd: 70_000,
+        dye_price_iqd: None,
+        sort_order: 0,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: None,
+    })
+    .unwrap();
+    sub.dye_price_iqd = Some(3_000);
+    let item = InventoryItem::try_new(InventoryItemNewInput {
+        name_ar: "Gel".into(),
+        name_en: None,
+        unit: "ml".into(),
+        low_stock_threshold: 0,
+        entity_id: ENTITY_ID.into(),
+        origin_device_id: None,
+    })
+    .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    ct_repo.upsert(&mut tx, &parent).await.unwrap();
+    sub_repo.upsert(&mut tx, &sub).await.unwrap();
+    item_repo.upsert(&mut tx, &item).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let service = make_consumption_service(&pool, ct_repo.clone(), sub_repo.clone());
+    let result = service
+        .create(
+            Uuid::now_v7(),
+            UserRole::Superadmin,
+            ENTITY_ID,
+            ConsumptionCreateInput {
+                check_type_id: parent.id,
+                check_subtype_id: Some(sub.id),
+                item_id: item.id,
+                quantity_per_check: 5,
+                on_dye_only: true,
+            },
+        )
+        .await;
+    assert!(
+        result.is_ok(),
+        "dye-only consumption rule must be accepted when a live subtype has a dye price: {:?}",
+        result.err()
     );
 }

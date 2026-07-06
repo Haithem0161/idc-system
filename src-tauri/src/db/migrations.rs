@@ -108,6 +108,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "024_settings_tenant_reconcile.sql",
         include_str!("../../migrations/024_settings_tenant_reconcile.sql"),
     ),
+    (
+        "025_dye_price_per_check_type.sql",
+        include_str!("../../migrations/025_dye_price_per_check_type.sql"),
+    ),
 ];
 
 /// The local sync schema version: the count of embedded migrations. Sent to the
@@ -302,20 +306,21 @@ mod tests {
         // Seed populated the v1 setting rows. Migration 002 seeds 10 keys;
         // migration 018 adds `report_pct` and `reporting_doctor_name` (+2) and
         // tombstones `report_cost_iqd` (the row is soft-deleted, not removed),
-        // leaving 12 physical rows.
+        // leaving 12 physical rows. Migration 025 tombstones `dye_cost_iqd`
+        // (also soft-deleted, not removed) -- still 12 physical rows.
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM settings")
             .fetch_one(&pool)
             .await
             .unwrap();
         assert_eq!(n, 12);
-        // The retired flat-cost key is tombstoned (deleted_at set), and the new
-        // percentage key is live.
+        // The two retired keys (report_cost_iqd, dye_cost_iqd) are tombstoned
+        // (deleted_at set); the rest remain live.
         let (live,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM settings WHERE deleted_at IS NULL")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(live, 11);
+        assert_eq!(live, 10);
 
         // Migration 012 added the 5 optional patient demographics columns
         // (and re-running run() above must not have errored on duplicate
