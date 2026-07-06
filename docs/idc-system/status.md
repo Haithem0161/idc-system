@@ -148,6 +148,14 @@ Pass 3 (final) completed 2026-05-11 via six parallel sub-agents on non-overlappi
 
 ## Blockers & Notes
 
+### Cut base = full collected total; dye is profit off the top (2026-07-06)
+
+Fixed a money-math defect surfaced in the field: on a dye visit the doctor cut came out too small (100k service + 60k dye + doctor 25% gave 10k, not 25k). Root cause: `money_math::compute()` defaulted the `collected` cash basis to `price` alone, then `cut_base = max(0, collected - dye)` -- so cuts ran on `price - dye` (40k). Corrected the default to `price + dye` (the full patient total), so `cut_base = (price+dye) - dye = price`: dye is **profit secured off the top**, kept whole in clinic net, and never shrinks the cut base. This reverses the earlier "dye reduces the cut base" decision from the cuts-paid-basis work (note below, 2026-07-05). Underpayment still scales cuts (collected < price+dye) and the zero-guard still fires when collected < dye. Also brought the dead frontend TS port `computeRunningTotal` into parity (it was wrong in the other direction -- cuts off `price`, no dye subtraction, no zero-guard) and added the `.max(0)` report-base clamp to match Rust exactly.
+
+**Scope:** pure domain logic. No schema, no server, no migration, no `SERVER_SCHEMA_VERSION` bump. Locked visits keep their stored snapshots (no retro-recompute); only new visits get the corrected math.
+
+**Validation:** Rust fmt + clippy(--lib) clean; money_math 53 unit tests green (2 recomputed + 1 new regression for the exact 100k/60k case); touched integration binaries green per-target (visits_phase05 48, reports_phase07 44) -- doctor-cut/net expectations recomputed. Frontend lint + build clean, 24 format.test.ts vitest pass (+4 dye/underpay/zero-guard/report-clamp). Whole-branch review clean. Commits on `fix/cut-base-collected-default`. Manual `pnpm tauri dev` smoke deferred to user (needs UI).
+
 ### Per-check-type (and per-subtype) dye price (2026-07-05)
 
 Replaced the single global `settings.dye_cost_iqd` and the `check_types.dye_supported` flag with a nullable **per-check-type AND per-subtype `dye_price_iqd`**. Dye availability is now "a dye price resolves" (not a flag). Full cross-surface change in schema-version lockstep.
